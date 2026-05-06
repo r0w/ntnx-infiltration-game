@@ -1,0 +1,11 @@
+{
+  "name": "verify-protection-secure",
+  "active": true,
+  "prompt": "ego",
+  "defaultColor": "magenta",
+  "messages": [
+    "stage-022.line-01",
+    "stage-022.line-02"
+  ],
+  "saveScore": false
+}

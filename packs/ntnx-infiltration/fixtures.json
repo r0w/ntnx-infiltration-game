@@ -1,0 +1,412 @@
+{
+  "GET /api/prism/v4.0/config/cluster-profile-info": {
+    "data": {
+      "build": {
+        "version": "pc.2024.3-mock"
+      }
+    }
+  },
+  "POST /api/nutanix/v3/projects/list": {
+    "entities": [
+      {
+        "metadata": { "uuid": "proj-default", "name": "default" },
+        "status": { "name": "default", "resources": { "cluster_reference_list": [{ "kind": "cluster", "uuid": "cluster-mock-1" }] } }
+      },
+      {
+        "metadata": { "uuid": "proj-prod", "name": "Production" },
+        "status": { "name": "Production", "resources": { "cluster_reference_list": [{ "kind": "cluster", "uuid": "cluster-mock-1" }] } }
+      },
+      {
+        "metadata": { "uuid": "proj-{Trigram}", "name": "{Trigram}-proj" },
+        "spec": {
+          "name": "{Trigram}-proj",
+          "resources": {
+            "account_reference_list": [{ "kind": "account", "uuid": "acct-mock-1", "name": "NTNX_LOCAL_AZ" }],
+            "cluster_reference_list": [{ "kind": "cluster", "uuid": "cluster-mock-1" }],
+            "user_reference_list": [{ "kind": "user", "name": "TheProjectManager", "uuid": "user-theprojmgr" }],
+            "subnet_reference_list": [{ "kind": "subnet", "name": "secondary", "uuid": "subnet-secondary" }]
+          }
+        },
+        "status": {
+          "name": "{Trigram}-proj",
+          "resources": {
+            "account_reference_list": [{ "kind": "account", "uuid": "acct-mock-1", "name": "NTNX_LOCAL_AZ" }],
+            "cluster_reference_list": [{ "kind": "cluster", "uuid": "cluster-mock-1" }],
+            "user_reference_list": [{ "kind": "user", "name": "TheProjectManager", "uuid": "user-theprojmgr" }],
+            "subnet_reference_list": [{ "kind": "subnet", "name": "secondary", "uuid": "subnet-secondary" }]
+          }
+        }
+      }
+    ],
+    "metadata": { "total_matches": 3 }
+  },
+  "GET /api/ncm/v4.0/config/info": {
+    "data": {
+      "enabled": true,
+      "version": "ncm.2024.2-mock"
+    }
+  },
+  "GET /api/io/v1/license": {
+    "data": {
+      "licensed": true,
+      "expiresAt": "2099-01-01T00:00:00Z"
+    }
+  },
+  "POST /api/nutanix/v3/blueprints/list": {
+    "entities": [
+      {
+        "metadata": { "uuid": "bp-{Trigram}", "name": "bp-blankvm-prd{Vlanid}" },
+        "status": { "name": "bp-blankvm-prd{Vlanid}" }
+      },
+      {
+        "metadata": { "uuid": "bp-cloneprod", "name": "CloneProd" },
+        "status": { "name": "CloneProd" }
+      }
+    ],
+    "metadata": { "total_matches": 2 }
+  },
+  "GET /api/nutanix/v3/blueprints/bp-{Trigram}": {
+    "status": {
+      "resources": {
+        "service_definition_list": [
+          {
+            "name": "NewVM",
+            "action_list": [
+              {
+                "name": "action_create",
+                "runbook": {
+                  "task_definition_list": [
+                    { "name": "Add DNS Entry" },
+                    { "name": "foo" }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "POST /api/nutanix/v3/apps/list": {
+    "entities": [
+      {
+        "metadata": { "uuid": "app-{Trigram}", "name": "{Trigram}-app" },
+        "status": {
+          "name": "{Trigram}-app",
+          "state": "running",
+          "resources": { "app_blueprint_reference": { "kind": "blueprint", "name": "CloneProd", "uuid": "bp-cloneprod" } }
+        }
+      }
+    ],
+    "metadata": { "total_matches": 1 }
+  },
+  "POST /api/nutanix/v3/jobs/list": {
+    "entities": [
+      {
+        "metadata": { "uuid": "sched-{Trigram}", "name": "{Trigram}-sched" },
+        "resources": {
+          "name": "{Trigram}-sched",
+          "executable": { "entity": { "uuid": "app-{Trigram}" } }
+        }
+      }
+    ],
+    "metadata": { "total_matches": 1 }
+  },
+  "POST /api/nutanix/v3/action_trigger_types/list": {
+    "entities": [
+      {
+        "metadata": { "uuid": "trigger-event-mock", "name": "event_trigger" },
+        "status": { "name": "event_trigger", "resources": { "name": "event_trigger" } }
+      }
+    ],
+    "metadata": { "total_matches": 1 }
+  },
+  "POST /api/nutanix/v3/action_types/list": {
+    "entities": [
+      {
+        "metadata": { "uuid": "action-email-mock", "name": "email_action" },
+        "status": { "name": "email_action", "resources": { "name": "email_action" } }
+      }
+    ],
+    "metadata": { "total_matches": 1 }
+  },
+  "POST /api/nutanix/v3/action_rules/list": {
+    "entities": [
+      {
+        "metadata": { "uuid": "playbook-{Trigram}", "name": "{Trigram}-playbook" },
+        "status": {
+          "name": "{Trigram}-playbook",
+          "resources": {
+            "name": "{Trigram}-playbook",
+            "is_enabled": true,
+            "rule_type": "XPLAY",
+            "trigger_list": [
+              { "input_parameter_values": { "type": "VmPowerCycleAudit" } }
+            ],
+            "action_list": [
+              { "action_type_reference": { "kind": "action_type", "name": "email_action" } }
+            ]
+          }
+        }
+      }
+    ],
+    "metadata": { "total_matches": 1 }
+  },
+  "GET /api/clustermgmt/v4.0/config/clusters": {
+    "data": [
+      {
+        "extId": "cluster-mock-1",
+        "name": "mock-pc",
+        "config": { "numberOfNodes": 4 }
+      }
+    ]
+  },
+  "GET /api/clustermgmt/v4.0/config/hosts": {
+    "data": [
+      { "extId": "host-mock-1", "name": "host-1", "hostName": "host-1", "cluster": { "extId": "cluster-mock-1" } },
+      { "extId": "host-mock-2", "name": "host-2", "hostName": "host-2", "cluster": { "extId": "cluster-mock-1" } },
+      { "extId": "host-mock-3", "name": "host-3", "hostName": "host-3", "cluster": { "extId": "cluster-mock-1" } }
+    ]
+  },
+  "GET /api/prism/v4.2/config/domain-managers": {
+    "data": [
+      { "extId": "dm-mock-1", "name": "mock-pc" }
+    ]
+  },
+  "GET /api/clustermgmt/v4.0/config/clusters/cluster-mock-1/rackable-units": {
+    "data": [
+      { "serial": "AB12345DEMO" },
+      { "serial": "CD67890DEMO" },
+      { "serial": "EF13579DEMO" },
+      { "serial": "GH24680DEMO" }
+    ]
+  },
+  "GET /api/lifecycle/v4.0/resources/entities": {
+    "data": [
+      { "entityModel": "AHV", "availableVersions": ["7.3", "7.4"] },
+      { "entityModel": "AOS", "availableVersions": ["7.3.0.5", "7.4"] },
+      { "entityModel": "Foundation", "availableVersions": ["5.7"] },
+      { "entityModel": "NCC", "availableVersions": ["5.0.0"] },
+      { "entityModel": "PC", "availableVersions": ["7.3.1"] },
+      { "entityModel": "LCM", "availableVersions": ["3.5"] },
+      { "entityModel": "Calm", "availableVersions": ["3.10"] }
+    ]
+  },
+  "GET /api/iam/v4.0/authn/users": {
+    "data": [
+      { "extId": "user-mock-admin", "username": "admin", "name": "admin" },
+      { "extId": "user-{Trigram}-adm", "username": "{Trigram}-adm", "name": "{Trigram}-adm" },
+      { "extId": "user-theprojmgr", "username": "TheProjectManager", "name": "TheProjectManager" },
+      { "extId": "user-prod", "username": "{ProdUsername}", "name": "{ProdUsername}" }
+    ]
+  },
+  "GET /api/iam/v4.0/authz/authorization-policies": {
+    "data": [
+      { "extId": "auth-default", "displayName": "default-policy" },
+      {
+        "extId": "auth-{Trigram}",
+        "displayName": "{Trigram}-auth",
+        "role": "role-super-admin",
+        "identities": [
+          { "identityFilter": { "user": { "uuid": { "anyof": ["{UserUUID}"] } } } }
+        ],
+        "entities": [{ "entityFilter": { "*": { "*": { "eq": "*" } } } }],
+        "authorizationPolicyType": "USER_DEFINED"
+      }
+    ]
+  },
+  "GET /api/iam/v4.0/authz/roles": {
+    "data": [
+      { "extId": "role-super-admin", "displayName": "Super Admin" },
+      { "extId": "role-prj-admin", "displayName": "Project Admin" },
+      { "extId": "role-operator", "displayName": "Operator" }
+    ]
+  },
+  "GET /api/networking/v4.0/config/vpcs": {
+    "data": [
+      { "extId": "vpc-{Trigram}", "name": "{Trigram}-vpc" }
+    ]
+  },
+  "GET /api/networking/v4.0/config/subnets": {
+    "data": [
+      { "extId": "subnet-secondary", "name": "secondary", "networkId": 100, "isAdvancedNetworking": false },
+      { "extId": "subnet-{Trigram}", "name": "{Trigram}-subnet", "networkId": "{Vlanid}", "isAdvancedNetworking": true }
+    ]
+  },
+  "GET /api/vmm/v4.0/content/images": {
+    "data": [
+      { "extId": "img-centos", "name": "centos-base", "type": "DISK_IMAGE" },
+      { "extId": "img-{Trigram}-ubuntu", "name": "{Trigram}-ubuntu", "type": "DISK_IMAGE", "source": { "url": "{ImageURL}" } }
+    ]
+  },
+  "GET /api/vmm/v4.0/ahv/config/vms": {
+    "data": [
+      {
+        "extId": "vm-{Trigram}",
+        "name": "{Trigram}-vm",
+        "numSockets": 2,
+        "numCoresPerSocket": 1,
+        "memorySizeBytes": 4294967296,
+        "bootConfig": { "bootType": "UEFI" },
+        "host": { "extId": "host-mock-1" },
+        "powerState": "ON",
+        "nics": [
+          { "nicNetworkInfo": { "subnet": { "extId": "subnet-secondary" } } },
+          { "nicNetworkInfo": { "subnet": { "extId": "subnet-{Trigram}" } } }
+        ],
+        "disks": [
+          { "backingInfo": { "dataSource": { "reference": { "imageExtId": "img-{Trigram}-ubuntu" } } } }
+        ],
+        "guestCustomization": { "config": { "cloudInit": {} } },
+        "categories": [{ "extId": "cat-{Trigram}-critical" }]
+      }
+    ]
+  },
+  "GET /api/vmm/v4.2/ahv/config/vms": {
+    "data": [
+      {
+        "extId": "vm-{Trigram}",
+        "name": "{Trigram}-vm",
+        "categories": [{ "extId": "cat-{Trigram}-critical" }]
+      }
+    ]
+  },
+  "GET /api/nutanix/v3/vms/vm-{Trigram}": {
+    "spec": {
+      "resources": {
+        "guest_customization": { "cloud_init": { "user_data": "#cloud-config\n" } }
+      }
+    },
+    "metadata": { "project_reference": { "kind": "project", "uuid": "proj-{Trigram}" } }
+  },
+  "GET /api/prism/v4.2/config/categories": {
+    "data": [
+      { "extId": "cat-env-prod", "key": "Environment", "value": "Production" },
+      { "extId": "cat-env-test", "key": "Environment", "value": "Test" },
+      { "extId": "cat-{Trigram}-critical", "key": "{Trigram}-cat", "value": "Critical" },
+      { "extId": "cat-{Trigram}-test", "key": "{Trigram}-cat", "value": "Test" }
+    ]
+  },
+  "GET /api/datapolicies/v4.2/config/storage-policies": {
+    "data": [
+      {
+        "extId": "sto-default",
+        "name": "Default-Storage",
+        "policyType": "SYSTEM",
+        "encryptionSpec": { "encryptionState": "SYSTEM_DERIVED" }
+      },
+      {
+        "extId": "sto-{Trigram}",
+        "name": "{Trigram}-sto-policy",
+        "policyType": "USER",
+        "encryptionSpec": { "encryptionState": "INLINE" },
+        "categoryExtIds": ["cat-{Trigram}-critical"]
+      }
+    ]
+  },
+  "GET /api/microseg/v4.0/config/service-groups": {
+    "data": [
+      { "extId": "svc-ssh", "name": "ssh" },
+      { "extId": "svc-http", "name": "http" },
+      { "extId": "svc-https", "name": "https" }
+    ]
+  },
+  "GET /api/microseg/v4.0/config/policies": {
+    "data": [
+      {
+        "extId": "mseg-{Trigram}",
+        "name": "{Trigram}-mseg-policy",
+        "state": "ENFORCE"
+      }
+    ]
+  },
+  "GET /api/microseg/v4.0/config/policies/mseg-{Trigram}": {
+    "data": {
+      "extId": "mseg-{Trigram}",
+      "name": "{Trigram}-mseg-policy",
+      "state": "ENFORCE",
+      "scope": "GLOBAL",
+      "rules": [
+        {
+          "description": "default outbound",
+          "type": "APPLICATION",
+          "spec": {
+            "$objectType": "microseg.v4.config.ApplicationRuleSpec",
+            "securedGroupCategoryAssociatedEntityType": "VM",
+            "securedGroupCategoryReferences": ["cat-{Trigram}-critical"],
+            "destAllowSpec": "ALL",
+            "isAllProtocolAllowed": true
+          }
+        },
+        {
+          "description": "allow inbound SSH (22/tcp)",
+          "type": "APPLICATION",
+          "spec": {
+            "$objectType": "microseg.v4.config.ApplicationRuleSpec",
+            "securedGroupCategoryAssociatedEntityType": "VM",
+            "securedGroupCategoryReferences": ["cat-{Trigram}-critical"],
+            "srcAllowSpec": "ALL",
+            "tcpServices": [{ "startPort": 22, "endPort": 22 }]
+          }
+        },
+        {
+          "description": "allow inbound ICMP (echo)",
+          "type": "APPLICATION",
+          "spec": {
+            "$objectType": "microseg.v4.config.ApplicationRuleSpec",
+            "securedGroupCategoryAssociatedEntityType": "VM",
+            "securedGroupCategoryReferences": ["cat-{Trigram}-critical"],
+            "srcAllowSpec": "ALL",
+            "icmpServices": [{ "type": 8, "code": 0 }]
+          }
+        }
+      ]
+    }
+  },
+  "GET /api/datapolicies/v4.2/config/protection-policies": {
+    "data": [
+      {
+        "extId": "prot-{Trigram}",
+        "name": "{Trigram}-prot-policy",
+        "replicationConfigurations": [
+          {
+            "sourceLocationLabel": "local",
+            "schedule": {
+              "recoveryPointObjectiveTimeSeconds": 3600,
+              "retention": { "local": { "snapshotIntervalType": "DAILY", "frequency": 1 } }
+            }
+          }
+        ],
+        "categoryIds": ["cat-{Trigram}-test"]
+      }
+    ]
+  },
+  "GET /api/security/v4.1/management/approval-policies": {
+    "data": [
+      {
+        "extId": "appr-master",
+        "name": "master-appr-policy",
+        "approvers": ["charlie", "thom", "william"],
+        "expiryHours": 24,
+        "securedPolicies": [
+          { "policyExtId": "prot-{Trigram}", "policyType": "PROTECTION_POLICY" }
+        ]
+      }
+    ]
+  },
+  "GET /api/opsmgmt/v4.0/config/report-configs": {
+    "data": [
+      {
+        "extId": "report-{Trigram}",
+        "name": "{Trigram}-report",
+        "schedule": { "scheduleInterval": "DAILY", "time": "03:00" },
+        "notificationPolicy": {
+          "recipients": [{ "emailAddress": "{Trigram}{EmailReport}" }]
+        },
+        "sections": [
+          { "rows": [{ "widgets": [{ "widgetInfo": { "entityType": "VM" } }] }] }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,201 @@
+{
+    "status": {},
+    "spec": {
+        "name": "EG-Prereguisites",
+        "description": "",
+        "resources": {
+            "runbook": {
+                "name": "6383fb1b_runbook",
+                "description": "",
+                "task_definition_list": [
+                    {
+                        "type": "DAG",
+                        "name": "e698d883_dag",
+                        "description": "",
+                        "attrs": {
+                            "type": "",
+                            "edges": []
+                        },
+                        "child_tasks_local_reference_list": [
+                            {
+                                "name": "Create AD Endpoint",
+                                "kind": "app_task"
+                            }
+                        ],
+                        "variable_list": [],
+                        "timeout_secs": "0",
+                        "retries": "0",
+                        "inherit_target": false
+                    },
+                    {
+                        "type": "EXEC",
+                        "name": "Create AD Endpoint",
+                        "description": "",
+                        "attrs": {
+                            "type": "",
+                            "script": "#script\n\nimport requests\nimport uuid\n\npc_ip = \"@@{PC_IP}@@\"\npc_user = \"@@{PC_USER}@@\"\npc_password = \"@@{PC_PASSWORD}@@\"\nad_ip = \"@@{AD_IP}@@\"\nad_user = '@@{AD_USER}@@'\nad_password = \"@@{AD_PASSWORD}@@\"\nprojec_name = \"lab\"\ncred_uuid=uuid.uuid4()\ncred_name= \"endpoint_cred_ad\"+str(cred_uuid)[0:3]\nendopoint_name = \"AD\"\n\n\n# We retrieve project ID\nurl = \"https://%s:9440/api/nutanix/v3/projects/list\" % pc_ip\nheaders = {\n  \"Content-Type\": \"application/json\",\n  \"Accept\": \"application/json\"\n}\npayload={}\n\nresponse = requests.post(url, json=payload, headers=headers, verify=False, auth=( pc_user, pc_password) )\nresponse_data = response.json()\n\nif len(response_data['entities']) != 0:\n  for project in response_data['entities']:\n    if project['status']['name'] == projec_name:\n      projectUUID = project['metadata']['uuid']\n\nprint(\"Project \"+projec_name+\" ID : \"+projectUUID)\n      \n# Now we create endpoint\n\npayload = {\n    \"api_version\": \"3.0\",\n    \"spec\":\n        {\n            \"resources\":\n                {\n                    \"type\":\"Windows\",\n                    \"value_type\":\"IP\",\n                    \"attrs\":\n                        {\n                            \"credential_definition_list\":\n                                [\n                                    {\n                                        \"description\":\"\",\n                                        \"username\": ad_user,\n                                        \"type\":\"PASSWORD\",\n                                        \"name\":cred_name,\n                                        \"cred_class\":\"static\",\n                                        \"secret\":\n                                            {\n                                                \"attrs\":\n                                                    {\n                                                        \"is_secret_modified\":True\n                                                    },\n                                                \"value\": ad_password\n                                            },\n                                        \"uuid\":str(cred_uuid)\n                                    }\n                                ],\n                        \"login_credential_reference\":\n                            {\n                                \"name\": cred_name,\n                                \"kind\":\"app_credential\",\n                                \"uuid\": str(cred_uuid)\n                            },\n                            \"values\":\n                                [\n                                    ad_ip\n                                ],\n                            \"port\":5985,\n                            \"connection_protocol\": \"http\"\n                        }\n                },\n            \"name\": endopoint_name\n        },\n    \"metadata\":\n        {\n            \"project_reference\":\n                {\n                    \"name\":projec_name,\n                    \"kind\":\"project\",\n                    \"uuid\": str(projectUUID)\n                },\n            \"kind\":\"endpoint\"\n        }\n    }\n\nurl=\"https://%s:9440/api/nutanix/v3/endpoints\" % pc_ip\n\nresponse = requests.request(\"POST\", url, json=payload, headers=headers, verify=False, auth=(pc_user, pc_password))\nprint(response)",
+                            "script_type": "static_py3",
+                            "command_line_args": "",
+                            "exit_status": []
+                        },
+                        "child_tasks_local_reference_list": [],
+                        "variable_list": [],
+                        "timeout_secs": "0",
+                        "retries": "0",
+                        "inherit_target": false
+                    }
+                ],
+                "main_task_local_reference": {
+                    "name": "e698d883_dag",
+                    "kind": "app_task"
+                },
+                "variable_list": [
+                    {
+                        "type": "LOCAL",
+                        "name": "PC_IP",
+                        "description": "",
+                        "options": {
+                            "type": "PREDEFINED",
+                            "choices": []
+                        },
+                        "is_hidden": false,
+                        "is_mandatory": true,
+                        "data_type": "BASE",
+                        "val_type": "STRING",
+                        "label": "Prism Central IP",
+                        "attrs": {
+                            "type": ""
+                        },
+                        "editables": {
+                            "value": true
+                        },
+                        "value": ""
+                    },
+                    {
+                        "type": "LOCAL",
+                        "name": "PC_USER",
+                        "description": "",
+                        "options": {
+                            "type": "PREDEFINED",
+                            "choices": []
+                        },
+                        "is_hidden": false,
+                        "is_mandatory": true,
+                        "data_type": "BASE",
+                        "val_type": "STRING",
+                        "label": "Prism Central Admin user",
+                        "attrs": {
+                            "type": ""
+                        },
+                        "editables": {
+                            "value": true
+                        },
+                        "value": "admin"
+                    },
+                    {
+                        "type": "SECRET",
+                        "name": "PC_PASSWORD",
+                        "description": "",
+                        "options": {
+                            "type": "PREDEFINED",
+                            "choices": []
+                        },
+                        "is_hidden": false,
+                        "is_mandatory": true,
+                        "data_type": "BASE",
+                        "val_type": "STRING",
+                        "label": "Prism Central Admin Password",
+                        "attrs": {
+                            "type": "SECRET",
+                            "is_secret_modified": false,
+                            "secret_reference": {}
+                        },
+                        "editables": {
+                            "value": true
+                        },
+                        "value": ""
+                    },
+                    {
+                        "type": "LOCAL",
+                        "name": "AD_IP",
+                        "description": "",
+                        "options": {
+                            "type": "PREDEFINED",
+                            "choices": []
+                        },
+                        "is_hidden": false,
+                        "is_mandatory": true,
+                        "data_type": "BASE",
+                        "val_type": "STRING",
+                        "label": "Active Directory IP",
+                        "attrs": {
+                            "type": ""
+                        },
+                        "editables": {
+                            "value": true
+                        },
+                        "value": ""
+                    },
+                    {
+                        "type": "LOCAL",
+                        "name": "AD_USER",
+                        "description": "Please double \\ if needed",
+                        "options": {
+                            "type": "PREDEFINED",
+                            "choices": []
+                        },
+                        "is_hidden": false,
+                        "is_mandatory": true,
+                        "data_type": "BASE",
+                        "val_type": "STRING",
+                        "label": "Active Directory Admin User",
+                        "attrs": {
+                            "type": ""
+                        },
+                        "editables": {
+                            "value": true
+                        },
+                        "value": "NTNXLAB\\\\administrator"
+                    },
+                    {
+                        "type": "SECRET",
+                        "name": "AD_PASSWORD",
+                        "description": "",
+                        "options": {
+                            "type": "PREDEFINED",
+                            "choices": []
+                        },
+                        "is_hidden": false,
+                        "is_mandatory": true,
+                        "data_type": "BASE",
+                        "val_type": "STRING",
+                        "label": "Active Directory Admin Password",
+                        "attrs": {
+                            "type": "SECRET",
+                            "is_secret_modified": false,
+                            "secret_reference": {}
+                        },
+                        "editables": {
+                            "value": true
+                        },
+                        "value": ""
+                    }
+                ]
+            },
+            "endpoint_definition_list": [],
+            "credential_definition_list": [],
+            "endpoints_information": [],
+            "client_attrs": {}
+        }
+    },
+    "api_version": "3.0",
+    "product_version": "3.8.1",
+    "metadata": {
+        "last_update_time": "1733297457727853",
+        "creation_time": "1733297412399460",
+        "spec_version": 1,
+        "name": "EG-Prereguisites",
+        "kind": "runbook"
+    },
+    "contains_secrets": false
+}

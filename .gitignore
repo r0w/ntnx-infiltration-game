@@ -1,0 +1,61 @@
+node_modules
+*.log
+.DS_Store
+.bun
+.bunsdkconfig
+.env
+*.local
+*.local.*
+build/
+dist/
+.cache
+.turbo
+coverage/
+.pnpm-store
+*.tsbuildinfo
+*.tgz
+.eslintcache
+
+# Server runtime
+packages/server/data/
+packages/server/.ci-data/
+
+# Misc
+.idea/
+.vscode/
+.next/
+
+# Python
+*.pyc
+
+# Blueprint runtime — venv + caches + secrets
+tooling/blueprint/.venv/
+tooling/blueprint/.local/
+tooling/archive/v1/.venv/
+tooling/archive/v2/.venv/
+tooling/blueprint/__pycache__/
+tooling/blueprint/**/__pycache__/
+
+# Blueprint build artifacts — CI-built from source, not tracked
+tooling/blueprint/blueprint.json
+tooling/blueprint/blueprint.patched.json
+# (tooling/runbook_prerequisites.json is tracked — operator-uploadable
+# artifact bundled into each release alongside the BP)
+tooling/archive/v1/blueprint.json
+tooling/archive/v1/blueprint_legacy.json
+tooling/archive/v1/blueprint_legacy_scrubbed.json
+tooling/archive/v2/blueprint.json
+tooling/archive/blueprint-v3-tmp/blueprint.json
+
+# Generated at compile time by tooling/blueprint/compile.sh —
+# base64 .tgz blobs inlined into the sh task script.
+tooling/blueprint/scripts/push_prereq_bps.sh
+tooling/blueprint/scripts/upload_prereq_bps.py
+
+# Nutanix v4 Swagger specs — local reference only, too large for git (~17 MB)
+/specs/
+
+.claude/
+CLAUDE.md
+
+data/

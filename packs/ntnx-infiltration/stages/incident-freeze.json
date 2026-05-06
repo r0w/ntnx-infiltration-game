@@ -1,0 +1,16 @@
+{
+  "name": "incident-freeze",
+  "active": true,
+  "prompt": "ego",
+  "defaultColor": "magenta",
+  "messages": [
+    "stage-023.line-01",
+    "stage-023.line-02",
+    "stage-023.line-03"
+  ],
+  "saveScore": false,
+  "invalidates": [
+    "VMUUID",
+    "HostUUID"
+  ]
+}

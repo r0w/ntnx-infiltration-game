@@ -1,0 +1,31 @@
+{
+  "name": "create-protection-policy",
+  "active": true,
+  "prompt": "ego",
+  "defaultColor": "magenta",
+  "messages": [
+    "stage-020.line-01",
+    "stage-020.line-02",
+    "stage-020.line-03",
+    "stage-020.line-04",
+    "stage-020.line-05",
+    "stage-020.line-06",
+    "stage-020.line-07",
+    "stage-020.line-08",
+    "stage-020.line-09",
+    "stage-020.line-10",
+    "stage-020.line-11",
+    "stage-020.line-12"
+  ],
+  "saveScore": false,
+  "waitForInputValue": "Ok",
+  "check": {
+    "fn": "CheckProtectionPolicy"
+  },
+  "captures": [
+    "ProtectionPolicyUUID"
+  ],
+  "needs": [
+    "Trigram"
+  ]
+}

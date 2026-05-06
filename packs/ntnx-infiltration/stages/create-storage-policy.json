@@ -1,0 +1,23 @@
+{
+  "name": "create-storage-policy",
+  "active": true,
+  "prompt": "ego",
+  "defaultColor": "magenta",
+  "messages": [
+    "stage-017.line-01",
+    "stage-017.line-02",
+    "stage-017.line-03",
+    "stage-017.line-04",
+    "stage-017.line-05",
+    "stage-017.line-06",
+    "stage-017.line-07"
+  ],
+  "saveScore": false,
+  "waitForInputValue": "Ok",
+  "check": {
+    "fn": "CheckStoragePolicy"
+  },
+  "needs": [
+    "Trigram"
+  ]
+}

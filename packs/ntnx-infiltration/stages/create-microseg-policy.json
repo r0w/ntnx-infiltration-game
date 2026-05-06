@@ -1,0 +1,28 @@
+{
+  "name": "create-microseg-policy",
+  "active": true,
+  "prompt": "ego",
+  "defaultColor": "magenta",
+  "messages": [
+    "stage-018.line-01",
+    "stage-018.line-02",
+    "stage-018.line-03",
+    "stage-018.line-04",
+    "stage-018.line-05",
+    "stage-018.line-06",
+    "stage-018.line-07",
+    "stage-018.line-08",
+    "stage-018.line-09",
+    "stage-018.line-10",
+    "stage-018.line-11",
+    "stage-018.line-12"
+  ],
+  "saveScore": false,
+  "waitForInputValue": "Ok",
+  "check": {
+    "fn": "CheckSecurityPolicy"
+  },
+  "needs": [
+    "Trigram"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "modify-blueprint",
+  "active": true,
+  "prompt": "ego",
+  "defaultColor": "magenta",
+  "messages": [
+    "stage-037.line-01",
+    "stage-037.line-02",
+    "stage-037.line-03",
+    "stage-037.line-04",
+    "stage-037.line-05",
+    "stage-037.line-07",
+    "stage-037.line-08",
+    "stage-037.line-09"
+  ],
+  "saveScore": false,
+  "waitForInputValue": "Ok",
+  "check": {
+    "fn": "CheckUpdateBP"
+  }
+}

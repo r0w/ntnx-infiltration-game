@@ -1,0 +1,1 @@
+../../blueprint/scripts/update_game.sh

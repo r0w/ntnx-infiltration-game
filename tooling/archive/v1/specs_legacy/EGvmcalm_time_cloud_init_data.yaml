@@ -1,0 +1,18 @@
+|-
+#cloud-config
+timezone: @@{TIMEZONE}@@
+
+users:
+  - name: @@{NUTANIX.username}@@
+    shell: /bin/bash
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+  - name: @@{PLAYER.username}@@
+    shell: /bin/bash
+    sudo: []
+chpasswd:
+  list: |
+    @@{NUTANIX.username}@@:@@{NUTANIX.secret}@@
+    @@{PLAYER.username}@@:@@{PLAYER.secret}@@
+  expire: false
+
+ssh_pwauth: true

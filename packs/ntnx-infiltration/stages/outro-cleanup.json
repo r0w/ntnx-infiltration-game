@@ -1,0 +1,13 @@
+{
+  "name": "outro-cleanup",
+  "active": true,
+  "prompt": "system",
+  "defaultColor": "white",
+  "messages": [
+    "stage-039.line-01",
+    "stage-039.line-02",
+    "stage-039.line-03",
+    "stage-039.line-04"
+  ],
+  "saveScore": false
+}

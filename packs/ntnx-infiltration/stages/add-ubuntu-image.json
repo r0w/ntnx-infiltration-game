@@ -1,0 +1,26 @@
+{
+  "name": "add-ubuntu-image",
+  "active": true,
+  "prompt": "ego",
+  "defaultColor": "magenta",
+  "messages": [
+    "stage-011.line-01",
+    "stage-011.line-02",
+    "stage-011.line-03",
+    "stage-011.line-04",
+    "stage-011.line-05",
+    "stage-011.line-06",
+    "stage-011.line-07"
+  ],
+  "saveScore": false,
+  "waitForInputValue": "Ok",
+  "check": {
+    "fn": "CheckImage"
+  },
+  "captures": [
+    "ImageUUID"
+  ],
+  "needs": [
+    "Trigram"
+  ]
+}

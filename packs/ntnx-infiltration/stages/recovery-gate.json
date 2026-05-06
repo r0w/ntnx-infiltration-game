@@ -1,0 +1,14 @@
+{
+  "name": "recovery-gate",
+  "active": true,
+  "prompt": "system",
+  "defaultColor": "white",
+  "messages": [
+    "stage-002.line-01"
+  ],
+  "saveScore": false,
+  "silentOnSuccess": true,
+  "check": {
+    "fn": "NeedRecovery"
+  }
+}

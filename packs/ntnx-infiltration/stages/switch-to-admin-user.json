@@ -1,0 +1,14 @@
+{
+  "name": "switch-to-admin-user",
+  "active": true,
+  "prompt": "ego",
+  "defaultColor": "magenta",
+  "messages": [
+    "stage-008.line-01",
+    "stage-008.line-02"
+  ],
+  "saveScore": false,
+  "needs": [
+    "Trigram"
+  ]
+}

@@ -1,0 +1,1 @@
+../../blueprint/scripts/cluster_health.py

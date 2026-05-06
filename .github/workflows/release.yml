@@ -1,0 +1,288 @@
+name: release
+
+# Build the bundled Docker image, push to ghcr.io, compile the Calm
+# blueprint, and attach all artifacts to the GitHub release.
+#
+# Trigger: git tag v* on main, then `git push --tags`. The tag name
+# becomes the image tag (vX.Y.Z) plus :latest. Manual run via
+# workflow_dispatch is also allowed for re-publishing without a fresh
+# tag.
+#
+# Blueprint compilation: `calm compile bp` normally needs a live PC
+# connection (it resolves project / subnet / cluster refs through its
+# cache). The compile-blueprint job below pre-seeds ~/.calm/dsl.db
+# with stub entries via `seed_ci_cache.py` so calm-dsl resolves to
+# placeholder UUIDs. The substrate's editables.yaml marks the relevant
+# fields as runtime-overridable, so the operator picks the real subnet/
+# cluster at launch time via the Prism Central UI — the stub UUIDs are
+# never actually consumed.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to (re)release (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: write   # gh release upload
+  packages: write   # ghcr.io push
+
+env:
+  REGISTRY: ghcr.io
+  # github.repository is "owner/repo" lowercased — exactly what ghcr expects.
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve tag
+        id: resolve
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Releasing $TAG"
+
+      - name: Set up Docker buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.resolve.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  compile-blueprint:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ needs.build-and-push.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.9 (calm-dsl 4.3.1 needs 3.9)
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.9'
+
+      - name: Install ntnx-ncm-dsl
+        run: pip install ntnx-ncm-dsl==4.3.1
+
+      - name: Write ~/.calm config files directly (bypass calm init dsl)
+        # `calm init dsl` always probes the PC twice — once for NCM
+        # decoupled status (/dm/v3/groups), once for Calm enablement
+        # (/api/nutanix/v3/services/nucalm/status). Both refuse in CI
+        # since 127.0.0.1 has no PC. The NCM probe falls through to a
+        # bad json.loads (we previously sed-patched it), but the Calm
+        # status probe raises hard with no fallback. Side-stepping the
+        # whole command: write config.ini + init.ini directly, matching
+        # the shape `calm init dsl` would produce on success. Stub
+        # values are fine — `calm compile bp` only reads the project
+        # name + the dsl.db cache (populated next step), neither of
+        # which trigger any PC probe.
+        run: |
+          mkdir -p ~/.calm/.local
+          cat > ~/.calm/config.ini <<'EOF'
+          [SERVER]
+          pc_ip = 127.0.0.1
+          pc_port = 9440
+          pc_username = admin
+          pc_password = stub
+          api_key_location = -
+
+          [NCM_SERVER]
+          ncm_enabled = False
+          host = None
+          port = None
+
+          [NC_SERVER]
+          enabled = False
+          host = None
+          username = admin
+          password = stub
+
+          [PROJECT]
+          name = production
+
+          [LOG]
+          level = INFO
+
+          [POLICY]
+          policy_status = False
+
+          [APPROVAL_POLICY]
+          approval_policy_status = True
+
+          [STRATOS]
+          stratos_status = False
+
+          [CLOUD_PROVIDERS]
+          cp_status = True
+
+          [CONNECTION]
+          retries_enabled = True
+          connection_timeout = 5
+          read_timeout = 30
+
+          [CATEGORIES]
+          EOF
+          cat > ~/.calm/init.ini <<EOF
+          [CONFIG]
+          location = $HOME/.calm/config.ini
+
+          [DB]
+          location = $HOME/.calm/dsl.db
+
+          [LOCAL_DIR]
+          location = $HOME/.calm/.local
+          EOF
+          # blueprint.py calls read_local_file() for 6 secret stubs (cred
+          # password, 5 profile passwords/tokens). The function looks at
+          # .local/<name> first, then ~/.calm/.local/<name>, and errors
+          # if neither exists. In CI we don't have the real secrets — and
+          # don't need them, the BP is filled at launch via Prism UI. Just
+          # create empty placeholders so compile resolves them as "".
+          for f in BP_CRED_NUTANIX_PASSWORD \
+                   Profile_Default_variable_PC_PASSWORD \
+                   Profile_Default_variable_ADMIN_PASSWORD \
+                   Profile_Default_variable_GAME_PROD_PASSWORD \
+                   Profile_Default_variable_GAME_OLD_PC_PASSWORD \
+                   Profile_Default_variable_GIT_TOKEN; do
+            : > ~/.calm/.local/$f
+          done
+
+      - name: Seed ~/.calm/dsl.db with stub refs (offline compile)
+        # seed_ci_cache.py populates the cache with stub UUIDs so
+        # compile resolves project/cluster/subnet refs without a live
+        # PC. Stubs land in the JSON's substrate.cluster_reference +
+        # first NIC subnet_reference; both are marked editable in
+        # specs/VM_create_spec_editables.yaml so the operator picks
+        # the real entities at launch via Prism UI.
+        run: python3 tooling/blueprint/seed_ci_cache.py
+
+      - name: Generate push_prereq_bps.sh from template + .tgz blobs
+        # blueprint.py's `Push prereq BPs` install task references
+        # scripts/push_prereq_bps.sh — assembled at compile time from
+        # the template + base64-inlined CloneProd.tgz + NewblankVM.tgz
+        # (per memory project_bundle_inline_b64). The output is gitignored
+        # since the blobs change. compile.sh does this locally; replicate
+        # it inline here so `calm compile bp` finds the file.
+        run: |
+          python3 - <<'PY'
+          import base64, pathlib
+          root = pathlib.Path('tooling/blueprint')
+          template = (root / 'scripts' / 'push_prereq_bps.sh.template').read_text()
+          cp = base64.b64encode((root / 'prereqs' / 'CloneProd.tgz').read_bytes()).decode('ascii')
+          bv = base64.b64encode((root / 'prereqs' / 'NewblankVM.tgz').read_bytes()).decode('ascii')
+          out = template.replace('__CLONEPROD_TGZ_B64__', cp).replace('__BLANKVM_TGZ_B64__', bv)
+          (root / 'scripts' / 'push_prereq_bps.sh').write_text(out)
+          print(f'wrote push_prereq_bps.sh ({len(out)} chars)')
+          PY
+
+      - name: Build blueprint.json (calm-dsl native + post-compile patcher)
+        # patch_escript.py applies 6 passes: banned-import rewrites
+        # (sandbox), CUSTOM→DEB packages (cycle avoidance), boot disk
+        # 40 GiB grow, owner_reference + project_reference strip, and
+        # canonical secret normalization (UI-import safe).
+        run: |
+          cd tooling/blueprint
+          calm compile bp -f blueprint.py --out json > blueprint.json
+          python3 patch_escript.py blueprint.json blueprint.patched.json
+          # Sanity check: install runbook must have ≥10 tasks
+          python3 -c "
+          import json
+          bp = json.load(open('blueprint.patched.json'))
+          for p in bp['spec']['resources']['package_definition_list']:
+              if p['type'] == 'DEB':
+                  tasks = p['options']['install_runbook']['task_definition_list']
+                  ec = [t for t in tasks if t.get('type') in ('EXEC','SET_VARIABLE')]
+                  assert len(ec) >= 10, f'expected ≥10 install tasks, got {len(ec)}'
+                  print(f'compile-blueprint: {len(ec)} install tasks OK')
+                  break
+          "
+
+      - name: Stash blueprint.patched.json for upload job
+        uses: actions/upload-artifact@v4
+        with:
+          name: blueprint-json
+          path: tooling/blueprint/blueprint.patched.json
+          if-no-files-found: error
+          retention-days: 1
+
+  upload-blueprint:
+    needs: compile-blueprint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Pull compiled blueprint from previous job
+        uses: actions/download-artifact@v4
+        with:
+          name: blueprint-json
+          path: tooling/blueprint/
+
+      - name: Create release if missing + upload blueprint asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.compile-blueprint.outputs.tag }}
+        run: |
+          # Push of a tag does NOT auto-create a GitHub Release; do it here
+          # if absent. `gh release view` exits non-zero when the release
+          # doesn't exist yet — that's the trigger to create it.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --generate-notes \
+              --title "$TAG" \
+              --notes-start-tag "$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || echo "$TAG")"
+          fi
+
+          # Release assets are renamed at upload time with a `nig-NN-`
+          # prefix (NIG = ntnx-infiltration-game) so the GitHub Release
+          # page lists them in the order the operator should consume:
+          #
+          #   nig-00-runbook-prerequisites.json   one-shot per fresh PC,
+          #                                        creates the AD endpoint
+          #   nig-01-blueprint.json               the game BP — upload, fill
+          #                                        vars, launch. Auto-uploads
+          #                                        CloneProd + BlankVM-source
+          #                                        (bundled inline as base64
+          #                                        in upload_prereq_bps.py)
+          #                                        + creates production VMs +
+          #                                        users + AD endpoint users +
+          #                                        starts the container.
+          #
+          # Two assets, two clicks. Same UX as the legacy
+          # ntnx-escape-game (1 runbook + 1 blueprint).
+          STAGE=$(mktemp -d)
+          [[ -f tooling/runbook_prerequisites.json ]] && \
+            cp tooling/runbook_prerequisites.json "$STAGE/nig-00-runbook-prerequisites.json"
+          cp tooling/blueprint/blueprint.patched.json "$STAGE/nig-01-blueprint.json"
+          ls -la "$STAGE/"
+          gh release upload "$TAG" "$STAGE"/* --clobber

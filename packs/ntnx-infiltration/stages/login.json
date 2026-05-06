@@ -1,0 +1,28 @@
+{
+  "name": "login",
+  "active": true,
+  "prompt": "system",
+  "defaultColor": "white",
+  "messages": [
+    "stage-001.trigram-prompt",
+    "stage-001.pin-prompt"
+  ],
+  "saveScore": false,
+  "silentOnSuccess": true,
+  "check": {
+    "fn": "CheckTrigram"
+  },
+  "captures": [
+    "PIN",
+    "Trigram"
+  ],
+  "invalidates": [
+    "Greeting"
+  ],
+  "computeGreeting": {
+    "inputVar": "Trigram",
+    "newKey": "stage-001.greeting-new",
+    "returningKey": "stage-001.greeting-returning",
+    "outputVar": "Greeting"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "create-auth-policy",
+  "active": true,
+  "prompt": "ego",
+  "defaultColor": "magenta",
+  "messages": [
+    "stage-007.line-01",
+    "stage-007.line-02",
+    "stage-007.line-03"
+  ],
+  "saveScore": false,
+  "waitForInputValue": "Ok",
+  "check": {
+    "fn": "CheckAuthPolicy"
+  },
+  "needs": [
+    "Trigram"
+  ]
+}

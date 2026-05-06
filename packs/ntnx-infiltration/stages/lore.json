@@ -1,0 +1,13 @@
+{
+  "name": "lore",
+  "active": true,
+  "prompt": "system",
+  "defaultColor": "white",
+  "messages": [
+    "stage-000.lore-initializing",
+    "stage-000.lore-connecting",
+    "stage-000.lore-endpoint",
+    "stage-000.lore-connected"
+  ],
+  "saveScore": false
+}
