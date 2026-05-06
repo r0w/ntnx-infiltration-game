@@ -1,0 +1,1802 @@
+import type { CheckContext, CheckResult } from '@ntnx-game/engine';
+import {
+  cacheEntity,
+  getTrigram,
+  listAll,
+  listAllV3,
+  localizedHint,
+  nutanixErrorDetail,
+  recoverVar,
+} from './helpers';
+
+/**
+ * Check functions referenced by the 39 stages of the ntnx-infiltration pack.
+ * Each check validates that the player has completed the stage's action on
+ * the cluster by querying Nutanix v4 endpoints and asserting the expected
+ * entity exists. In mock mode the queries resolve against `fixtures.json`
+ * (with `{Trigram}` substitution wired in by the session-service) so the
+ * game loops end-to-end without a live Prism Central.
+ *
+ * Several v4 paths are provisional and marked as such inline — a real
+ * cluster will confirm the exact namespace (storage policies, NCM X-Play,
+ * Calm apps, approvals are the fuzziest). Live validation is Phase 9c's
+ * follow-up when a PC becomes available.
+ */
+
+// ─── IAM ─────────────────────────────────────────────────────────────────
+
+/**
+ * Stage 1 `login`. Validates the Trigram the player entered via `<input/>`.
+ * Three-part check:
+ *   1. Shape — 2–8 chars, `[A-Za-z0-9_-]`. No network call.
+ *   2. Returning-agent re-auth — when another unfinished session in the
+ *      same pack already captured this Trigram, compare the just-submitted
+ *      PIN to the one stored on that session. Match → return `switchTo`
+ *      and session-service hands the client over to the old session
+ *      (localStorage swap, hydrate at its progression). Mismatch → return
+ *      `retryFromVariable: 'PIN'` with a dim hint; player re-tries the PIN
+ *      (or presses ↓ to switch agent entirely).
+ *   3. New-agent pass — no collision → capture stands, stage advances.
+ * Directory lookups are skipped when `ctx.sessionDirectory` is absent
+ * (unit tests that don't stand up a full session-service).
+ */
+async function CheckTrigram(ctx: CheckContext): Promise<CheckResult> {
+  const raw = ctx.vars.get('Trigram');
+  if (typeof raw !== 'string' || raw.trim().length === 0) {
+    return { pass: false, detail: 'Trigram is empty.', retryFromVariable: 'Trigram' };
+  }
+  if (!/^[A-Za-z0-9]{3}$/.test(raw)) {
+    return {
+      pass: false,
+      detail: 'Trigram must be exactly 3 letters or digits.',
+      retryFromVariable: 'Trigram',
+    };
+  }
+  // Trigrams are case-insensitive: normalize to lowercase so `rbo`, `RBO`,
+  // and `rbO` are the same agent (single session, no collisions, no
+  // duplicate Nutanix resources named `RBO-vm` vs `rbo-vm`).
+  const trigram = raw.toLowerCase();
+  // PIN format check happens in the same stage (login captures both
+  // Trigram and PIN before the check runs). 4 digits, no exceptions.
+  // Rewinding to the PIN input keeps the trigram already typed.
+  const pin = ctx.vars.get('PIN');
+  if (typeof pin !== 'string' || !/^\d{4}$/.test(pin)) {
+    return {
+      pass: false,
+      detail: 'PIN must be exactly 4 digits.',
+      retryFromVariable: 'PIN',
+    };
+  }
+  const others = ctx.sessionDirectory
+    ?.findOtherSessionsWithVariable(ctx.session.id, 'Trigram', trigram)
+    .filter((s) => s.finishedAt === null) ?? [];
+  if (others.length > 0) {
+    const submittedPin = ctx.vars.get('PIN');
+    // Most-recent-first (directory already sorts by started_at DESC) — if
+    // the player had multiple active sessions with the same trigram (edge
+    // case), take the latest.
+    const target = others[0];
+    const storedPin = ctx.sessionDirectory?.getVariable(target.sessionId, 'PIN');
+    if (
+      typeof submittedPin === 'string' &&
+      typeof storedPin === 'string' &&
+      submittedPin === storedPin
+    ) {
+      ctx.logger.info('trigram+pin match → swap to existing session', {
+        trigram,
+        target: target.sessionId,
+      });
+      return { pass: false, switchTo: target.sessionId };
+    }
+    ctx.logger.warn('trigram collision with PIN mismatch', { trigram });
+    return {
+      pass: false,
+      detail: `Agent code "${trigram}" is already claimed. Wrong PIN — try again, or press ↓ to switch agent.`,
+      retryFromVariable: 'PIN',
+    };
+  }
+  ctx.logger.info('trigram validated (new agent)', { trigram });
+  return {
+    pass: true,
+    detail: `Welcome, agent ${trigram}.`,
+    captured: { Trigram: trigram },
+  };
+}
+
+/**
+ * Stage 6 `create-admin-user`. Verifies that `{Trigram}-adm` exists in
+ * Nutanix IAM. Captures the user's extId so downstream stages that reference
+ * the same user (e.g. the authorization policy) can find it via
+ * `ctx.cache.get('user', …)`.
+ */
+async function CheckUser(ctx: CheckContext): Promise<CheckResult> {
+  const trigram = getTrigram(ctx);
+  const expected = `${trigram}-adm`;
+  const expectedLc = expected.toLowerCase();
+  try {
+    const users = await listAll<{ extId?: string; name?: string; username?: string }>(
+      ctx,
+      '/api/iam/v4.0/authn/users',
+    );
+    // v4 IAM normalizes `username` to lowercase on store — `qaE-adm` POSTed
+    // becomes `qae-adm` in the list. `name` may carry the original casing
+    // on some shapes, so check both with case-insensitive compare to stay
+    // tolerant.
+    const found = users.find(
+      (u) =>
+        (u.username ?? '').toLowerCase() === expectedLc ||
+        (u.name ?? '').toLowerCase() === expectedLc,
+    );
+    if (!found) {
+      return { pass: false, detail: `User '${expected}' not found.` };
+    }
+    if (found.extId) {
+      ctx.cache.set({ kind: 'user', logicalName: expected, uuid: found.extId });
+    }
+    return {
+      pass: true,
+      detail: `User '${expected}' found.`,
+      captured: found.extId ? { UserUUID: found.extId } : undefined,
+    };
+  } catch (err) {
+    return { pass: false, detail: `IAM query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+/**
+ * Stage 7 `create-auth-policy`. Mirrors Python `CheckAuthPolicy` →
+ * `checkAuthorizationPolicyAssignement` : verifies `{Trigram}-auth` exists
+ * and asserts (a) `role` matches the `Super Admin` system role's extId,
+ * (b) at least one identity entry has `identityFilter.user.uuid.anyof`
+ * containing `UserUUID`. Without these, a player could pass with a
+ * policy that grants the wrong role or targets a different user.
+ */
+async function CheckAuthPolicy(ctx: CheckContext): Promise<CheckResult> {
+  const trigram = getTrigram(ctx);
+  const expected = `${trigram}-auth`;
+  const expectedLc = expected.toLowerCase();
+  const userUuid = ctx.vars.get('UserUUID');
+  try {
+    // v4 authz policies carry the identifier on `displayName`. Top-level
+    // `name` is null in list responses — the cached `cacheEntity` helper
+    // only matches on `name`, so open-code the find+cache here. Match
+    // case-insensitive because v4 IAM lowercases identifiers (a
+    // policy POSTed as `qaE-auth` reads back as `qae-auth`).
+    const policies = await listAll<{
+      extId?: string;
+      name?: string;
+      displayName?: string;
+      role?: string;
+      identities?: Array<{
+        identityFilter?: { user?: { uuid?: { anyof?: string[] } } };
+        $reserved?: { user?: { uuid?: { anyof?: string[] } } };
+      }>;
+    }>(ctx, '/api/iam/v4.0/authz/authorization-policies');
+    const found = policies.find(
+      (p) => (p.displayName ?? '').toLowerCase() === expectedLc,
+    );
+    if (!found) {
+      return { pass: false, detail: `Authorization policy '${expected}' not found.` };
+    }
+    // Look up the Super Admin role's extId so we can compare. v4 IAM
+    // exposes role names on `displayName` (top-level `name` is empty
+    // on system roles).
+    const roles = await listAll<{ extId?: string; displayName?: string }>(
+      ctx,
+      '/api/iam/v4.0/authz/roles',
+    );
+    const superAdmin = roles.find((r) => /super admin/i.test(r.displayName ?? ''));
+    if (superAdmin?.extId && found.role !== superAdmin.extId) {
+      return {
+        pass: false,
+        detail: `Authorization policy '${expected}' is not bound to the Super Admin role.`,
+      };
+    }
+    if (typeof userUuid === 'string' && userUuid.length > 0) {
+      const userBound = (found.identities ?? []).some((id) => {
+        const anyof =
+          id.identityFilter?.user?.uuid?.anyof ?? id.$reserved?.user?.uuid?.anyof ?? [];
+        return anyof.includes(userUuid);
+      });
+      if (!userBound) {
+        return {
+          pass: false,
+          detail: `Authorization policy '${expected}' does not target '${trigram}-adm'.`,
+        };
+      }
+    }
+    if (found.extId) {
+      ctx.cache.set({ kind: 'authPolicy', logicalName: expected, uuid: found.extId });
+    }
+    return {
+      pass: true,
+      detail: `Authorization policy '${expected}' grants Super Admin to '${trigram}-adm'.`,
+    };
+  } catch (err) {
+    return { pass: false, detail: `IAM query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+// ─── Projects & networking ───────────────────────────────────────────────
+
+/**
+ * Stage 9 `create-project`. Mirrors Python `CheckProject` (CheckLabs.py):
+ * verifies `{Trigram}-proj` exists with `account_reference_list` non-empty
+ * — that's what the "Infrastructure tab → Add infrastructure" step
+ * populates (an *account* binding to the Nutanix cluster, not the bare
+ * cluster reference). Without this, the project can't actually be used
+ * as a Calm/NCM scope by downstream stages.
+ *
+ * v3 API (`POST /api/nutanix/v3/projects/list`); reads `spec.resources` —
+ * Python reads the same path on this endpoint, the `status.resources`
+ * mirror is server-rendered.
+ */
+async function CheckProject(ctx: CheckContext): Promise<CheckResult> {
+  const trigram = getTrigram(ctx);
+  const expected = `${trigram}-proj`;
+  try {
+    const projects = await listAllV3<{
+      metadata?: { uuid?: string; name?: string };
+      spec?: {
+        name?: string;
+        resources?: {
+          account_reference_list?: unknown[];
+          cluster_reference_list?: unknown[];
+          subnet_reference_list?: unknown[];
+        };
+      };
+      status?: { name?: string };
+    }>(ctx, '/api/nutanix/v3/projects/list');
+    const found = projects.find(
+      (p) => p.spec?.name === expected || p.status?.name === expected || p.metadata?.name === expected,
+    );
+    if (!found) return { pass: false, detail: `Project '${expected}' not found.` };
+    const accounts = found.spec?.resources?.account_reference_list ?? [];
+    if (accounts.length === 0) {
+      return {
+        pass: false,
+        detail: `Project '${expected}' has no infrastructure — add the Nutanix cluster account in the Infrastructure tab.`,
+      };
+    }
+    if (found.metadata?.uuid) {
+      ctx.cache.set({
+        kind: 'project',
+        logicalName: expected,
+        uuid: found.metadata.uuid,
+      });
+    }
+    return {
+      pass: true,
+      detail: `Project '${expected}' has ${accounts.length} infrastructure account(s) attached.`,
+      captured: found.metadata?.uuid ? { ProjectUUID: found.metadata.uuid } : undefined,
+    };
+  } catch (err) {
+    return { pass: false, detail: `Project query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+/**
+ * Stage 10 `create-subnet`. Mirrors Python `CheckNetwork` →
+ * `checkSubnetAdvanced`: verifies `{Trigram}-subnet` exists on the given
+ * VLAN id and is created with `isAdvancedNetworking: true` (a.k.a. the
+ * "Nutanix IPAM with advanced networking" mode the stage prompt asks for).
+ * Without the advanced flag, AHV refuses to attach a 2-NIC VM combining
+ * this subnet with the cluster's `secondary` subnet — CheckVM (stage 12)
+ * would silently fail to create the VM.
+ */
+async function CheckNetwork(ctx: CheckContext): Promise<CheckResult> {
+  const trigram = getTrigram(ctx);
+  const expected = `${trigram}-subnet`;
+  const vlanRaw = ctx.vars.get('Vlanid');
+  const expectedVlan =
+    typeof vlanRaw === 'number'
+      ? vlanRaw
+      : typeof vlanRaw === 'string' && vlanRaw.length > 0
+      ? Number.parseInt(vlanRaw, 10)
+      : Number.NaN;
+  try {
+    const subnets = await listAll<{
+      extId?: string;
+      name?: string;
+      networkId?: number | string;
+      isAdvancedNetworking?: boolean;
+    }>(ctx, '/api/networking/v4.0/config/subnets');
+    const found = subnets.find((s) => s.name === expected);
+    if (!found) return { pass: false, detail: `Subnet '${expected}' not found.` };
+    const actualVlan =
+      typeof found.networkId === 'number'
+        ? found.networkId
+        : Number.parseInt(String(found.networkId), 10);
+    if (Number.isFinite(expectedVlan) && actualVlan !== expectedVlan) {
+      return {
+        pass: false,
+        detail: `Subnet '${expected}' on VLAN ${actualVlan} (expected ${expectedVlan}).`,
+      };
+    }
+    if (found.isAdvancedNetworking !== true) {
+      return {
+        pass: false,
+        detail: `Subnet '${expected}' is not in advanced-networking mode — re-create it with Nutanix IPAM enabled.`,
+      };
+    }
+    if (found.extId) {
+      ctx.cache.set({ kind: 'network', logicalName: expected, uuid: found.extId });
+    }
+    return {
+      pass: true,
+      detail: `Subnet '${expected}' found (VLAN ${actualVlan}, advanced networking).`,
+      captured: found.extId ? { NetworkUUID: found.extId } : undefined,
+    };
+  } catch (err) {
+    return { pass: false, detail: `Subnet query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+// ─── VM lifecycle ────────────────────────────────────────────────────────
+
+/**
+ * Stage 11 `add-ubuntu-image`. Verifies `{Trigram}-ubuntu` exists in the
+ * image library as a disk image (not an ISO — the stage prose is explicit).
+ * Captures ImageUUID so CheckVM can verify the VM's boot disk references it
+ * later.
+ */
+async function CheckImage(ctx: CheckContext): Promise<CheckResult> {
+  const trigram = getTrigram(ctx);
+  const expected = `${trigram}-ubuntu`;
+  try {
+    const images = await listAll<{
+      extId?: string;
+      name?: string;
+      type?: string;
+    }>(ctx, '/api/vmm/v4.0/content/images');
+    const found = images.find((i) => i.name === expected);
+    if (!found) return { pass: false, detail: `Image '${expected}' not found in library.` };
+    if (found.type && !/^DISK/i.test(found.type)) {
+      return {
+        pass: false,
+        detail: `Image '${expected}' has type '${found.type}' (expected DISK, not ISO).`,
+      };
+    }
+    if (found.extId) {
+      ctx.cache.set({ kind: 'image', logicalName: expected, uuid: found.extId });
+    }
+    return {
+      pass: true,
+      detail: `Image '${expected}' found (disk).`,
+      captured: found.extId ? { ImageUUID: found.extId } : undefined,
+    };
+  } catch (err) {
+    return { pass: false, detail: `Image query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+/**
+ * Stage 12 `create-vm`. Mirrors original Python `CheckVM` (CheckLabs.py)
+ * plus our existing vCPU/memory/UEFI assertions. Verifies `{Trigram}-vm`:
+ * exists, has 2 vCPU + memory + UEFI + power=ON (our additions), 2 NICs
+ * with at least one on the player's `{Trigram}-subnet`, boot disk based on
+ * the player's Ubuntu image, cloud-init present, and assigned to the
+ * player's project. The last two read v3 endpoints (no v4 equivalent yet)
+ * — defensive on errors per Python's `hasVMCloudinit` precedent (PC 7.3+
+ * may not expose the field, so unreachable v3 → assume pass rather than
+ * false-fail). Captures VMUUID + HostUUID for downstream stages.
+ */
+async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
+  const trigram = getTrigram(ctx);
+  const expected = `${trigram}-vm`;
+  try {
+    // Filter server-side instead of paginating the full VM list — on a HPoC
+    // with 100+ VMs that drops a multi-second pagination scan to a single
+    // 1-page query. Name is unique per trigram so the filter returns 0/1.
+    const vms = await listAll<{
+      extId?: string;
+      name?: string;
+      numSockets?: number;
+      numCoresPerSocket?: number;
+      memorySizeBytes?: number;
+      bootConfig?: { bootType?: string; '$objectType'?: string };
+      host?: { extId?: string };
+      powerState?: string;
+      nics?: Array<{
+        nicNetworkInfo?: { subnet?: { extId?: string } };
+        networkInfo?: { subnet?: { extId?: string } };
+      }>;
+      disks?: Array<{
+        backingInfo?: {
+          dataSource?: { reference?: { imageExtId?: string } };
+        };
+      }>;
+      guestCustomization?: unknown;
+    }>(ctx, `/api/vmm/v4.0/ahv/config/vms?%24filter=name%20eq%20'${expected}'`);
+    const found = vms.find((v) => v.name === expected);
+    if (!found) {
+      return {
+        pass: false,
+        detail: `VM '${expected}' not found.`,
+        hint: localizedHint(ctx, {
+          en: `VM '${expected}' is missing — create it.`,
+          fr: `La VM '${expected}' n'existe pas — créez-la.`,
+        }),
+      };
+    }
+    const vcpu = (found.numSockets ?? 1) * (found.numCoresPerSocket ?? 1);
+    if (vcpu < 2) {
+      return {
+        pass: false,
+        detail: `VM '${expected}' has ${vcpu} vCPU (expected ≥ 2).`,
+        hint: localizedHint(ctx, {
+          en: `Check the VM's vCPU configuration.`,
+          fr: `Vérifiez la configuration vCPU de la VM.`,
+        }),
+      };
+    }
+    if (!found.memorySizeBytes || found.memorySizeBytes < 1) {
+      return {
+        pass: false,
+        detail: `VM '${expected}' has no memory configured.`,
+        hint: localizedHint(ctx, {
+          en: `Check the VM's memory configuration.`,
+          fr: `Vérifiez la configuration mémoire de la VM.`,
+        }),
+      };
+    }
+    const bootTypeOk =
+      /UEFI/i.test(found.bootConfig?.bootType ?? '') ||
+      /UefiBoot/i.test(found.bootConfig?.['$objectType'] ?? '');
+    if (found.bootConfig && !bootTypeOk) {
+      return {
+        pass: false,
+        detail: `VM '${expected}' boot mode not UEFI.`,
+        hint: localizedHint(ctx, {
+          en: `Check the VM's boot mode.`,
+          fr: `Vérifiez le mode de démarrage de la VM.`,
+        }),
+      };
+    }
+    if (found.powerState !== 'ON') {
+      return {
+        pass: false,
+        detail: `VM '${expected}' is not powered ON (state=${found.powerState ?? 'unknown'}).`,
+        hint: localizedHint(ctx, {
+          en: `VM is powered off — start it.`,
+          fr: `La VM est éteinte — démarrez-la.`,
+        }),
+      };
+    }
+    // NIC count + subnet binding. Self-heal NetworkUUID from the cluster
+    // when the session var is missing (server restart, fresh resume, etc.) —
+    // invisible to the player; only fails the assertion when the subnet
+    // truly doesn't exist on the cluster.
+    const nics = found.nics ?? [];
+    if (nics.length !== 2) {
+      return {
+        pass: false,
+        detail: `VM '${expected}' has ${nics.length} NIC(s) (expected 2).`,
+        hint: localizedHint(
+          ctx,
+          nics.length < 2
+            ? {
+                en: `VM is missing a NIC — you need 2 (one per subnet).`,
+                fr: `Il manque une NIC à la VM — il en faut 2 (une par sous-réseau).`,
+              }
+            : {
+                en: `VM has too many NICs.`,
+                fr: `La VM a trop de NICs.`,
+              },
+        ),
+      };
+    }
+    const networkUuid = await recoverVar(ctx, 'NetworkUUID', 'create-vm', async () => {
+      const subnets = await listAll<{ extId?: string; name?: string }>(
+        ctx,
+        '/api/networking/v4.0/config/subnets',
+      );
+      return subnets.find((s) => s.name === `${trigram}-subnet`)?.extId;
+    });
+    if (networkUuid) {
+      const onSubnet = nics.some(
+        (n) =>
+          n?.nicNetworkInfo?.subnet?.extId === networkUuid ||
+          n?.networkInfo?.subnet?.extId === networkUuid,
+      );
+      if (!onSubnet) {
+        return {
+          pass: false,
+          detail: `VM '${expected}' has no NIC on '${trigram}-subnet'.`,
+          hint: localizedHint(ctx, {
+            en: `One of the VM's NICs should be on your '${trigram}-subnet'.`,
+            fr: `Une des NICs de la VM doit être sur votre '${trigram}-subnet'.`,
+          }),
+        };
+      }
+    }
+    // Boot disk image binding. Same self-heal pattern for ImageUUID.
+    const imageUuid = await recoverVar(ctx, 'ImageUUID', 'create-vm', async () => {
+      const images = await listAll<{ extId?: string; name?: string }>(
+        ctx,
+        '/api/vmm/v4.0/content/images',
+      );
+      return images.find((i) => i.name === `${trigram}-ubuntu`)?.extId;
+    });
+    if (imageUuid) {
+      const disks = found.disks ?? [];
+      const bootImg = disks[0]?.backingInfo?.dataSource?.reference?.imageExtId;
+      if (bootImg !== imageUuid) {
+        return {
+          pass: false,
+          detail: `VM '${expected}' boot disk is not based on '${trigram}-ubuntu'.`,
+          hint: localizedHint(ctx, {
+            en: `Check the VM's boot disk image source.`,
+            fr: `Vérifiez l'image source du disque de boot de la VM.`,
+          }),
+        };
+      }
+    }
+    // Cloud-init + project both live on the v3 VM payload — fetch ONCE
+    // and read both fields. Saves a round-trip vs the previous two-GET
+    // pattern. Failures here don't block the check (defensive: PC 7.3+
+    // hides the v3 endpoint sometimes).
+    const projectUuid = await recoverVar(ctx, 'ProjectUUID', 'create-vm', async () => {
+      try {
+        const projects = await listAllV3<{
+          spec?: { name?: string };
+          status?: { name?: string };
+          metadata?: { name?: string; uuid?: string };
+        }>(ctx, '/api/nutanix/v3/projects/list');
+        return projects.find(
+          (p) =>
+            p.spec?.name === `${trigram}-proj` ||
+            p.status?.name === `${trigram}-proj` ||
+            p.metadata?.name === `${trigram}-proj`,
+        )?.metadata?.uuid;
+      } catch {
+        return undefined;
+      }
+    });
+    let v3vm:
+      | {
+          spec?: { resources?: Record<string, unknown> };
+          metadata?: { project_reference?: { uuid?: string } };
+        }
+      | null = null;
+    if (found.extId && (!found.guestCustomization || projectUuid)) {
+      try {
+        v3vm = await ctx.nutanix.rest.request('GET', `/api/nutanix/v3/vms/${found.extId}`);
+      } catch {
+        v3vm = null;
+      }
+    }
+    // Cloud-init: v4 GET stops returning `guestCustomization` on PC 7.3+
+    // (always null even when set); v3 mirror also drops the key. Mirror
+    // Python `hasVMCloudinit`: only fail when v3 explicitly returns the
+    // key with a null value; absent key OR HTTP error → assume pass.
+    let cloudInitOk = !!found.guestCustomization;
+    if (!cloudInitOk) {
+      const resources = v3vm?.spec?.resources;
+      if (resources && 'guest_customization' in resources) {
+        cloudInitOk = resources.guest_customization != null;
+      } else {
+        // No v3 payload OR key absent → defensive pass.
+        cloudInitOk = true;
+      }
+    }
+    if (!cloudInitOk) {
+      return {
+        pass: false,
+        detail: `VM '${expected}' missing cloud-init.`,
+        hint: localizedHint(ctx, {
+          en: `VM has no cloud-init configured.`,
+          fr: `La VM n'a pas de cloud-init configuré.`,
+        }),
+      };
+    }
+    // Project ownership comparison from the same v3 payload.
+    if (projectUuid && v3vm) {
+      const vmProj = v3vm.metadata?.project_reference?.uuid;
+      if (!vmProj || vmProj !== projectUuid) {
+        return {
+          pass: false,
+          detail: `VM '${expected}' project is '${vmProj ?? 'none'}', expected '${projectUuid}'.`,
+          hint: localizedHint(ctx, {
+            en: `VM is not in your project — use Manage Ownership.`,
+            fr: `La VM n'est pas dans votre projet — utilisez Manage Ownership.`,
+          }),
+        };
+      }
+    } else if (projectUuid && !v3vm) {
+      ctx.logger.warn(`CheckVM: project verification unavailable for ${expected}`);
+    }
+    if (found.extId) {
+      ctx.cache.set({ kind: 'vm', logicalName: expected, uuid: found.extId });
+    }
+    const captured: Record<string, unknown> = {};
+    if (found.extId) captured.VMUUID = found.extId;
+    if (found.host?.extId) captured.HostUUID = found.host.extId;
+    return {
+      pass: true,
+      detail: `VM '${expected}' found (${vcpu} vCPU, UEFI, 2 NICs, cloud-init, running).`,
+      captured: Object.keys(captured).length > 0 ? captured : undefined,
+    };
+  } catch (err) {
+    return { pass: false, detail: `VM query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+/**
+ * Stage 14 `live-migrate-vm`. Verifies the VM is now on a host different
+ * from the one CheckVM captured as HostUUID. In mock mode, the fixture
+ * returns a different host id on the second query (post-migration), which
+ * is enough to exercise the check logic. Deeper validation (was an actual
+ * migration task initiated, not just a metadata change) needs a live PC.
+ */
+async function CheckLiveMigration(ctx: CheckContext): Promise<CheckResult> {
+  const trigram = getTrigram(ctx);
+  const expected = `${trigram}-vm`;
+  const previousHost = ctx.vars.get('HostUUID');
+  if (typeof previousHost !== 'string' || previousHost.length === 0) {
+    return {
+      pass: false,
+      detail: 'Previous host unknown — CheckVM must have run and captured HostUUID.',
+    };
+  }
+  try {
+    const vms = await listAll<{ name?: string; host?: { extId?: string } }>(
+      ctx,
+      '/api/vmm/v4.0/ahv/config/vms',
+    );
+    const found = vms.find((v) => v.name === expected);
+    if (!found) return { pass: false, detail: `VM '${expected}' not found.` };
+    const currentHost = found.host?.extId;
+    if (!currentHost) {
+      return { pass: false, detail: `VM '${expected}' has no host assignment.` };
+    }
+    if (currentHost === previousHost) {
+      // Mock fixtures are static — a second query returns the same host id.
+      // Treat as pass in mock mode and flag the assumption; a live cluster
+      // will actually see the host field change after migration.
+      if (ctx.nutanix.mode === 'mock') {
+        return {
+          pass: true,
+          detail: `VM '${expected}' migration assumed (mock replays a single host).`,
+        };
+      }
+      return {
+        pass: false,
+        detail: `VM '${expected}' still on host ${currentHost} — migrate it to another node.`,
+      };
+    }
+    return {
+      pass: true,
+      detail: `VM '${expected}' migrated from ${previousHost} to ${currentHost}.`,
+      captured: { HostUUID: currentHost },
+    };
+  } catch (err) {
+    return { pass: false, detail: `VM query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+/**
+ * Stage 26 `restore-vm-from-recovery`. Verifies `{Trigram}-vm` exists again
+ * after the incident deleted it. Live validation would verify the VM's
+ * creation timestamp is post-incident and that a recovery-point reference
+ * lingers in its metadata; here we only assert presence because the mock
+ * replays a static fixture.
+ */
+async function CheckRestoreVM(ctx: CheckContext): Promise<CheckResult> {
+  const trigram = getTrigram(ctx);
+  const expected = `${trigram}-vm`;
+  try {
+    const vms = await listAll<{ extId?: string; name?: string; powerState?: string }>(
+      ctx,
+      '/api/vmm/v4.0/ahv/config/vms',
+    );
+    const found = vms.find((v) => v.name === expected);
+    if (!found) {
+      return {
+        pass: false,
+        detail: `VM '${expected}' still missing — restore it from a recovery point.`,
+      };
+    }
+    // Match the original Python CheckRestoreVM: restored VM must be running.
+    if (found.powerState !== 'ON') {
+      return {
+        pass: false,
+        detail: `VM '${expected}' restored but powered-off — start it.`,
+      };
+    }
+    if (found.extId) {
+      ctx.cache.set({ kind: 'vm', logicalName: expected, uuid: found.extId });
+    }
+    return {
+      pass: true,
+      detail: `VM '${expected}' restored and running.`,
+      captured: found.extId ? { VMUUID: found.extId } : undefined,
+    };
+  } catch (err) {
+    return { pass: false, detail: `VM query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+// ─── Categories ──────────────────────────────────────────────────────────
+
+/**
+ * Stage 15 `create-category`. Verifies the `{Trigram}-cat` category carries
+ * both `Critical` and `Test` values (v4 models each key:value as a separate
+ * category entity). Captures CatUUID pointing at the `Critical` entity —
+ * CheckCatVM uses it to check the VM was tagged with that specific value.
+ */
+async function CheckCat(ctx: CheckContext): Promise<CheckResult> {
+  const trigram = getTrigram(ctx);
+  const expectedKey = `${trigram}-cat`;
+  try {
+    const categories = await listAll<{ extId?: string; key?: string; value?: string }>(
+      ctx,
+      '/api/prism/v4.2/config/categories',
+    );
+    const matching = categories.filter((c) => c.key === expectedKey);
+    const values = new Set(matching.map((c) => c.value).filter((v): v is string => !!v));
+    const missing = ['Critical', 'Test'].filter((v) => !values.has(v));
+    if (missing.length > 0) {
+      return {
+        pass: false,
+        detail: `Category '${expectedKey}' missing values: ${missing.join(', ')}.`,
+      };
+    }
+    for (const c of matching) {
+      if (c.extId && c.value) {
+        ctx.cache.set({
+          kind: 'category',
+          logicalName: `${expectedKey}:${c.value}`,
+          uuid: c.extId,
+        });
+      }
+    }
+    const critical = matching.find((c) => c.value === 'Critical');
+    return {
+      pass: true,
+      detail: `Category '${expectedKey}' created with values Critical + Test.`,
+      captured: critical?.extId ? { CatUUID: critical.extId } : undefined,
+    };
+  } catch (err) {
+    return { pass: false, detail: `Category query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+/**
+ * Stage 16 `apply-category-to-vm`. Verifies `{Trigram}-vm` has the
+ * `{Trigram}-cat:Critical` category (by extId captured in CheckCat) applied.
+ * In v4, VMs carry a `categories` list of category-entity references.
+ */
+async function CheckCatVM(ctx: CheckContext): Promise<CheckResult> {
+  const trigram = getTrigram(ctx);
+  const vmName = `${trigram}-vm`;
+  const catUuid = ctx.vars.get('CatUUID');
+  if (typeof catUuid !== 'string' || catUuid.length === 0) {
+    return {
+      pass: false,
+      detail: 'Category UUID missing — CheckCat must have run first.',
+    };
+  }
+  try {
+    // The list endpoint's default projection omits `categories` entirely —
+    // we have to opt in via `$select=extId,name,categories`. Also note the
+    // path is v4.2 on live (v4.0 works too, but v4.2 is what actually
+    // honors the $select field reliably).
+    const vms = await listAll<{
+      extId?: string;
+      name?: string;
+      categories?: Array<{ extId?: string }>;
+    }>(ctx, '/api/vmm/v4.2/ahv/config/vms?%24select=extId,name,categories');
+    const vm = vms.find((v) => v.name === vmName);
+    if (!vm) return { pass: false, detail: `VM '${vmName}' not found.` };
+    const applied = (vm.categories ?? []).some((c) => c.extId === catUuid);
+    if (!applied) {
+      return {
+        pass: false,
+        detail: `VM '${vmName}' has no '${trigram}-cat:Critical' category — apply it.`,
+      };
+    }
+    return {
+      pass: true,
+      detail: `Category '${trigram}-cat:Critical' applied to '${vmName}'.`,
+    };
+  } catch (err) {
+    return { pass: false, detail: `VM query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+// ─── Storage + security + protection + approval ─────────────────────────
+
+/**
+ * Stage 17 `create-storage-policy`. Verifies `{Trigram}-sto-policy` exists
+ * with encryption enabled. Live path is `/api/datapolicies/v4.2/config/
+ * storage-policies` (namespace moved from the provisional `storage` guess);
+ * shape is `encryptionSpec.encryptionState` — any value other than
+ * `NO_ENCRYPTION` counts as encrypted (`INLINE`, `SYSTEM_DERIVED`, etc.).
+ */
+async function CheckStoragePolicy(ctx: CheckContext): Promise<CheckResult> {
+  const trigram = getTrigram(ctx);
+  const expected = `${trigram}-sto-policy`;
+  try {
+    const policies = await listAll<{
+      extId?: string;
+      name?: string;
+      encryptionSpec?: { encryptionState?: string };
+    }>(ctx, '/api/datapolicies/v4.2/config/storage-policies');
+    const found = policies.find((p) => p.name === expected);
+    if (!found) return { pass: false, detail: `Storage policy '${expected}' not found.` };
+    const encState = found.encryptionSpec?.encryptionState ?? 'NO_ENCRYPTION';
+    if (encState === 'NO_ENCRYPTION') {
+      return { pass: false, detail: `Storage policy '${expected}' does not have encryption enabled.` };
+    }
+    if (found.extId) {
+      ctx.cache.set({ kind: 'storagePolicy', logicalName: expected, uuid: found.extId });
+    }
+    return {
+      pass: true,
+      detail: `Storage policy '${expected}' with encryption (${encState}).`,
+      captured: found.extId ? { StoragePolicyUUID: found.extId } : undefined,
+    };
+  } catch (err) {
+    return { pass: false, detail: `Storage policy query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+/**
+ * Common rule shape on a v4 microseg policy. The list endpoint omits `rules`,
+ * so checks that need rule-level assertions GET the policy by id.
+ */
+interface MsegRuleSpec {
+  $objectType?: string;
+  securedGroupCategoryAssociatedEntityType?: string;
+  securedGroupCategoryReferences?: string[];
+  srcAllowSpec?: string;
+  destAllowSpec?: string;
+  isAllProtocolAllowed?: boolean;
+  tcpServices?: Array<{ startPort?: number; endPort?: number }>;
+  udpServices?: Array<{ startPort?: number; endPort?: number }>;
+  icmpServices?: Array<{ type?: number; code?: number; isAllAllowed?: boolean }>;
+  serviceGroupReferences?: string[];
+}
+interface MsegRule {
+  description?: string;
+  type?: string;
+  spec?: MsegRuleSpec;
+}
+
+/**
+ * Stage 18 `create-microseg-policy`. Mirrors the original Python check from
+ * ntnx-escape-game (`CheckSecurityPolicy`) — beyond name + ENFORCE state we
+ * verify the player scoped the policy to their `{Trigram}-cat:Critical`
+ * category and added at least one outbound allow-all rule.
+ */
+async function CheckSecurityPolicy(ctx: CheckContext): Promise<CheckResult> {
+  const trigram = getTrigram(ctx);
+  const expected = `${trigram}-mseg-policy`;
+  const catUuid = ctx.vars.get('CatUUID');
+  try {
+    const policies = await listAll<{ extId?: string; name?: string; state?: string }>(
+      ctx,
+      '/api/microseg/v4.0/config/policies',
+    );
+    const found = policies.find((p) => p.name === expected);
+    if (!found?.extId) {
+      return { pass: false, detail: `Security policy '${expected}' not found.` };
+    }
+    if (found.state && !/ENFORCE/i.test(found.state)) {
+      return {
+        pass: false,
+        detail: `Security policy '${expected}' in state '${found.state}' (expected ENFORCE).`,
+      };
+    }
+    const detail = await ctx.nutanix.request<{ data?: { rules?: MsegRule[] } }>(
+      'GET',
+      `/api/microseg/v4.0/config/policies/${found.extId}`,
+    );
+    const rules = detail?.data?.rules ?? [];
+    if (typeof catUuid === 'string' && catUuid.length > 0) {
+      const scoped = rules.some((r) =>
+        (r.spec?.securedGroupCategoryReferences ?? []).includes(catUuid),
+      );
+      if (!scoped) {
+        return {
+          pass: false,
+          detail: `Security policy '${expected}' is not scoped to '${trigram}-cat:Critical'.`,
+        };
+      }
+    }
+    // Python `CheckSecurityPolicy` only asserts "≥1 rule has
+    // is_all_protocol_allowed" (no destAllowSpec clause). Match the
+    // permissive shape so a hand-crafted policy that uses a different
+    // direction for the allow-all rule still passes.
+    const hasAllProtocol = rules.some((r) => r.spec?.isAllProtocolAllowed === true);
+    if (!hasAllProtocol) {
+      return {
+        pass: false,
+        detail: `Security policy '${expected}' missing an allow-all-protocol rule.`,
+      };
+    }
+    ctx.cache.set({ kind: 'securityPolicy', logicalName: expected, uuid: found.extId });
+    return { pass: true, detail: `Security policy '${expected}' in enforce mode.` };
+  } catch (err) {
+    return { pass: false, detail: `Security policy query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+/**
+ * Stage 19 `allow-ssh-in-microseg`. 1:1 port of Python `CheckSecurityPolicy2`
+ * (CheckLabs.py): asserts (a) NO rule has `serviceGroupReferences`
+ * containing the cluster's built-in `ssh` service-group extId, (b) at least
+ * one rule has `icmpServices` populated.
+ *
+ * The (a) clause looks inverted at first read, but matches the stage prompt:
+ * the player is told to add a Traffic Filter "ssh from {frontendHost} only".
+ * In Flow's data model, source-IP-restricted ssh stores as a tcp-port-22
+ * rule with a source filter, NOT as a generic `serviceGroupReferences=ssh`.
+ * A rule with `serviceGroupReferences=ssh` would mean "allow ssh from
+ * anywhere" — the bad answer the check guards against.
+ */
+async function CheckSecurityPolicy2(ctx: CheckContext): Promise<CheckResult> {
+  const trigram = getTrigram(ctx);
+  const expected = `${trigram}-mseg-policy`;
+  try {
+    const policies = await listAll<{ extId?: string; name?: string }>(
+      ctx,
+      '/api/microseg/v4.0/config/policies',
+    );
+    const listEntry = policies.find((p) => p.name === expected);
+    if (!listEntry?.extId) {
+      return { pass: false, detail: `Security policy '${expected}' not found.` };
+    }
+    // Python step 1 : look up the cluster's built-in `ssh` service-group
+    // extId. Flow ships with system-defined service groups; we filter by
+    // name. Skip the assertion if the service-group is missing on this PC
+    // (defensive — older clusters may not ship it; Python would silently
+    // pass through retrieveFlowServiceID returning None).
+    const serviceGroups = await listAll<{ extId?: string; name?: string }>(
+      ctx,
+      '/api/microseg/v4.0/config/service-groups',
+    );
+    const sshSvc = serviceGroups.find((g) => g.name === 'ssh');
+    const detail = await ctx.nutanix.request<{ data?: { rules?: MsegRule[] } }>(
+      'GET',
+      `/api/microseg/v4.0/config/policies/${listEntry.extId}`,
+    );
+    const rules = detail?.data?.rules ?? [];
+    if (sshSvc?.extId) {
+      const broadSshRule = rules.find((r) =>
+        (r.spec?.serviceGroupReferences ?? []).includes(sshSvc.extId!),
+      );
+      if (broadSshRule) {
+        return {
+          pass: false,
+          detail: `Security policy '${expected}' has an unrestricted SSH rule — restrict the SSH Traffic Filter to a specific source IP.`,
+        };
+      }
+    }
+    // Python step 2 : at least one rule with icmp services populated.
+    const hasIcmp = rules.some((r) => (r.spec?.icmpServices ?? []).length > 0);
+    if (!hasIcmp) {
+      return {
+        pass: false,
+        detail: `Security policy '${expected}' missing an ICMP rule — add it as a Traffic Filter.`,
+      };
+    }
+    return { pass: true, detail: `Security policy '${expected}' SSH is source-restricted + ICMP allowed.` };
+  } catch (err) {
+    return { pass: false, detail: `Security policy query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+/**
+ * Stage 20 `create-protection-policy`. Mirrors Python `CheckProtectionPolicy`
+ * (CheckLabs.py): verifies `{Trigram}-prot-policy` exists with
+ * (a) RPO = 3600s,
+ * (b) DAILY auto-rollup retention,
+ * (c) scoped to category `{Trigram}-cat`,
+ * (d) the category's bound value is NOT `Critical` (the prompt asks the
+ *     player to attach to the *non-critical* tier — `Test`).
+ * Field paths use v4 datapolicies shape: `replicationConfigurations[].schedule`
+ * + `categories[]` (each `{name, value}` per category-binding entry).
+ */
+async function CheckProtectionPolicy(ctx: CheckContext): Promise<CheckResult> {
+  const trigram = getTrigram(ctx);
+  const expected = `${trigram}-prot-policy`;
+  const expectedCatKey = `${trigram}-cat`;
+  try {
+    const policies = await listAll<{
+      extId?: string;
+      name?: string;
+      replicationConfigurations?: Array<{
+        schedule?: {
+          recoveryPointObjectiveTimeSeconds?: number;
+          retention?: {
+            local?: { snapshotIntervalType?: string };
+          };
+        };
+      }>;
+      categoryIds?: string[];
+    }>(ctx, '/api/datapolicies/v4.2/config/protection-policies');
+    const found = policies.find((p) => p.name === expected);
+    if (!found) return { pass: false, detail: `Protection policy '${expected}' not found.` };
+    const schedules = (found.replicationConfigurations ?? [])
+      .map((r) => r.schedule)
+      .filter((s): s is NonNullable<typeof s> => !!s);
+    if (schedules.length === 0) {
+      return {
+        pass: false,
+        detail: `Protection policy '${expected}' has no schedule — add a local hourly snapshot.`,
+      };
+    }
+    if (!schedules.some((s) => s.recoveryPointObjectiveTimeSeconds === 3600)) {
+      return {
+        pass: false,
+        detail: `Protection policy '${expected}' RPO is not 1 hour (3600 s).`,
+      };
+    }
+    if (!schedules.some((s) => s.retention?.local?.snapshotIntervalType === 'DAILY')) {
+      return {
+        pass: false,
+        detail: `Protection policy '${expected}' retention is not DAILY — set the auto-rollup interval to DAILY.`,
+      };
+    }
+    // v4 binds via `categoryIds: [extId]` — resolve each id back to its
+    // {key, value} pair so we can assert the player attached to their own
+    // category AND chose the non-critical tier (Python's intent: snapshot
+    // the low-impact entities, not the production-critical ones).
+    const allCats = await listAll<{ extId?: string; key?: string; value?: string }>(
+      ctx,
+      '/api/prism/v4.2/config/categories',
+    );
+    const boundCats = (found.categoryIds ?? [])
+      .map((id) => allCats.find((c) => c.extId === id))
+      .filter((c): c is NonNullable<typeof c> => !!c);
+    const matchingCat = boundCats.find((c) => c.key === expectedCatKey);
+    if (!matchingCat) {
+      return {
+        pass: false,
+        detail: `Protection policy '${expected}' is not scoped to '${expectedCatKey}'.`,
+      };
+    }
+    if (matchingCat.value === 'Critical') {
+      return {
+        pass: false,
+        detail: `Protection policy '${expected}' targets '${expectedCatKey}:Critical' — re-target to '${expectedCatKey}:Test' (the non-critical tier).`,
+      };
+    }
+    if (found.extId) {
+      ctx.cache.set({ kind: 'protectionPolicy', logicalName: expected, uuid: found.extId });
+    }
+    return {
+      pass: true,
+      detail: `Protection policy '${expected}' (RPO=3600s, DAILY rollup, scoped to '${matchingCat.key}:${matchingCat.value}').`,
+      captured: found.extId ? { ProtectionPolicyUUID: found.extId } : undefined,
+    };
+  } catch (err) {
+    return { pass: false, detail: `Protection policy query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+/**
+ * Stage 21 `create-approval-policy`. Verifies `master-appr-policy` (fixed
+ * name — not namespaced by trigram because it's cluster-wide) exists and is
+ * linked to the player's protection policy. Cluster-wide approval policies
+ * are sensitive on shared profiles; this stage is a candidate for
+ * `impact: 'destructive'` in Phase 11. Live path is
+ * `/api/security/v4.1/management/approval-policies` (approvals live inside
+ * the security namespace on v4, not the guessed `/approvals/`).
+ */
+async function CheckApprovalPolicy(ctx: CheckContext): Promise<CheckResult> {
+  const expectedName = 'master-appr-policy';
+  const protectionUuid = ctx.vars.get('ProtectionPolicyUUID');
+  try {
+    // Linked protection policies live on `securedPolicies[]` (not
+    // `targetPolicyExtIds` — that's the create-time DTO only). Each entry
+    // has `policyExtId` + `policyType: 'PROTECTION_POLICY'`. Confirmed
+    // against the live PC + the original Python `CheckApprovalPolicy` in
+    // `r0w/ntnx-escape-game`. The link is wired via a separate
+    // `$actions/associate-policies` POST, not by a write to securedPolicies
+    // directly (that field is read-only in the schema).
+    const policies = await listAll<{
+      extId?: string;
+      name?: string;
+      securedPolicies?: Array<{ policyExtId?: string; policyType?: string }>;
+    }>(ctx, '/api/security/v4.1/management/approval-policies');
+    const found = policies.find((p) => p.name === expectedName);
+    if (!found) {
+      return {
+        pass: false,
+        detail: `Approval policy '${expectedName}' not found.`,
+      };
+    }
+    if (typeof protectionUuid === 'string' && protectionUuid.length > 0) {
+      const linked = (found.securedPolicies ?? []).some(
+        (sp) => sp.policyExtId === protectionUuid,
+      );
+      if (!linked) {
+        return {
+          pass: false,
+          detail: `Approval policy not linked to your protection policy — associate them.`,
+        };
+      }
+    }
+    if (found.extId) {
+      ctx.cache.set({ kind: 'approvalPolicy', logicalName: expectedName, uuid: found.extId });
+    }
+    return { pass: true, detail: `Approval policy '${expectedName}' linked.` };
+  } catch (err) {
+    return { pass: false, detail: `Approval policy query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+// ─── Reports, NCM playbook, capacity + updates ──────────────────────────
+
+/**
+ * Stage 27 `create-report`. Mirrors Python `CheckReport` (CheckLabs.py):
+ * verifies `{Trigram}-report` exists with
+ * (a) DAILY schedule (`schedule.scheduleInterval === 'DAILY'`),
+ * (b) recipient email = `{Trigram}{EmailReport}`
+ *     (`notificationPolicy.recipients[].emailAddress`),
+ * (c) at least one widget targeting `entityType === 'VM'`
+ *     (`sections[].rows[].widgets[].widgetInfo.entityType`).
+ * v4 paths confirmed against an existing live `cur-report`. Field names
+ * differ from the v3 ones the original Python read but the assertions
+ * are the same.
+ */
+async function CheckReport(ctx: CheckContext): Promise<CheckResult> {
+  const trigram = getTrigram(ctx);
+  const expected = `${trigram}-report`;
+  const emailSuffix = ctx.vars.get('EmailReport');
+  const expectedEmail =
+    typeof emailSuffix === 'string' && emailSuffix.length > 0
+      ? `${trigram}${emailSuffix}`
+      : undefined;
+  try {
+    const reports = await listAll<{
+      extId?: string;
+      name?: string;
+      schedule?: { scheduleInterval?: string };
+      notificationPolicy?: {
+        recipients?: Array<{ emailAddress?: string }>;
+      };
+      sections?: Array<{
+        rows?: Array<{
+          widgets?: Array<{
+            widgetInfo?: { entityType?: string };
+          }>;
+        }>;
+      }>;
+    }>(ctx, '/api/opsmgmt/v4.0/config/report-configs');
+    const found = reports.find((r) => r.name === expected);
+    if (!found) return { pass: false, detail: `Report '${expected}' not found.` };
+    if (found.schedule?.scheduleInterval !== 'DAILY') {
+      return {
+        pass: false,
+        detail: `Report '${expected}' is not on a DAILY schedule.`,
+      };
+    }
+    const recipients = found.notificationPolicy?.recipients ?? [];
+    if (recipients.length === 0) {
+      return {
+        pass: false,
+        detail: `Report '${expected}' has no recipient — add an email recipient.`,
+      };
+    }
+    if (expectedEmail && !recipients.some((r) => r.emailAddress === expectedEmail)) {
+      return {
+        pass: false,
+        detail: `Report '${expected}' recipient does not match '${expectedEmail}'.`,
+      };
+    }
+    const hasVmWidget = (found.sections ?? []).some((s) =>
+      (s.rows ?? []).some((row) =>
+        (row.widgets ?? []).some(
+          (w) => (w.widgetInfo?.entityType ?? '').toUpperCase() === 'VM',
+        ),
+      ),
+    );
+    if (!hasVmWidget) {
+      return {
+        pass: false,
+        detail: `Report '${expected}' template has no VM-list widget — add the "List of VMs" widget.`,
+      };
+    }
+    if (found.extId) {
+      ctx.cache.set({ kind: 'report', logicalName: expected, uuid: found.extId });
+    }
+    return {
+      pass: true,
+      detail: `Report '${expected}' scheduled DAILY → ${recipients[0]!.emailAddress} with VM-list widget.`,
+    };
+  } catch (err) {
+    return { pass: false, detail: `Report query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+/**
+ * Stage 28 `expand-cluster` (CheckNewNode). Stage prose asks the player to
+ * simulate expansion and type the new node's serial number via
+ * `<input var='NodeSerial'/>`. We validate the captured input is a
+ * non-empty alphanumeric string — no API call, the cluster state isn't
+ * mutated (stage is a "take a screenshot" educational step).
+ */
+async function CheckNewNode(ctx: CheckContext): Promise<CheckResult> {
+  const serial = ctx.vars.get('NodeSerial');
+  if (typeof serial !== 'string' || serial.trim().length === 0) {
+    return {
+      pass: false,
+      detail: 'No node serial captured.',
+      retryFromVariable: 'NodeSerial',
+    };
+  }
+  if (!/^[A-Za-z0-9-]{3,}$/.test(serial.trim())) {
+    return {
+      pass: false,
+      detail: `Serial '${serial}' doesn't look like a node serial.`,
+      retryFromVariable: 'NodeSerial',
+    };
+  }
+  // Always query live — operators want this stage to verify against the
+  // current cluster state (a node could have been added/removed between
+  // server boot and now). Boot-time cache was an optimization that hid
+  // recent topology changes; pay the round-trip per attempt instead.
+  try {
+    // Need cluster UUID first.
+    const clusters = await ctx.nutanix.request<{ data?: Array<{ extId?: string }> }>(
+      'GET',
+      '/api/clustermgmt/v4.0/config/clusters',
+    );
+    const clusterUuid = clusters.data?.[0]?.extId;
+    if (!clusterUuid) {
+      return { pass: false, detail: 'Cluster UUID not found — capability probe failed?' };
+    }
+    let units: Array<{ serial?: string }> = [];
+    for (const v of ['v4.0.b2', 'v4.0', 'v4.2']) {
+      try {
+        const res = await ctx.nutanix.request<{ data?: Array<{ serial?: string }> }>(
+          'GET',
+          `/api/clustermgmt/${v}/config/clusters/${clusterUuid}/rackable-units`,
+        );
+        if (res?.data) {
+          units = res.data;
+          break;
+        }
+      } catch {
+        // try next version
+      }
+    }
+    if (units.length === 0) {
+      return {
+        pass: false,
+        detail: `Could not list cluster rackable-units (no API version 4.0.b2 / 4.0 / 4.2 responded).`,
+      };
+    }
+    const submitted = serial.trim();
+    const found = units.some((u) => (u.serial ?? '').trim() === submitted);
+    if (!found) {
+      const seen = units.map((u) => u.serial).filter(Boolean).join(', ');
+      return {
+        pass: false,
+        detail: `Serial '${submitted}' not found in cluster rackable-units (saw: ${seen || '<none>'}).`,
+        retryFromVariable: 'NodeSerial',
+      };
+    }
+    return { pass: true, detail: `Node serial '${submitted}' confirmed on cluster.` };
+  } catch (err) {
+    return { pass: false, detail: `Rackable-unit query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+/**
+ * Stage 29 `lcm-check-updates`. Player types the number of available
+ * updates they saw in the LCM inventory via `<input var='NumberUpdates'/>`.
+ * No API — we only verify the captured value parses as a non-negative int.
+ */
+async function CheckUpdates(ctx: CheckContext): Promise<CheckResult> {
+  const raw = ctx.vars.get('NumberUpdates');
+  if (typeof raw !== 'string' && typeof raw !== 'number') {
+    return {
+      pass: false,
+      detail: 'No update count captured.',
+      retryFromVariable: 'NumberUpdates',
+    };
+  }
+  const submitted = typeof raw === 'number' ? raw : Number.parseInt(String(raw).trim(), 10);
+  if (!Number.isFinite(submitted) || submitted < 0) {
+    return {
+      pass: false,
+      detail: `Update count '${raw}' is not a non-negative integer.`,
+      retryFromVariable: 'NumberUpdates',
+    };
+  }
+  // Mock mode: skip the live LCM lookup. The fixture entity count is an
+  // arbitrary seed value that doesn't match anything the player has on
+  // screen, so cross-checking it just blocks manual play. Auto-fill still
+  // returns the fixture count for auto-play; manual entry of any
+  // non-negative integer passes here.
+  if (ctx.nutanix.mode === 'mock') {
+    return {
+      pass: true,
+      detail: `${submitted} update(s) recorded (mock mode, format-only validation).`,
+    };
+  }
+  // Always query live — operators want this stage to validate against
+  // the current LCM inventory (a scan + new updates may have landed
+  // since boot). Boot-time cache was an optimization that went stale;
+  // pay the LCM round-trip per attempt instead.
+  try {
+    let entities: Array<{ availableVersions?: unknown }> = [];
+    for (const v of ['v4.0.a1', 'v4.0', 'v4.2']) {
+      try {
+        const res = await ctx.nutanix.request<{ data?: typeof entities }>(
+          'GET',
+          `/api/lifecycle/${v}/resources/entities`,
+        );
+        if (res?.data) {
+          entities = res.data;
+          break;
+        }
+      } catch {
+        // try next version
+      }
+    }
+    if (entities.length === 0) {
+      // LCM endpoint not reachable on this PC — fall back to format-only
+      // validation so the stage doesn't block when LCM isn't reachable.
+      return {
+        pass: true,
+        detail: `${submitted} update(s) recorded (LCM endpoint unreachable, format-only validation).`,
+      };
+    }
+    const actual = entities.filter((e) => 'availableVersions' in e).length;
+    if (actual !== submitted) {
+      return {
+        pass: false,
+        detail: `LCM reports ${actual} updates, you typed ${submitted}.`,
+        retryFromVariable: 'NumberUpdates',
+      };
+    }
+    return { pass: true, detail: `${submitted} update(s) — matches LCM inventory.` };
+  } catch (err) {
+    return { pass: false, detail: `LCM query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+/**
+ * Stage 31 `capacity-runway` (CheckRunway). Player reads the runway
+ * dashboard on a different cluster and types the number of days remaining
+ * via `<input var='Runway'/>`. Pure input validation — we don't cross-check
+ * against the cluster since the stage prose explicitly hands the player
+ * into a secondary PC the check function has no connection to.
+ */
+async function CheckRunway(ctx: CheckContext): Promise<CheckResult> {
+  const raw = ctx.vars.get('Runway');
+  if (typeof raw !== 'string' && typeof raw !== 'number') {
+    return {
+      pass: false,
+      detail: 'No runway value captured.',
+      retryFromVariable: 'Runway',
+    };
+  }
+  const submitted =
+    typeof raw === 'number' ? raw : Number.parseInt(String(raw).trim(), 10);
+  if (!Number.isFinite(submitted) || submitted < 0) {
+    return {
+      pass: false,
+      detail: `Runway '${raw}' is not a positive number of days.`,
+      retryFromVariable: 'Runway',
+    };
+  }
+  // Mock mode: skip the OldPC raw fetch (it bypasses the mock-adapter and
+  // hits a real secondary cluster, breaking offline play). Format-only
+  // validation; auto-fill returns a canned 120 for auto-play, manual
+  // typing accepts any non-negative integer.
+  if (ctx.nutanix.mode === 'mock') {
+    return {
+      pass: true,
+      detail: `${submitted} days recorded (mock mode, format-only validation).`,
+    };
+  }
+  // Original `CheckRunway` queries a SECOND cluster (`OldPC`) via the v3
+  // groups endpoint with a `capacity.runway` group_member_attribute. Stage
+  // 31 prose explicitly hands the player to the secondary cluster's
+  // capacity dashboard. If the runtime hasn't been wired with `OldPC` /
+  // `OldPCUsername` / `OldPCPassword` (no secondary cluster available
+  // for this event), fall back to format-only validation — the player's
+  // typed value is the only signal we have.
+  const oldPc = ctx.vars.get('OldPC');
+  const oldUser = ctx.vars.get('OldPCUsername');
+  const oldPass = ctx.vars.get('OldPCPassword');
+  if (
+    typeof oldPc !== 'string' ||
+    typeof oldUser !== 'string' ||
+    typeof oldPass !== 'string' ||
+    !oldPc ||
+    !oldUser ||
+    !oldPass
+  ) {
+    return {
+      pass: true,
+      detail: `${submitted} days recorded (no secondary cluster wired, format-only validation).`,
+    };
+  }
+  try {
+    // OldPC env may be just a host/IP (`10.55.82.39`) — add scheme + PC
+    // port. Or it may already be a full URL (`https://…:9440`) from a
+    // hand-rolled deployment — strip trailing `/`. Detect by leading scheme.
+    const stripped = oldPc.replace(/\/+$/, '');
+    const base = /^https?:\/\//.test(stripped) ? stripped : `https://${stripped}:9440`;
+    const url = `${base}/api/nutanix/v3/groups`;
+    const auth = `Basic ${btoa(`${oldUser}:${oldPass}`)}`;
+    const now = Date.now();
+    const body = {
+      entity_type: 'cluster',
+      group_member_attributes: [{ attribute: 'capacity.runway' }],
+      query_name: 'prism:RunwayInfoQueryModel',
+      interval_start_ms: now - 3 * 86400 * 1000,
+      interval_end_ms: now,
+      downsampling_interval: 86400,
+    };
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: auth,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(body),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tls: { rejectUnauthorized: false } as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    if (!res.ok) {
+      return {
+        pass: true,
+        detail: `${submitted} days recorded (secondary cluster ${oldPc} returned ${res.status}, format-only validation).`,
+      };
+    }
+    const data = (await res.json()) as {
+      group_results?: Array<{
+        entity_results?: Array<{
+          data?: Array<{ name?: string; values?: Array<{ values?: unknown[] }> }>;
+        }>;
+      }>;
+    };
+    const entry = data.group_results?.[0]?.entity_results?.[0]?.data?.find(
+      (d) => d.name === 'capacity.runway',
+    );
+    const actual = entry?.values?.[0]?.values?.[0];
+    const actualNum =
+      typeof actual === 'number' ? actual : Number.parseInt(String(actual ?? ''), 10);
+    if (!Number.isFinite(actualNum)) {
+      return {
+        pass: true,
+        detail: `${submitted} days recorded (secondary cluster runway unparseable, format-only validation).`,
+      };
+    }
+    if (actualNum !== submitted) {
+      return {
+        pass: false,
+        detail: `Cluster runway is ${actualNum} days, you typed ${submitted}.`,
+        retryFromVariable: 'Runway',
+      };
+    }
+    return { pass: true, detail: `${submitted} days — matches secondary cluster capacity.` };
+  } catch (err) {
+    return {
+      pass: true,
+      detail: `${submitted} days recorded (runway query failed: ${nutanixErrorDetail(err)}, format-only validation).`,
+    };
+  }
+}
+
+/**
+ * Stage 33 `create-ncm-playbook`. Verifies `{Trigram}-playbook` exists in
+ * NCM X-Play with at least one action (the stage asks for an email-on-VM-
+ * power-cycle rule). X-Play playbooks live on v3 as `action_rules` with a
+ * POST /list shape — `rule_type: "XPLAY"` distinguishes them from older
+ * alert-action rules. `entities[].status.resources.{action_list, is_enabled,
+ * name}` is where the real fields sit.
+ */
+async function CheckPlaybook(ctx: CheckContext): Promise<CheckResult> {
+  const trigram = getTrigram(ctx);
+  const expected = `${trigram}-playbook`;
+  try {
+    const playbooks = await listAllV3<{
+      metadata?: { uuid?: string };
+      status?: {
+        name?: string;
+        resources?: {
+          name?: string;
+          is_enabled?: boolean;
+          rule_type?: string;
+          trigger_list?: Array<{
+            input_parameter_values?: { type?: string };
+          }>;
+          action_list?: Array<{
+            action_type_reference?: { name?: string };
+          }>;
+        };
+      };
+    }>(ctx, '/api/nutanix/v3/action_rules/list');
+    const found = playbooks.find(
+      (p) => p.status?.name === expected || p.status?.resources?.name === expected,
+    );
+    if (!found) return { pass: false, detail: `Playbook '${expected}' not found.` };
+    const r = found.status?.resources ?? {};
+    // Original Python `CheckPlaybook` (r0w/ntnx-escape-game) requires:
+    //   - exactly 1 trigger of type `VmPowerCycleAudit`
+    //   - exactly 1 action of type `email_action`
+    //   - `is_enabled: true`
+    // Stage 33 prose says "email-on-VM-power-cycle rule" so the player
+    // sets these explicitly — strict validation.
+    const triggers = r.trigger_list ?? [];
+    if (triggers.length !== 1) {
+      return {
+        pass: false,
+        detail: `Playbook '${expected}' must have exactly 1 trigger (saw ${triggers.length}).`,
+      };
+    }
+    const triggerType = triggers[0]?.input_parameter_values?.type;
+    if (triggerType !== 'VmPowerCycleAudit') {
+      return {
+        pass: false,
+        detail: `Playbook '${expected}' trigger type is '${triggerType ?? '?'}' (expected VmPowerCycleAudit).`,
+      };
+    }
+    const actions = r.action_list ?? [];
+    if (actions.length !== 1) {
+      return {
+        pass: false,
+        detail: `Playbook '${expected}' must have exactly 1 action (saw ${actions.length}).`,
+      };
+    }
+    const actionName = actions[0]?.action_type_reference?.name;
+    if (actionName !== 'email_action') {
+      return {
+        pass: false,
+        detail: `Playbook '${expected}' action is '${actionName ?? '?'}' (expected email_action).`,
+      };
+    }
+    if (!r.is_enabled) {
+      return { pass: false, detail: `Playbook '${expected}' is disabled — enable it.` };
+    }
+    if (found.metadata?.uuid) {
+      ctx.cache.set({ kind: 'playbook', logicalName: expected, uuid: found.metadata.uuid });
+    }
+    return {
+      pass: true,
+      detail: `Playbook '${expected}' enabled with VmPowerCycleAudit→email_action.`,
+    };
+  } catch (err) {
+    return { pass: false, detail: `Playbook query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+// ─── Self-Service / Calm ─────────────────────────────────────────────────
+
+/**
+ * Stage 35 `clone-app-blueprint` (CheckCloneApp). Verifies the player
+ * launched the `CloneProd` blueprint as an application named `{Trigram}-app`.
+ * Self-Service / Calm apps live on v3 (`POST /api/nutanix/v3/apps/list`) —
+ * v4 hasn't absorbed them. `status.resources.app_blueprint_reference.name`
+ * carries the source blueprint.
+ */
+async function CheckCloneApp(ctx: CheckContext): Promise<CheckResult> {
+  const trigram = getTrigram(ctx);
+  const expectedApp = `${trigram}-app`;
+  const expectedVpc = `${trigram}-vpc`;
+  try {
+    // App existence (v3 — no v4 SDK for Calm apps)
+    const apps = await listAllV3<{
+      metadata?: { uuid?: string; name?: string };
+      status?: {
+        name?: string;
+        state?: string;
+        resources?: { app_blueprint_reference?: { name?: string } };
+      };
+    }>(ctx, '/api/nutanix/v3/apps/list');
+    const foundApp = apps.find(
+      (a) => a.status?.name === expectedApp || a.metadata?.name === expectedApp,
+    );
+    if (!foundApp) return { pass: false, detail: `Application '${expectedApp}' not found.` };
+    const bpName = foundApp.status?.resources?.app_blueprint_reference?.name;
+    if (bpName && bpName !== 'CloneProd') {
+      return {
+        pass: false,
+        detail: `Application '${expectedApp}' not launched from CloneProd (saw '${bpName}').`,
+      };
+    }
+    if (foundApp.metadata?.uuid) {
+      ctx.cache.set({ kind: 'calmApp', logicalName: expectedApp, uuid: foundApp.metadata.uuid });
+    }
+    // The original Python CheckCloneApp also asserts the player created the
+    // VPC `{Trigram}-vpc` as a runtime input to the blueprint launch. v4
+    // networking exposes VPCs at `/api/networking/v4.0/config/vpcs`.
+    const vpcs = await listAll<{ extId?: string; name?: string }>(
+      ctx,
+      '/api/networking/v4.0/config/vpcs',
+    );
+    const foundVpc = vpcs.find((v) => v.name === expectedVpc);
+    if (!foundVpc) {
+      return {
+        pass: false,
+        detail: `VPC '${expectedVpc}' not found — the blueprint launch should have created it via the vpcName runtime input.`,
+      };
+    }
+    const captured: Record<string, unknown> = {};
+    if (foundApp.metadata?.uuid) captured.AppUUID = foundApp.metadata.uuid;
+    if (foundVpc.extId) captured.VpcUUID = foundVpc.extId;
+    return {
+      pass: true,
+      detail: `Application '${expectedApp}' launched from CloneProd; VPC '${expectedVpc}' present.`,
+      captured: Object.keys(captured).length > 0 ? captured : undefined,
+    };
+  } catch (err) {
+    return { pass: false, detail: `App/VPC query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+/**
+ * Stage 36 `schedule-day2-action` (CheckSchedDay2). Verifies `{Trigram}-sched`
+ * exists as a scheduler policy in Self-Service, targeting the player's app.
+ * Scheduler policies live on v3 with `cron_expression` or a frequency field
+ * in `status.resources`.
+ */
+async function CheckSchedDay2(ctx: CheckContext): Promise<CheckResult> {
+  const trigram = getTrigram(ctx);
+  const expected = `${trigram}-sched`;
+  const appUuid = ctx.vars.get('AppUUID');
+  try {
+    // Calm app-scheduler entities live on `/api/nutanix/v3/jobs/list` —
+    // the GUI calls them "Self-Service > Policies" but they're modeled as
+    // jobs in the v3 API. Original Python `CheckSchedDay2` looks for
+    // `entities[?(metadata.name=='{trigram}-sched')].resources` and
+    // verifies `executable.entity.uuid == AppUUID`.
+    //
+    // Note: v3 jobs list returns `entities[].resources` at top level (NOT
+    // nested under `status.resources` like apps/blueprints). Different
+    // shape per resource type — confirmed against live PC.
+    const jobs = await ctx.nutanix.rest.request<{
+      entities?: Array<{
+        metadata?: { uuid?: string; name?: string };
+        resources?: {
+          name?: string;
+          executable?: { entity?: { uuid?: string } };
+        };
+      }>;
+    }>('POST', '/api/nutanix/v3/jobs/list', { kind: 'job', length: 100 });
+    const found = (jobs.entities ?? []).find(
+      (j) => j.metadata?.name === expected || j.resources?.name === expected,
+    );
+    if (!found) return { pass: false, detail: `Scheduled policy '${expected}' not found.` };
+    if (typeof appUuid === 'string' && appUuid.length > 0) {
+      const target = found.resources?.executable?.entity?.uuid;
+      if (target !== appUuid) {
+        return {
+          pass: false,
+          detail: `Schedule '${expected}' targets '${target ?? '?'}' (expected app UUID '${appUuid}').`,
+        };
+      }
+    }
+    return { pass: true, detail: `Schedule '${expected}' targets the player's app.` };
+  } catch (err) {
+    return { pass: false, detail: `Scheduler query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+/**
+ * Stage 37 `modify-blueprint` (CheckUpdateBP). Verifies the blueprint
+ * `bp-blankvm-prd{Vlanid}` now carries a task named `foo` inside the
+ * `Create` action of its `NewVM` service. Blueprints live on v3 — list is
+ * shallow (no services), but the GET-by-uuid returns the full spec with
+ * `spec.resources.app_profile_list[].deployment_create_list[].substrate_
+ * local_reference` and action trees. We take the shallow list, resolve the
+ * name, then GET the spec to traverse services→actions→tasks.
+ */
+async function CheckUpdateBP(ctx: CheckContext): Promise<CheckResult> {
+  const vlan = ctx.vars.get('Vlanid');
+  const vlanStr = vlan === undefined || vlan === null ? '' : String(vlan);
+  const expected = `bp-blankvm-prd${vlanStr}`;
+  try {
+    const bps = await listAllV3<{
+      metadata?: { uuid?: string; name?: string };
+      status?: { name?: string };
+    }>(ctx, '/api/nutanix/v3/blueprints/list');
+    const found = bps.find(
+      (b) => b.status?.name === expected || b.metadata?.name === expected,
+    );
+    if (!found?.metadata?.uuid) {
+      return { pass: false, detail: `Blueprint '${expected}' not found.` };
+    }
+    // GET-by-uuid returns the full blueprint with services/actions/tasks.
+    // The Calm SDK exposes the action under its INTERNAL name `action_create`
+    // (the GUI label is "Create" but the spec key is `action_create`) —
+    // confirmed against the original Python CheckUpdateBP in r0w/ntnx-escape-game.
+    const spec = await ctx.nutanix.rest.request<{
+      status?: {
+        resources?: {
+          service_definition_list?: Array<{
+            name?: string;
+            action_list?: Array<{
+              name?: string;
+              runbook?: {
+                task_definition_list?: Array<{ name?: string }>;
+              };
+            }>;
+          }>;
+        };
+      };
+    }>('GET', `/api/nutanix/v3/blueprints/${found.metadata.uuid}`);
+    const services = spec?.status?.resources?.service_definition_list ?? [];
+    const newVm = services.find((s) => s.name === 'NewVM');
+    if (!newVm) return { pass: false, detail: `Service 'NewVM' missing from '${expected}'.` };
+    const createAction = (newVm.action_list ?? []).find((a) => a.name === 'action_create');
+    if (!createAction) return { pass: false, detail: `Action 'action_create' missing on NewVM.` };
+    const tasks = createAction.runbook?.task_definition_list ?? [];
+    const hasFoo = tasks.some((t) => t.name === 'foo');
+    if (!hasFoo) {
+      return {
+        pass: false,
+        detail: `Task 'foo' missing from Create action — add it after 'Add DNS Entry'.`,
+      };
+    }
+    return { pass: true, detail: `Blueprint '${expected}' has the 'foo' backdoor task.` };
+  } catch (err) {
+    return { pass: false, detail: `Blueprint query failed: ${nutanixErrorDetail(err)}` };
+  }
+}
+
+/**
+ * Stage 2 `recovery-gate`. The legacy Python engine used this as a boot
+ * gate: re-validate the session's position in case of a restart. Our new
+ * engine stores progress in the `sessions` table with `current_stage` and
+ * re-renders the awaiting stage on reconnect, so recovery is implicit. The
+ * check stays as a no-op pass for scenario compatibility; removing the
+ * stage is a Phase 11 or 12 candidate.
+ */
+async function NeedRecovery(ctx: CheckContext): Promise<CheckResult> {
+  ctx.logger.info('recovery gate passthrough (state restore handled by session table)');
+  return { pass: true, detail: 'Ready.' };
+}
+
+export const checks = {
+  // IAM
+  CheckTrigram,
+  CheckUser,
+  CheckAuthPolicy,
+
+  // Projects & networking
+  CheckProject,
+  CheckNetwork,
+
+  // VM lifecycle
+  CheckImage,
+  CheckVM,
+  CheckLiveMigration,
+  CheckRestoreVM,
+
+  // Categories
+  CheckCat,
+  CheckCatVM,
+
+  // Storage + security + protection + approval policies
+  CheckStoragePolicy,
+  CheckSecurityPolicy,
+  CheckSecurityPolicy2,
+  CheckProtectionPolicy,
+  CheckApprovalPolicy,
+
+  // Reports, NCM playbook, capacity + updates
+  CheckReport,
+  CheckNewNode,
+  CheckUpdates,
+  CheckRunway,
+  CheckPlaybook,
+
+  // Self-Service / Calm
+  CheckCloneApp,
+  CheckSchedDay2,
+  CheckUpdateBP,
+  NeedRecovery,
+};

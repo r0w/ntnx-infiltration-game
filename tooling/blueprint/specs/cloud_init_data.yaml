@@ -1,0 +1,28 @@
+#cloud-config
+# v4 cloud-init: creates `nutanix` user + bootstraps the Calm
+# `python_remote` venv at /home/nutanix/.calm/venv/. Calm SSHes in as
+# the cred user (`nutanix`) for both readiness probe AND the CloneProd
+# day-2 task "Clone the Environment", which runs as
+# /home/<cred_user>/.calm/venv/bin/python <script>. Calm does NOT
+# auto-install this venv — without it the task fails with
+# `bash: /home/nutanix/.calm/venv/bin/python: No such file or directory`
+# (live-confirmed 2026-05-03).
+#
+# The runcmd below mirrors what the legacy game's host setup did, just
+# inlined into cloud-init so it lands before the install runbook fires.
+timezone: @@{TIMEZONE}@@
+users:
+  - name: nutanix
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: sudo
+    shell: /bin/bash
+    lock_passwd: false
+    plain_text_passwd: @@{NUTANIX.secret}@@
+chpasswd: { expire: false }
+ssh_pwauth: true
+package_update: true
+packages:
+  - python3-venv
+  - python3-pip
+runcmd:
+  - sudo -iu nutanix bash -c 'mkdir -p ~/.calm && python3 -m venv ~/.calm/venv && ~/.calm/venv/bin/pip install --quiet --upgrade pip && ~/.calm/venv/bin/pip install --quiet ntnx-networking-py-client ntnx-vmm-py-client ntnx-prism-py-client jsonpath-ng requests'

@@ -1,0 +1,1 @@
+../../blueprint/scripts/setup_production_project.py

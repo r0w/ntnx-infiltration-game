@@ -1,0 +1,17 @@
+#cloud-config
+users:
+  - name: nutanix
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: sudo
+    shell: /bin/bash
+    lock_passwd: false
+    plain_text_passwd: nutanix/4u
+    ssh_authorized_keys: []
+chpasswd:
+  expire: false
+ssh_pwauth: true
+package_update: true
+packages:
+  - git
+  - curl
+  - unzip

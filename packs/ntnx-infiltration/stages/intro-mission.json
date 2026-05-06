@@ -1,0 +1,15 @@
+{
+  "name": "intro-mission",
+  "active": true,
+  "prompt": "ego",
+  "defaultColor": "magenta",
+  "messages": [
+    "stage-004.line-01",
+    "stage-004.line-02",
+    "stage-004.line-03"
+  ],
+  "saveScore": false,
+  "needs": [
+    "Username"
+  ]
+}

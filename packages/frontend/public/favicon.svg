@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>ntnx infiltration game</title>
+  <g stroke="#7cdcfe" stroke-width="3" stroke-linecap="round" fill="none">
+    <line x1="7"  y1="7"  x2="25" y2="25" />
+    <line x1="12" y1="7"  x2="25" y2="20" />
+    <line x1="7"  y1="12" x2="20" y2="25" />
+    <line x1="25" y1="7"  x2="7"  y2="25" />
+    <line x1="20" y1="7"  x2="7"  y2="20" />
+    <line x1="25" y1="12" x2="12" y2="25" />
+  </g>
+</svg>

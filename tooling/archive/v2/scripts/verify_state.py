@@ -1,0 +1,1 @@
+../../blueprint/scripts/verify_state.py

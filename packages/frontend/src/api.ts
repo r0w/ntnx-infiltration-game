@@ -1,0 +1,373 @@
+import type {
+  CreateSessionRequest,
+  CreateSessionResponse,
+  DisabledStage,
+  MessageUnit,
+  SubmitInputRequest,
+} from '@ntnx-game/shared';
+
+export type { DisabledStage };
+
+export interface AdvanceResponse {
+  kind: 'units' | 'awaiting-input' | 'finished' | 'switch-session' | 'gated';
+  /** Canonical stage name — present on units/awaiting-input/gated(stage). */
+  stageName?: string;
+  units: MessageUnit[];
+  awaitingVariable?: string;
+  /** Set when `kind === 'switch-session'` — swap localStorage to this id. */
+  switchSessionId?: string;
+  /** Discriminator on gated: 'stage' (per-stage gate) | 'global' (lunch lock). */
+  gatedReason?: 'stage' | 'global';
+  actions: string[];
+  check?: { pass: boolean; detail?: string; hint?: string; cheer?: string };
+  disabledStages: DisabledStage[];
+  typingSpeedMs?: number;
+  rejected?: { expected: string; got: string; message?: string };
+}
+
+export interface SessionSnapshot {
+  sessionId: string;
+  trigram: string;
+  /** Canonical stage name of the last passed stage; `null` = pre-game. */
+  currentStage: string | null;
+  clusterProfile: 'hpoc' | 'other';
+  capabilities: string[];
+  awaiting: { variable: string; stageName: string; renderOffset: number } | null;
+  locale: string;
+  finishedAt: number | null;
+  replay?: MessageUnit[] | null;
+}
+
+const BASE = '/api';
+
+async function post<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
+  });
+  return handle<T>(res);
+}
+
+async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, { signal });
+  return handle<T>(res);
+}
+
+async function adminGet<T>(path: string, password: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { 'X-Admin-Password': password },
+  });
+  return handle<T>(res);
+}
+
+async function adminDel<T>(path: string, password: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'DELETE',
+    headers: { 'X-Admin-Password': password },
+  });
+  return handle<T>(res);
+}
+
+async function adminPost<T>(path: string, password: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return handle<T>(res);
+}
+
+/**
+ * Thrown by `handle()` on non-2xx. Carries the parsed JSON body so
+ * callers can read structured fields the backend included alongside
+ * `error` (e.g. act-current's `transportError` / `transportCode` for
+ * VPN diagnostics in the auto-play banner). `body` is null when the
+ * response wasn't JSON.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly body: Record<string, unknown> | null;
+  constructor(status: number, body: Record<string, unknown> | null, detail: string) {
+    super(`${status} ${detail}`);
+    this.name = 'ApiError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
+async function handle<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    let detail = res.statusText;
+    let body: Record<string, unknown> | null = null;
+    try {
+      body = (await res.json()) as Record<string, unknown>;
+      if (typeof body.error === 'string') detail = body.error;
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, body, detail);
+  }
+  return (await res.json()) as T;
+}
+
+export interface PackInfo {
+  id: string;
+  name: string;
+  /**
+   * Operator-facing server mode. `mock` = fixtures, `test` = real PC + dev
+   * tools, `live` = real PC + production demo (dev tools + auto-play
+   * hidden). Drives DevPanel + AutoPlayToggle visibility in GameApp.
+   */
+  mode: 'mock' | 'test' | 'live';
+  /** Server's runtime clusterProfile — `'other'` means the engine
+   *  filters destructive stages, `'hpoc'` means they play normally.
+   *  DevPanel uses this to dim destructive stage chips only when
+   *  they would actually be skipped. */
+  clusterProfile: 'hpoc' | 'other';
+  defaultLocale: string;
+  supportedLocales: string[];
+  stages: Array<{
+    name: string;
+    active: boolean;
+    impact: 'safe' | 'destructive';
+    requires: string[];
+    hasCheck: boolean;
+    captures: string[];
+  }>;
+}
+
+export interface ScoreboardEntry {
+  rank: number;
+  sessionId: string;
+  trigram: string | null;
+  username: string | null;
+  stageName: string | null;
+  stagesPassed: number;
+  /** Stages the engine gated for this session (e.g. destructive on `other`).
+   *  Subtracted from `totalStages` when computing the percent display. */
+  stagesDisabled: number;
+  totalStages: number;
+  startedAt: number;
+  finishedAt: number | null;
+  lastActivityAt: number | null;
+  status: 'playing' | 'finished';
+}
+
+export interface ScoreboardPayload {
+  packId: string;
+  packName: string;
+  mode: 'mock' | 'live';
+  totalStages: number;
+  entries: ScoreboardEntry[];
+}
+
+export interface AdminUserEntry {
+  sessionId: string;
+  trigram: string | null;
+  username: string | null;
+  pin: string | null;
+  /** Name of the last completed stage; null = pre-game. */
+  currentStage: string | null;
+  /** Name of the stage the player is ABOUT to play. null when finished. */
+  nextStageName: string | null;
+  stagesPassed: number;
+  totalStages: number;
+  startedAt: number;
+  finishedAt: number | null;
+  lastActivityAt: number | null;
+  locale: string;
+}
+
+export interface AdminUsersPayload {
+  packId: string;
+  packName: string;
+  totalStages: number;
+  entries: AdminUserEntry[];
+}
+
+export interface AdminGateEntry {
+  stageName: string;
+  unlocked: boolean;
+  arrivedCount: number;
+  totalActive: number;
+  arrivedTrigrams: string[];
+  unlockedAt: number | null;
+}
+
+export interface AdminGatesPayload {
+  entries: AdminGateEntry[];
+}
+
+export interface AdminPackStageEntry {
+  stageName: string;
+  active: boolean;
+  adminGate: boolean;
+  /** Pack-declared `impact` ('safe' default, 'destructive' filtered on
+   *  shared clusters when `clusterProfile === 'other'`). */
+  impact: 'safe' | 'destructive';
+  activeOverridden: boolean;
+  adminGateOverridden: boolean;
+  needs: string[];
+  captures: string[];
+  brokenMissingVars: string[];
+}
+
+export interface AdminPackPayload {
+  packId: string;
+  packName: string;
+  stages: AdminPackStageEntry[];
+  brokenCount: number;
+  /** Server's runtime clusterProfile. */
+  clusterProfile: 'hpoc' | 'other';
+  /** Server's transport mode. `mock` means destructive gate is bypassed. */
+  mode: 'mock' | 'live';
+}
+
+export interface AdminPackTogglePreview {
+  requested: string;
+  cascade: Array<{ stageName: string; missingVars: string[] }>;
+}
+
+export interface AdminLunchStatus {
+  paused: boolean;
+  pausedAt: number | null;
+  affectedCount: number;
+}
+
+export const api = {
+  createSession: (req: CreateSessionRequest) =>
+    post<CreateSessionResponse>('/session', req),
+  getSession: (id: string) => get<SessionSnapshot>(`/session/${id}`),
+  advance: (id: string) => post<AdvanceResponse>(`/session/${id}/advance`),
+  submitInput: (id: string, req: SubmitInputRequest) =>
+    post<AdvanceResponse>(`/session/${id}/input`, req),
+  skipTo: (id: string, stageName: string) =>
+    post<{ skipped: string[]; finalStage: string | null }>(
+      `/session/${id}/skip-to/${encodeURIComponent(stageName)}`,
+    ),
+  gotoStage: (id: string, stageName: string) =>
+    post<{ currentStage: string | null }>(
+      `/session/${id}/goto/${encodeURIComponent(stageName)}`,
+    ),
+  switchIdentity: (id: string) =>
+    post<{ currentStage: string | null }>(`/session/${id}/switch-identity`),
+  fireAction: (id: string, name: string) =>
+    post<{ fired: string }>(`/session/${id}/action/${name}`),
+  listActions: (id: string) => get<{ names: string[] }>(`/session/${id}/actions`),
+  /**
+   * Auto-play helper: fires the registered **act** handler for whatever stage
+   * the session is currently awaiting on. Server-side gated to `test` mode
+   * (403 in `mock`/`live`). See routes/stage.ts:act-current.
+   */
+  actCurrent: (id: string) =>
+    post<{
+      ok: boolean;
+      stageName: string;
+      durationMs: number;
+      error?: string;
+      /** True when the act failed at the network layer (PC unreachable). */
+      transportError?: boolean;
+      /** Lowest syscall code (`ENETUNREACH` / `ENOTFOUND` / …) when known. */
+      transportCode?: string;
+    }>(`/session/${id}/act-current`),
+  /** Live cluster lookup for the awaiting named-var prompt (NodeSerial /
+   *  NumberUpdates / Runway). 404 when the variable isn't auto-fillable
+   *  (player must type manually). */
+  autoFillCurrent: (id: string) =>
+    post<{ ok: boolean; variable: string; value?: string; error?: string }>(
+      `/session/${id}/auto-fill-current`,
+    ),
+  pack: () => get<PackInfo>('/pack'),
+  scoreboard: () => get<ScoreboardPayload>('/scoreboard'),
+  sshPing: (target: string, signal?: AbortSignal) =>
+    post<{
+      ok: boolean;
+      target: string;
+      exitCode: number | null;
+      output: string[];
+      durationMs: number;
+      error?: string;
+    }>('/ssh/ping', { target }, signal),
+  sshTcp: (target: string, port = 22, signal?: AbortSignal) =>
+    post<{
+      ok: boolean;
+      target: string;
+      port: number;
+      ip?: string;
+      durationMs: number;
+      error?: string;
+    }>('/ssh/tcp', { target, port }, signal),
+  adminLogin: (password: string) =>
+    post<{ ok: true }>('/admin/login', { password }),
+  adminUsers: (password: string) =>
+    adminGet<AdminUsersPayload>('/admin/users', password),
+  adminDelete: (password: string, sessionId: string) =>
+    adminDel<{ ok: true; sessionId: string }>(`/admin/users/${sessionId}`, password),
+  adminGates: (password: string) =>
+    adminGet<AdminGatesPayload>('/admin/gates', password),
+  adminUnlockGate: (password: string, stageName: string) =>
+    adminPost<{ ok: true; stageName: string; unlocked: boolean }>(
+      `/admin/gates/${encodeURIComponent(stageName)}/unlock`,
+      password,
+    ),
+  adminLockGate: (password: string, stageName: string) =>
+    adminPost<{ ok: true; stageName: string; unlocked: boolean }>(
+      `/admin/gates/${encodeURIComponent(stageName)}/lock`,
+      password,
+    ),
+  adminPack: (password: string) => adminGet<AdminPackPayload>('/admin/pack', password),
+  adminPackToggle: (
+    password: string,
+    stageName: string,
+    field: 'active' | 'adminGate',
+    value: boolean | null,
+  ) =>
+    adminPost<{ ok: true; stageName: string; field: string; value: boolean | null }>(
+      `/admin/pack/stages/${encodeURIComponent(stageName)}/toggle?field=${field}`,
+      password,
+      { value },
+    ),
+  adminPackPreviewDisable: (password: string, stageName: string) =>
+    adminGet<AdminPackTogglePreview>(
+      `/admin/pack/preview-disable/${encodeURIComponent(stageName)}`,
+      password,
+    ),
+  adminLunchStatus: (password: string) =>
+    adminGet<AdminLunchStatus>('/admin/lunch', password),
+  adminLunchLock: (password: string) =>
+    adminPost<{ ok: true; paused: true }>('/admin/lunch/lock', password),
+  adminLunchUnlock: (password: string) =>
+    adminPost<{ ok: true; paused: false }>('/admin/lunch/unlock', password),
+  adminCleanupAll: (password: string, trigram: string) =>
+    adminPost<{
+      ok: true;
+      trigram: string;
+      cleanedStages: number;
+      failures: number;
+      results: Array<{ stage: string; ok: boolean; error?: string; durationMs: number }>;
+    }>(`/seed/cleanup-all/${encodeURIComponent(trigram)}`, password),
+  adminClusterConfig: (password: string) =>
+    adminGet<AdminClusterConfigPayload>('/admin/cluster-config', password),
+  adminClusterConfigSave: (
+    password: string,
+    body: { rackableUnitSerials?: string[]; lcmAvailableUpdates?: number | null },
+  ) =>
+    fetch('/api/admin/cluster-config', {
+      method: 'PUT',
+      headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((res) => handle<AdminClusterConfigPayload>(res)),
+  adminClusterConfigRefresh: (password: string) =>
+    adminPost<AdminClusterConfigPayload>('/admin/cluster-config/refresh', password),
+};
+
+export interface AdminClusterConfigPayload {
+  rackableUnitSerials: string[];
+  lcmAvailableUpdates: number | null;
+  meta: {
+    rackableUnitSerials?: { source: 'probe' | 'admin'; updatedAt: number };
+    lcmAvailableUpdates?: { source: 'probe' | 'admin'; updatedAt: number };
+  };
+}

@@ -1,0 +1,20 @@
+{
+  "name": "expand-cluster",
+  "active": true,
+  "prompt": "ego",
+  "defaultColor": "magenta",
+  "messages": [
+    "stage-028.line-01",
+    "stage-028.line-02",
+    "stage-028.line-03",
+    "stage-028.line-04"
+  ],
+  "saveScore": false,
+  "impact": "destructive",
+  "check": {
+    "fn": "CheckNewNode"
+  },
+  "captures": [
+    "NodeSerial"
+  ]
+}

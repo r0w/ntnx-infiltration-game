@@ -1,0 +1,21 @@
+{
+  "name": "apply-category-to-vm",
+  "active": true,
+  "prompt": "ego",
+  "defaultColor": "magenta",
+  "messages": [
+    "stage-016.line-01",
+    "stage-016.line-02",
+    "stage-016.line-03",
+    "stage-016.line-04"
+  ],
+  "saveScore": false,
+  "waitForInputValue": "Ok",
+  "check": {
+    "fn": "CheckCatVM"
+  },
+  "needs": [
+    "CatUUID",
+    "Trigram"
+  ]
+}

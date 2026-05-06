@@ -1,0 +1,32 @@
+{
+  "name": "create-vm",
+  "active": true,
+  "prompt": "ego",
+  "defaultColor": "magenta",
+  "messages": [
+    "stage-012.line-01",
+    "stage-012.line-02",
+    "stage-012.line-03",
+    "stage-012.line-04",
+    "stage-012.line-05",
+    "stage-012.line-06",
+    "stage-012.line-07",
+    "stage-012.line-08",
+    "stage-012.line-09",
+    "stage-012.line-10",
+    "stage-012.line-11",
+    "stage-012.line-12"
+  ],
+  "saveScore": false,
+  "waitForInputValue": "Ok",
+  "check": {
+    "fn": "CheckVM"
+  },
+  "captures": [
+    "HostUUID",
+    "VMUUID"
+  ],
+  "needs": [
+    "Trigram"
+  ]
+}

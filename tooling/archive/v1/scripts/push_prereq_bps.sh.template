@@ -1,0 +1,86 @@
+#!/bin/bash
+set -euo pipefail
+
+# Push CloneProd + BlankVM-source prereq blueprints to Calm.
+#
+# Calm's `import_file` API only accepts a JSON BP body (not a raw .tgz),
+# so the legacy approach was: extract the .tgz, sed-substitute placeholders
+# in the calm-dsl Python source, then run `calm create bp -f blueprint.py`
+# from a calm-dsl Docker container. We do the same here.
+#
+# The .tgz blobs are base64-inlined at build time by build_blueprint.py
+# (replaces the two placeholders below).
+#
+# Idempotent — both `calm create bp` calls use --force so re-runs
+# overwrite stale copies.
+
+PC_IP="@@{PC_IP}@@"
+PC_USER="@@{PC_USERNAME}@@"
+PC_PWD="@@{PC_PASSWORD}@@"
+CLUSTER_NAME="@@{CLUSTERNAME}@@"
+
+CALM_DSL_IMAGE="${CALM_DSL_IMAGE:-ntnx/calm-dsl:latest}"
+WORKDIR="$HOME/calm-dsl-staging"
+DSLDIR="$WORKDIR/.calm"
+
+mkdir -p "$WORKDIR"
+cd "$WORKDIR"
+
+# 1. Decode the base64-inlined .tgz blobs
+echo "[push_prereq_bps] decoding inlined .tgz blobs..."
+echo "__CLONEPROD_TGZ_B64__" | base64 -d > CloneProd.tgz
+echo "__BLANKVM_TGZ_B64__" | base64 -d > NewblankVM.tgz
+
+# 2. Extract + sed-substitute placeholders (legacy convention: {X} → @@{X}@@
+#    for runtime resolution by Calm, plus {PROJECT} → "production" literal
+#    for calm-dsl compile-time resolution)
+echo "[push_prereq_bps] extracting + patching..."
+rm -rf CloneProd NewblankVM
+tar xzf CloneProd.tgz
+tar xzf NewblankVM.tgz
+
+sed -i 's/{PC_IP}/@@{PC_IP}@@/g'         CloneProd/blueprint.py
+sed -i 's/{PC_USER}/@@{PC_USERNAME}@@/g' CloneProd/blueprint.py
+sed -i 's/{PC_PWD}/@@{PC_PASSWORD}@@/g'  CloneProd/blueprint.py
+sed -i 's/{PROJECT}/production/g'         CloneProd/blueprint.py
+
+sed -i "s/{CLUSTER_NAME}/$CLUSTER_NAME/g" NewblankVM/blueprint.py
+sed -i 's/{PROJECT}/production/g'         NewblankVM/blueprint.py
+
+# 3. Pull the calm-dsl Docker image (need docker — installed by upstream
+#    Install Docker task)
+echo "[push_prereq_bps] pulling calm-dsl image $CALM_DSL_IMAGE ..."
+sudo docker pull "$CALM_DSL_IMAGE"
+
+# 4. Initialize calm-dsl with PC creds in our staging .calm dir
+mkdir -p "$DSLDIR"
+echo "[push_prereq_bps] initializing calm-dsl config..."
+sudo docker run --rm \
+    -v "$DSLDIR:/root/.calm" \
+    "$CALM_DSL_IMAGE" \
+    calm init dsl -i "$PC_IP" -P 9440 -u "$PC_USER" -p "$PC_PWD" -pj production
+
+# 5. Refresh the cache so Ref.Project("production") resolves
+echo "[push_prereq_bps] updating calm-dsl cache..."
+sudo docker run --rm \
+    -v "$DSLDIR:/root/.calm" \
+    "$CALM_DSL_IMAGE" \
+    calm update cache
+
+# 6. Create both BPs
+push_bp() {
+    local bp_dir="$1"
+    local bp_name="$2"
+    echo "[push_prereq_bps] creating BP '$bp_name' from $bp_dir/blueprint.py ..."
+    sudo docker run --rm \
+        -v "$DSLDIR:/root/.calm" \
+        -v "$WORKDIR:/work" \
+        -w "/work" \
+        "$CALM_DSL_IMAGE" \
+        calm create bp --file "$bp_dir/blueprint.py" --name "$bp_name" --force
+}
+
+push_bp CloneProd CloneProd
+push_bp NewblankVM BlankVM-source
+
+echo "[push_prereq_bps] both prereq BPs uploaded."

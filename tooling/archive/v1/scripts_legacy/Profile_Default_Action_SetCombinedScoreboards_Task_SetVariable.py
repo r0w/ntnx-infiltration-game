@@ -1,0 +1,3 @@
+#script
+
+print("COMBINEDSCOREBOARDS=@@{SCOREBOARDSIPS}@@")

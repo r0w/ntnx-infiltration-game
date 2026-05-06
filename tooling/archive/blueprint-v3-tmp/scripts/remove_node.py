@@ -1,0 +1,1 @@
+../../blueprint/scripts/remove_node.py

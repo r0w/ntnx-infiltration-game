@@ -1,0 +1,17 @@
+{
+  "name": "test-ncm-playbook",
+  "active": true,
+  "prompt": "ego",
+  "defaultColor": "magenta",
+  "messages": [
+    "stage-034.line-01",
+    "stage-034.line-02",
+    "stage-034.line-03",
+    "stage-034.line-04"
+  ],
+  "saveScore": false,
+  "waitForInputValue": "Ok",
+  "needs": [
+    "Trigram"
+  ]
+}

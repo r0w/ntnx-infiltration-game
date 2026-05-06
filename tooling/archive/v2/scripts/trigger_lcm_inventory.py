@@ -1,0 +1,1 @@
+../../blueprint/scripts/trigger_lcm_inventory.py

@@ -1,0 +1,17 @@
+services:
+  infiltration:
+    build: .
+    image: ntnx-infiltration-game:latest
+    ports:
+      - "3000:3000"
+    environment:
+      GAME_PACK: ${GAME_PACK:-ntnx-infiltration}
+      MODE: ${MODE:-mock}
+      PC_ENDPOINT: ${PC_ENDPOINT}
+      PC_USER: ${PC_USER}
+      PC_PASSWORD: ${PC_PASSWORD}
+      CLUSTER_PROFILE: ${CLUSTER_PROFILE:-other}
+      TYPING_SPEED_MS: ${TYPING_SPEED_MS:-15}
+    volumes:
+      - ./data:/data
+    restart: unless-stopped

@@ -1,0 +1,33 @@
+{
+  "name": "clone-app-blueprint",
+  "active": true,
+  "prompt": "ego",
+  "defaultColor": "magenta",
+  "messages": [
+    "stage-035.line-01",
+    "stage-035.line-02",
+    "stage-035.line-03",
+    "stage-035.line-04",
+    "stage-035.line-05",
+    "stage-035.line-06",
+    "stage-035.line-07",
+    "stage-035.line-08",
+    "stage-035.line-09",
+    "stage-035.line-10",
+    "stage-035.line-11",
+    "stage-035.line-12",
+    "stage-035.line-13",
+    "stage-035.line-14",
+    "stage-035.line-15",
+    "stage-035.line-16",
+    "stage-035.line-17"
+  ],
+  "saveScore": false,
+  "waitForInputValue": "Ok",
+  "check": {
+    "fn": "CheckCloneApp"
+  },
+  "needs": [
+    "Trigram"
+  ]
+}

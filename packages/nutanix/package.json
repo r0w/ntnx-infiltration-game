@@ -1,0 +1,26 @@
+{
+  "name": "@ntnx-game/nutanix",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ntnx-game/engine": "workspace:*",
+    "@nutanix-api/iam-js-client": "^4.1.2-beta.2",
+    "@nutanix-api/vmm-js-client": "^4.2.2",
+    "@nutanix-api/prism-js-client": "^4.3.1",
+    "@nutanix-api/networking-js-client": "^4.3.1",
+    "@nutanix-api/microseg-js-client": "^4.2.2",
+    "@nutanix-api/datapolicies-js-client": "^4.2.2",
+    "@nutanix-api/security-js-client": "^4.1.2",
+    "@nutanix-api/opsmgmt-js-client": "^4.0.4",
+    "@nutanix-api/clustermgmt-js-client": "^4.2.2",
+    "@nutanix-api/lifecycle-js-client": "^4.2.2"
+  }
+}
