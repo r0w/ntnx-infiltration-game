@@ -1353,6 +1353,24 @@ a.terminal-link:visited {
   margin-top: 6px;
 }
 .admin-cluster-saved { font-size: 12px; }
+.admin-cluster-iops {
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.admin-cluster-iops-link {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.admin-cluster-iops-link:hover { filter: brightness(1.2); }
+.admin-cluster-iops-refresh {
+  margin-left: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.admin-cluster-iops-err { font-size: 12px; margin-top: 2px; }
 .admin-table {
   width: 100%;
   border-collapse: collapse;
