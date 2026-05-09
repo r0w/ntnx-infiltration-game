@@ -310,7 +310,7 @@ jobs:
           #                                        vars, launch. Auto-uploads
           #                                        CloneProd + BlankVM-source
           #                                        (bundled inline as base64
-          #                                        in upload_prereq_bps.py)
+          #                                        in push_prereq_bps.sh)
           #                                        + creates production VMs +
           #                                        users + AD endpoint users +
           #                                        starts the container.
