@@ -20,8 +20,10 @@ blueprint internals, see [`tooling/blueprint/README.md`](./tooling/blueprint/REA
    + 7 prod VMs + 12 prereq blueprints + game container).
 5. Share the game URL (printed in the app description) with players.
 
-Total operator time: **~5 minutes of clicks**, then ~25 min of
-unattended install runbook.
+Total operator time: **~5 minutes of clicks**, then 30-40 min of
+unattended install runbook (the cluster shrink is the long pole; see
+[Step 4](#step-4---upload--activate--launch-the-blueprint) for the
+per-branch breakdown).
 
 ## Cluster prerequisites
 
@@ -118,29 +120,34 @@ In Prism Central:
 The substrate section asks for the cluster + first NIC subnet (any
 real ones on your HPoC). Submit.
 
-5. Wait for the install runbook (~10 min on a healthy HPoC, gated on
-   the longest of 5 parallel branches). Two sequential prereqs first,
-   then 5 branches run in parallel:
+5. Wait for the install runbook (~30-40 min worst case, gated on the
+   `Ensure host 4 removed` task in the cluster branch — the destructive
+   shrink is the long pole; the script polls up to 40 min for the host
+   to drain + leave the metadata cluster). Two sequential prereqs
+   first, then 5 branches run in parallel:
 
    1. `Activate policy engine` (kicks off async MSP boot, best-effort)
    2. `Get Cluster` (captures CLUSTERNAME / CLUSTERUUID)
 
-   - **Cluster branch** (~10 min, longest): `Ensure host 4 removed` →
-     `Wait for cluster health` → `Setup subnets` →
-     `Setup production project` → `Create Prod VMs` →
-     `Setup jumphost endpoint` → `Verify final state`.
+   - **Cluster branch** (~16-40 min, **longest** — gates the install):
+     `Ensure host 4 removed` → `Wait for cluster health` →
+     `Setup subnets` → `Setup production project` → `Create Prod VMs`
+     → `Setup jumphost endpoint` → `Verify final state`. The
+     node-remove dominates: ~16 min observed on NX-3060, 40 min cap
+     in the script's polling loop.
    - **Local IAM branch** (~30 s): `Create Local users`.
    - **AD branch** (~30 s): `Add AD users`.
    - **LCM branch** (~5 s API call): `Trigger LCM inventory`.
-   - **Container + prereqs branch** (~7 min): `Install Docker` →
+   - **Container + prereqs branch** (~5-7 min): `Install Docker` →
      `Push prereq BPs` → `Clone fake BPs` → `Run game container`.
      Sequential because Push prereq BPs needs Docker, Clone fake BPs
      needs CloneProd uploaded, and Run game container is last so the
      game URL only exposes once everything's settled.
 
-   The cluster branch is the critical path; the other branches finish
-   before it. The game URL is available when the container branch
-   finishes (~7 min).
+   The other 4 branches finish well before the cluster branch — the
+   game URL is therefore available within the first ~5-7 min, but
+   stage 28 (the in-game expand-cluster check) won't render its
+   prerequisite spare-node until the cluster branch completes.
 
 When the app reaches **`running`** state, the description field shows
 the game URL: `http://<deployed-vm-ip>:3000/`.
