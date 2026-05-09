@@ -123,31 +123,40 @@ real ones on your HPoC). Submit.
 5. Wait for the install runbook (~30-40 min worst case, gated on the
    `Ensure host 4 removed` task in the cluster branch — the destructive
    shrink is the long pole; the script polls up to 40 min for the host
-   to drain + leave the metadata cluster). Two sequential prereqs
-   first, then 5 branches run in parallel:
+   to drain + leave the metadata cluster). One sequential prereq, then
+   5 branches in parallel. The deploy is "done" only when the cluster
+   has its final 3-node shape AND the game container is up — the game
+   URL never exposes prematurely.
 
-   1. `Activate policy engine` (kicks off async MSP boot, best-effort)
-   2. `Get Cluster` (captures CLUSTERNAME / CLUSTERUUID)
+   1. `Get Cluster` (sequential, ~5 s — captures CLUSTERNAME +
+      CLUSTERUUID; the cluster branch needs CLUSTERUUID to look up
+      hosts).
 
-   - **Cluster branch** (~16-40 min, **longest** — gates the install):
-     `Ensure host 4 removed` → `Wait for cluster health` →
-     `Setup subnets` → `Setup production project` → `Create Prod VMs`
-     → `Setup jumphost endpoint` → `Verify final state`. The
-     node-remove dominates: ~16 min observed on NX-3060, 40 min cap
-     in the script's polling loop.
+   - **Cluster + container branch** (~30-40 min, **longest** — gates
+     the deploy). Three logical phases, all sequential within the
+     branch: (a) **setup cluster** (`Ensure host 4 removed` →
+     `Wait for cluster health` → `Setup subnets` →
+     `Setup production project` → `Create Prod VMs` →
+     `Setup jumphost endpoint`); (b) **setup game prereqs**
+     (`Install Docker` → `Push prereq BPs` → `Clone fake BPs`);
+     (c) **verify + launch** (`Verify final state` →
+     `Run game container`). Verify sits right before `Run game
+     container` so the game never exposes on a broken cluster — a
+     verify failure hard-stops the deploy.
+   - **Policy branch** (~30 s up to ~10 min worst case): `Activate
+     policy engine`. Best-effort — runs in parallel with the cluster
+     branch so the policy MSP has the full ~30-40 min cluster-shrink
+     window to come up; by the time `Run game container` fires, stage
+     21 (in-game create-approval-policy) is playable.
    - **Local IAM branch** (~30 s): `Create Local users`.
    - **AD branch** (~30 s): `Add AD users`.
    - **LCM branch** (~5 s API call): `Trigger LCM inventory`.
-   - **Container + prereqs branch** (~5-7 min): `Install Docker` →
-     `Push prereq BPs` → `Clone fake BPs` → `Run game container`.
-     Sequential because Push prereq BPs needs Docker, Clone fake BPs
-     needs CloneProd uploaded, and Run game container is last so the
-     game URL only exposes once everything's settled.
 
-   The other 4 branches finish well before the cluster branch — the
-   game URL is therefore available within the first ~5-7 min, but
-   stage 28 (the in-game expand-cluster check) won't render its
-   prerequisite spare-node until the cluster branch completes.
+   The 4 short branches finish within the first ~30 s; the cluster
+   branch dominates wall-clock end-to-end. App state flips to
+   `running` (and the game URL appears in the description field) the
+   moment `Run game container` returns SUCCESS at the tail of the
+   cluster branch.
 
 When the app reaches **`running`** state, the description field shows
 the game URL: `http://<deployed-vm-ip>:3000/`.
