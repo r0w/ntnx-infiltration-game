@@ -12,6 +12,10 @@ export interface DevPanelProps {
    *  toggle so operators see at a glance whether the next prompt will
    *  auto-submit or wait for them. */
   autoPlay?: boolean;
+  /** True while the auto-play harness is making a request (autofill or
+   *  act). Surface it visibly so silent stages don't look like the UI
+   *  is wedged. */
+  autoPlayActing?: boolean;
   /**
    * Server mode (`mock` | `test`). Surfaced in the toggle label so the
    * operator knows at a glance which adapter the session is hitting —
@@ -30,6 +34,7 @@ export function DevPanel({
   awaitingVariable,
   busy,
   autoPlay,
+  autoPlayActing,
   mode,
   onGoto,
 }: DevPanelProps) {
@@ -118,8 +123,15 @@ export function DevPanel({
           {mode ?? 'dev'}
         </span>
         {autoPlay && (
-          <span className="devpanel-autoplay" title="Auto-play armed — next CONTINUE prompts will auto-submit">
-            AUTOPLAY
+          <span
+            className={`devpanel-autoplay ${autoPlayActing ? 'devpanel-autoplay-acting' : ''}`}
+            title={
+              autoPlayActing
+                ? 'Auto-play is making a request (autofill / act)'
+                : 'Auto-play armed — next CONTINUE prompts will auto-submit'
+            }
+          >
+            {autoPlayActing ? 'AUTOPLAY ⏳' : 'AUTOPLAY'}
           </span>
         )}
         {' · '}
