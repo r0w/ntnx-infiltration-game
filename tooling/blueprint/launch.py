@@ -73,7 +73,10 @@ SECRETS_AND_VARS = {
     "IMAGE_REPO": os.environ.get("IMAGE_REPO", "ghcr.io/r0w/ntnx-infiltration-game"),
     "GAME_VLAN_ID": os.environ.get("GAME_VLAN_ID", ""),
     "GAME_PROD_PASSWORD": os.environ.get("GAME_PROD_PASSWORD", "MyPassword4Prod!"),
-    "GAME_OLD_PC_PASSWORD": os.environ.get("GAME_OLD_PC_PASSWORD", ""),
+    # Default matches OPERATOR.md ("Planner PC password = ILike2Plan!"), so
+    # self-tests against the canonical legacy "OldPC" cluster (10.55.82.39)
+    # work without extra env. Override for events targeting another cluster.
+    "GAME_OLD_PC_PASSWORD": os.environ.get("GAME_OLD_PC_PASSWORD", "ILike2Plan!"),
     "GAME_EMAIL_REPORT": os.environ.get("GAME_EMAIL_REPORT", ""),
 }
 
