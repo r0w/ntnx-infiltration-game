@@ -28,19 +28,19 @@ if [[ ! -f "$HOME/.calm/dsl.db" ]]; then
   "$VENV/bin/python" "$SEED"
 fi
 
-# Generate scripts/upload_prereq_bps.py from the template + the
+# Generate scripts/push_prereq_bps.sh from the template + the
 # CloneProd.tgz / NewblankVM.tgz blobs (base64-inlined). The
-# `Upload prereq BPs` install task references this file. Output is
+# `Push prereq BPs` install task references this file. Output is
 # gitignored — regen each compile so blob updates propagate.
 SCRIPT_DIR="$SCRIPT_DIR" "$VENV/bin/python" -c "
 import base64, pathlib, os
 HERE = pathlib.Path(os.environ['SCRIPT_DIR'])
-template = (HERE / 'scripts' / 'upload_prereq_bps.py.template').read_text()
+template = (HERE / 'scripts' / 'push_prereq_bps.sh.template').read_text()
 cp = base64.b64encode((HERE / 'prereqs' / 'CloneProd.tgz').read_bytes()).decode('ascii')
 bv = base64.b64encode((HERE / 'prereqs' / 'NewblankVM.tgz').read_bytes()).decode('ascii')
 out = template.replace('__CLONEPROD_TGZ_B64__', cp).replace('__BLANKVM_TGZ_B64__', bv)
-(HERE / 'scripts' / 'upload_prereq_bps.py').write_text(out)
-print(f'  generated upload_prereq_bps.py ({len(out)} chars)')
+(HERE / 'scripts' / 'push_prereq_bps.sh').write_text(out)
+print(f'  generated push_prereq_bps.sh ({len(out)} chars)')
 "
 
 src="${1:-blueprint.py}"

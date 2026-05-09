@@ -318,51 +318,7 @@ class GameContent(Package):
                     inherit_target=False,
                 )
 
-            # Branch 4 — upload prereq BPs (CloneProd + BlankVM-source)
-            # then clone the 10 immersion BPs from CloneProd. Sequential
-            # within the branch because Clone fake BPs needs CloneProd
-            # to be uploaded first.
-            #
-            # Branch 4 has an *internal* dependency on Branch 1's
-            # ProjectUUID (Setup production project). Calm DSL 4.3.1
-            # can't express cross-branch waits in a single parallel
-            # block, so upload_prereq_bps.py polls for the project + the
-            # BP existence as part of its idempotent skip path: if
-            # CloneProd already exists (or can't be created because the
-            # project isn't ready yet), it warn-skips and the operator
-            # re-fires this branch as a day-2 action. In practice
-            # Branch 1 takes ~10 min (cluster_health) so the project is
-            # ready well before this branch starts heavy work.
-            #
-            # Why escript and not a Push BPs sh on the deployed VM:
-            # the .sh approach runs `calm init dsl` inside the
-            # ntnx/calm-dsl container, which probes
-            # `/api/calm/v3.0/features/approval_policy`. That endpoint
-            # is part of the policy engine MSP — which is still
-            # bootstrapping while this task fires. We've seen 30s
-            # timeouts there. The escript bypasses calm-dsl entirely:
-            # decodes b64-inlined .tgz blobs and POSTs them via a hand-
-            # crafted multipart body (sandbox-safe, no init flow).
-            with branch(p0):
-                CalmTask.Exec.escript.py3(
-                    name="Upload prereq BPs",
-                    filename=os.path.join("scripts", "upload_prereq_bps.py"),
-                    target=ref(Game),
-                )
-                # 10 fake-named BPs (ApacheServer / Wordpress /
-                # PrimaryAD / …) cloned from CloneProd via
-                # /api/nutanix/v3/blueprints/{uuid}/clone. Pure
-                # immersion — surfaces a realistic Self-Service catalog
-                # on PC for stage 35 narrative. Idempotent. Requires
-                # CloneProd to exist on PC (so runs after Upload
-                # prereq BPs).
-                CalmTask.Exec.escript.py3(
-                    name="Clone fake BPs",
-                    filename=os.path.join("scripts", "clone_fake_bps.py"),
-                    target=ref(Game),
-                )
-
-            # Branch 5 — fire async LCM inventory scan (~5 s API call,
+            # Branch 4 — fire async LCM inventory scan (~5 s API call,
             # PC runs it in background). Populates stage 29's update
             # count when the player checks LCM later.
             with branch(p0):
@@ -372,19 +328,52 @@ class GameContent(Package):
                     target=ref(Game),
                 )
 
-            # Branch 6 — Docker container deploy on the Calm-provisioned
-            # VM (~3 min: get.docker.com curl + image pull + container
-            # boot). Runs in parallel with everything else, so the game
-            # URL is available a few minutes after launch even though
-            # the cluster-side branches are still going. install_docker.
-            # sh is idempotent (skip-if-installed). run_container.sh
-            # does docker login → pull → run -d with PC + GAME_* env
-            # injected.
+            # Branch 5 — Docker container deploy + prereq BPs upload on
+            # the Calm-provisioned VM (~5 min total). Sequential within
+            # the branch because:
+            #   - Push prereq BPs needs Docker (uses ntnx/calm-dsl
+            #     container to .tgz→.json→/api/nutanix/v3/blueprints).
+            #   - Clone fake BPs needs CloneProd uploaded.
+            #   - Run game container last so the game URL only exposes
+            #     once the cluster-facing prereqs are in place.
+            #
+            # Why a sh task on the VM (and not a Calm escript): PC
+            # v3.x's /import_file endpoint rejects raw .tgz with
+            # "Uploaded file is not valid json" (validated 2026-05-09).
+            # The ntnx/calm-dsl container does the .tgz → JSON
+            # conversion locally (calm-dsl reads the .py from the tar
+            # and compiles to JSON) before POSTing.
+            #
+            # The .sh writes ~/.calm/config.ini directly inside the
+            # mounted volume instead of calling `calm init dsl`. `init
+            # dsl` probes /api/calm/v3.0/features/approval_policy at
+            # startup, which 30s-timeouts while the policy engine MSP
+            # is still bootstrapping (cf memory
+            # project_calm_policy_vm_unstable). `calm create bp`
+            # itself doesn't probe approval_policy.
             with branch(p0):
                 CalmTask.Exec.ssh(
                     name="Install Docker",
                     filename=os.path.join("scripts", "install_docker.sh"),
                     cred=ref(BP_CRED_NUTANIX),
+                    target=ref(Game),
+                )
+                CalmTask.Exec.ssh(
+                    name="Push prereq BPs",
+                    filename=os.path.join("scripts", "push_prereq_bps.sh"),
+                    cred=ref(BP_CRED_NUTANIX),
+                    target=ref(Game),
+                )
+                # 10 fake-named BPs (ApacheServer / Wordpress /
+                # PrimaryAD / …) cloned from CloneProd via
+                # /api/nutanix/v3/blueprints/{uuid}/clone. Pure
+                # immersion — surfaces a realistic Self-Service catalog
+                # on PC for stage 35 narrative. Idempotent. Requires
+                # CloneProd to exist on PC (so runs after Push prereq
+                # BPs).
+                CalmTask.Exec.escript.py3(
+                    name="Clone fake BPs",
+                    filename=os.path.join("scripts", "clone_fake_bps.py"),
                     target=ref(Game),
                 )
                 CalmTask.Exec.ssh(
