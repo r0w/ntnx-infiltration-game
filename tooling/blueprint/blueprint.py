@@ -519,7 +519,7 @@ class DefaultProfile(Profile):
         "thebadguy", is_mandatory=False, runtime=False, is_hidden=True,
     )
     GAME_OLD_PC = CalmVariable.Simple(
-        "", is_mandatory=False, runtime=False, is_hidden=True,
+        "10.55.82.39", is_mandatory=False, runtime=False, is_hidden=True,
     )
     GAME_OLD_PC_USERNAME = CalmVariable.Simple(
         "planner", is_mandatory=False, runtime=False, is_hidden=True,
