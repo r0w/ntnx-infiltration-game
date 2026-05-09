@@ -361,6 +361,8 @@ export const api = {
     }).then((res) => handle<AdminClusterConfigPayload>(res)),
   adminClusterConfigRefresh: (password: string) =>
     adminPost<AdminClusterConfigPayload>('/admin/cluster-config/refresh', password),
+  adminClusterStatus: (password: string) =>
+    adminGet<AdminClusterStatusPayload>('/admin/cluster-status', password),
 };
 
 export interface AdminClusterConfigPayload {
@@ -369,5 +371,17 @@ export interface AdminClusterConfigPayload {
   meta: {
     rackableUnitSerials?: { source: 'probe' | 'admin'; updatedAt: number };
     lcmAvailableUpdates?: { source: 'probe' | 'admin'; updatedAt: number };
+  };
+}
+
+export interface AdminClusterStatusPayload {
+  intelligentOps: {
+    /** `null` in mock mode or when the probe couldn't reach PC. */
+    state: 'ENABLED' | 'DISABLED' | 'UNKNOWN' | null;
+    /** Prism UI deep-link to the IOps activation screen. `null` when the
+     *  PC endpoint isn't configured (mock fixtures or local-dev). */
+    enableUrl: string | null;
+    /** Human-readable error if `state` is null and the probe failed. */
+    error?: string;
   };
 }

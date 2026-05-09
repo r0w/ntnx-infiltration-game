@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   api,
   type AdminClusterConfigPayload,
+  type AdminClusterStatusPayload,
   type AdminGateEntry,
   type AdminLunchStatus,
   type AdminPackStageEntry,
@@ -951,6 +952,7 @@ function ClusterConfigEditor({ password }: { password: string }) {
   }
   return (
     <div className="admin-cluster">
+      <IntelligentOpsStatus password={password} />
       <p className="admin-cluster-intro">
         <strong>Cached cluster snapshot</strong> · pre-loaded at boot to skip
         the slow rackable-units / LCM-inventory queries inside checks. Operator
@@ -1025,6 +1027,85 @@ function ClusterConfigEditor({ password }: { password: string }) {
         {savedAt && busy === null && (
           <span className="c-green admin-cluster-saved">saved {fmtAge(savedAt)}</span>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Read-only display of Prism Central product enablement, currently scoped
+ * to Intelligent Operations. Live-fetched on every Cluster tab open — no
+ * caching because the operator clicks Enable in Prism UI and wants to see
+ * the flip without restarting the backend. There is no public API to
+ * activate IOps from the game side; we surface the state and a deep-link
+ * to the Prism activation screen so the operator's "click here" path is
+ * one hop instead of three.
+ */
+function IntelligentOpsStatus({ password }: { password: string }) {
+  const [data, setData] = useState<AdminClusterStatusPayload | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      setData(await api.adminClusterStatus(password));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [password]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (busy && !data) {
+    return <div className="admin-empty">loading cluster status…</div>;
+  }
+  if (err) {
+    return <div className="app-error">cluster status: {err}</div>;
+  }
+  if (!data) return null;
+
+  const { state, enableUrl, error } = data.intelligentOps;
+  const stateClass =
+    state === 'ENABLED' ? 'c-green' : state === 'DISABLED' ? 'c-red' : 'c-dim';
+  const stateLabel = state ?? 'unknown';
+
+  return (
+    <div className="admin-cluster-section">
+      <div className="admin-cluster-label">
+        Intelligent Operations
+        <span className="c-dim"> · live</span>
+        <button
+          type="button"
+          className="app-reset admin-cluster-iops-refresh"
+          onClick={() => void load()}
+          disabled={busy}
+          title="re-probe Prism for the current state"
+        >
+          {busy ? '…' : '↻'}
+        </button>
+      </div>
+      <div className="admin-cluster-iops">
+        state: <span className={stateClass}>{stateLabel}</span>
+        {state === 'DISABLED' && enableUrl && (
+          <>
+            {' · '}
+            <a
+              href={enableUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="admin-cluster-iops-link"
+            >
+              activate in Prism →
+            </a>
+          </>
+        )}
+        {error && <div className="c-dim admin-cluster-iops-err">{error}</div>}
       </div>
     </div>
   );

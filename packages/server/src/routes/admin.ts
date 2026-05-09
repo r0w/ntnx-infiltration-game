@@ -6,6 +6,7 @@ import { SessionQueries, type AdminSessionRow } from '../db/queries';
 import type { LoadedPack } from '../pack-loader';
 import { analyzeDeps, cascadeDisable, type BrokenStage } from '../dep-analysis';
 import { probeClusterConfig } from '../cluster-config-probe';
+import { probeIntelligentOps, type IntelligentOpsProbeResult } from '../cluster-status-probe';
 import { consoleLogger } from '../logger';
 
 export interface AdminRoutesDeps {
@@ -23,6 +24,14 @@ export interface AdminRoutesDeps {
   nutanix: NutanixClient;
   /** Runtime clusterProfile (post mock-override). Surfaced on /pack. */
   clusterProfile: 'hpoc' | 'other';
+  /** Configured PC endpoint (e.g. `https://10.8.16.7:9440`). Used by
+   *  `/cluster-status` to build the Prism UI deep-link to the IOps
+   *  activation page. May be empty in mock mode. */
+  pcEndpoint: string;
+}
+
+export interface AdminClusterStatusPayload {
+  intelligentOps: IntelligentOpsProbeResult;
 }
 
 export interface AdminClusterConfigPayload {
@@ -447,6 +456,22 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       logger: consoleLogger,
     });
     return c.json(readClusterConfig());
+  });
+
+  // ─── live cluster status (no DB) ────────────────────────────────────
+  // Read-only probe of PC product enablement. Currently surfaces the
+  // Intelligent Operations state — no public API to flip it (PRI-55201
+  // on the v4 endpoint), so the response includes a deep-link to the
+  // Prism UI activation page. Hits the live PC on every call; intended
+  // frequency is "operator opens the Cluster tab", caching adds nothing.
+  router.get('/cluster-status', async (c) => {
+    const intelligentOps = await probeIntelligentOps({
+      nutanix: deps.nutanix,
+      pcEndpoint: deps.pcEndpoint,
+      logger: consoleLogger,
+    });
+    const payload: AdminClusterStatusPayload = { intelligentOps };
+    return c.json(payload);
   });
 
   return router;
