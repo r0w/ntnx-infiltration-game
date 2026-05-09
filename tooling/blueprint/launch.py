@@ -18,6 +18,8 @@ Env (required unless marked default):
   BP_NAME                  ntnx-infiltration-game       (default)
   APP_NAME                 = BP_NAME                    (default)
   GHCR_TOKEN               <github PAT, read:packages>  (optional - only for private images)
+  IMAGE_TAG                latest                        (default — set to e.g. `develop` for dev builds)
+  IMAGE_REPO               ghcr.io/r0w/ntnx-infiltration-game  (default — leave unset for the canonical repo)
   GAME_VLAN_ID             ""                            (default — random 0-249)
   GAME_PROD_PASSWORD       MyPassword4Prod!             (default — matches add_ad_users.ps1)
   GAME_OLD_PC_PASSWORD     ""                            (default — leaves stage 31 format-only)
@@ -67,6 +69,8 @@ SECRETS_AND_VARS = {
     "ADMIN_PASSWORD": os.environ.get("ADMIN_PASSWORD", "nutanix/4u"),
     "CLUSTER_PROFILE": os.environ.get("CLUSTER_PROFILE", "hpoc"),
     "MODE": os.environ.get("MODE", "live"),
+    "IMAGE_TAG": os.environ.get("IMAGE_TAG", "latest"),
+    "IMAGE_REPO": os.environ.get("IMAGE_REPO", "ghcr.io/r0w/ntnx-infiltration-game"),
     "GAME_VLAN_ID": os.environ.get("GAME_VLAN_ID", ""),
     "GAME_PROD_PASSWORD": os.environ.get("GAME_PROD_PASSWORD", "MyPassword4Prod!"),
     "GAME_OLD_PC_PASSWORD": os.environ.get("GAME_OLD_PC_PASSWORD", ""),
