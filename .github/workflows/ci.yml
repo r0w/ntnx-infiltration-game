@@ -1,14 +1,16 @@
 name: ci
 
-# Run the test suite + typecheck on every push to main and on every PR.
-# Catches regressions across all 4 workspace packages without needing an
-# HPoC — everything below runs against the mock adapter.
+# Run the test suite + typecheck on every push to main / develop and on
+# every PR targeting either. Catches regressions across all 4 workspace
+# packages without needing an HPoC — everything below runs against the
+# mock adapter. `develop` is the active integration branch; `main`
+# stays clean for vetted merges only.
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 # Cancel in-flight runs for the same ref when a newer commit lands —
 # saves CI minutes during rapid iteration on a feature branch.
