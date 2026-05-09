@@ -1144,6 +1144,14 @@ a.terminal-link:visited {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.55; }
 }
+.devpanel-autoplay-acting {
+  background: var(--accent);
+  animation: devpanel-autoplay-acting-pulse 0.6s ease-in-out infinite;
+}
+@keyframes devpanel-autoplay-acting-pulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.05); }
+}
 .devpanel-body {
   padding: 8px 16px 12px;
 }
