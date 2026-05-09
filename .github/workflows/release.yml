@@ -220,9 +220,9 @@ jobs:
         # the real entities at launch via Prism UI.
         run: python3 tooling/blueprint/seed_ci_cache.py
 
-      - name: Generate push_prereq_bps.sh from template + .tgz blobs
-        # blueprint.py's `Push prereq BPs` install task references
-        # scripts/push_prereq_bps.sh — assembled at compile time from
+      - name: Generate upload_prereq_bps.py from template + .tgz blobs
+        # blueprint.py's `Upload prereq BPs` install task references
+        # scripts/upload_prereq_bps.py — assembled at compile time from
         # the template + base64-inlined CloneProd.tgz + NewblankVM.tgz
         # (per memory project_bundle_inline_b64). The output is gitignored
         # since the blobs change. compile.sh does this locally; replicate
@@ -231,12 +231,12 @@ jobs:
           python3 - <<'PY'
           import base64, pathlib
           root = pathlib.Path('tooling/blueprint')
-          template = (root / 'scripts' / 'push_prereq_bps.sh.template').read_text()
+          template = (root / 'scripts' / 'upload_prereq_bps.py.template').read_text()
           cp = base64.b64encode((root / 'prereqs' / 'CloneProd.tgz').read_bytes()).decode('ascii')
           bv = base64.b64encode((root / 'prereqs' / 'NewblankVM.tgz').read_bytes()).decode('ascii')
           out = template.replace('__CLONEPROD_TGZ_B64__', cp).replace('__BLANKVM_TGZ_B64__', bv)
-          (root / 'scripts' / 'push_prereq_bps.sh').write_text(out)
-          print(f'wrote push_prereq_bps.sh ({len(out)} chars)')
+          (root / 'scripts' / 'upload_prereq_bps.py').write_text(out)
+          print(f'wrote upload_prereq_bps.py ({len(out)} chars)')
           PY
 
       - name: Build blueprint.json (calm-dsl native + post-compile patcher)

@@ -118,16 +118,26 @@ In Prism Central:
 The substrate section asks for the cluster + first NIC subnet (any
 real ones on your HPoC). Submit.
 
-5. Wait for the install runbook (~25 min on a healthy HPoC). The 15
-   tasks in order:
+5. Wait for the install runbook (~10 min on a healthy HPoC, gated on
+   the longest of 6 parallel branches). Two sequential prereqs first,
+   then 6 branches run in parallel:
 
-   `Activate policy engine` → `Get Cluster` → `Setup subnets` →
-   `Setup production project` → `Create Local users` → `Add AD users`
-   → `Create Prod VMs` → `Setup jumphost endpoint` →
-   `Trigger LCM inventory` → `Install Docker` → `Push prereq BPs` →
-   `Clone fake BPs` → `Run game container` → `Verify final state` →
-   `Ensure host 4 removed` (last because it gates a 40-min cluster
-   shrink poll).
+   1. `Activate policy engine` (kicks off async MSP boot, best-effort)
+   2. `Get Cluster` (captures CLUSTERNAME / CLUSTERUUID)
+
+   - **Cluster branch** (~10 min, longest): `Ensure host 4 removed` →
+     `Wait for cluster health` → `Setup subnets` →
+     `Setup production project` → `Create Prod VMs` →
+     `Setup jumphost endpoint` → `Verify final state`.
+   - **Local IAM branch** (~30 s): `Create Local users`.
+   - **AD branch** (~30 s): `Add AD users`.
+   - **Prereq BPs branch**: `Upload prereq BPs` → `Clone fake BPs`.
+   - **LCM branch** (~5 s API call): `Trigger LCM inventory`.
+   - **Container branch** (~3 min): `Install Docker` →
+     `Run game container`.
+
+   The game URL becomes available once the container branch finishes
+   (~3 min in), even while the cluster branch is still running.
 
 When the app reaches **`running`** state, the description field shows
 the game URL: `http://<deployed-vm-ip>:3000/`.
@@ -195,8 +205,10 @@ The blueprint exposes 2 day-2 actions in **Self-Service > Apps**:
   - both ready before the install runbook fires. SSH is there if you
   want to debug, but the install is fully zero-touch.
 - **No manual upload of `CloneProd.tgz` or `NewblankVM.tgz`**. The
-  install runbook's `Push prereq BPs` task uses an `ntnx/calm-dsl`
-  Docker container on the deployed VM to upload them via Calm's API.
+  install runbook's `Upload prereq BPs` task is a Calm escript that
+  decodes the base64-inlined `.tgz` blobs and POSTs them to PC's
+  `/import_file` via a hand-crafted multipart body — no extra tooling
+  required on the deployed VM.
 - **No subnet pre-creation**. The runbook renames `aux-1` →
   `secondary`, flips it to advanced-networking, and creates
   `TestNetwork` (`192.168.1.0/25`). Pre-creating these is fine
