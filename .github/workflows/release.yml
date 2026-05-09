@@ -21,6 +21,8 @@ on:
   push:
     tags:
       - 'v*'
+    branches:
+      - develop
   workflow_dispatch:
     inputs:
       tag:
@@ -41,19 +43,50 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
+      is_release: ${{ steps.resolve.outputs.is_release }}
     steps:
       - uses: actions/checkout@v6
 
-      - name: Resolve tag
+      - name: Resolve tag + image tags
         id: resolve
+        # Three trigger paths share this workflow:
+        #   - push of a `v*` git tag → cut a real GitHub Release, image
+        #     gets `:vX.Y.Z` + `:latest`.
+        #   - manual workflow_dispatch with an input tag → same as above
+        #     (used to re-release when a previous run flaked).
+        #   - push to `develop` → no GH Release, image gets `:develop`
+        #     and `:develop-<sha7>` so we can deploy a specific commit
+        #     and have it survive future develop pushes.
+        # `is_release` is consumed by the upload-blueprint job below so
+        # the GH Release path runs only on the first two cases.
         run: |
+          IMG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             TAG="${{ inputs.tag }}"
-          else
+            IS_RELEASE=true
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
+            IS_RELEASE=true
+          else
+            TAG="develop"
+            IS_RELEASE=false
           fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Releasing $TAG"
+          if [[ "${IS_RELEASE}" == "true" ]]; then
+            DOCKER_TAGS=$(printf '%s\n%s' "${IMG}:${TAG}" "${IMG}:latest")
+          else
+            SHA_SHORT="${GITHUB_SHA::7}"
+            DOCKER_TAGS=$(printf '%s\n%s' "${IMG}:develop" "${IMG}:develop-${SHA_SHORT}")
+          fi
+          {
+            echo "tag=${TAG}"
+            echo "is_release=${IS_RELEASE}"
+            echo "docker_tags<<EOF_DT"
+            echo "${DOCKER_TAGS}"
+            echo "EOF_DT"
+          } >> "$GITHUB_OUTPUT"
+          echo "Tag=${TAG}, is_release=${IS_RELEASE}"
+          echo "Docker tags:"
+          echo "${DOCKER_TAGS}"
 
       - name: Set up Docker buildx
         uses: docker/setup-buildx-action@v3
@@ -70,9 +103,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          tags: ${{ steps.resolve.outputs.docker_tags }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -85,6 +116,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ needs.build-and-push.outputs.tag }}
+      is_release: ${{ needs.build-and-push.outputs.is_release }}
     steps:
       - uses: actions/checkout@v6
 
@@ -240,6 +272,11 @@ jobs:
   upload-blueprint:
     needs: compile-blueprint
     runs-on: ubuntu-latest
+    # Only on real releases (tag push or workflow_dispatch). Develop-push
+    # builds skip this job — the docker image + the artifact-stashed
+    # blueprint.patched.json are enough for dev deploys via launch.py;
+    # we don't want to clutter the GH Releases page with dev tags.
+    if: needs.compile-blueprint.outputs.is_release == 'true'
     steps:
       - uses: actions/checkout@v6
 
