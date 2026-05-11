@@ -11,6 +11,7 @@
   ],
   "saveScore": false,
   "impact": "destructive",
+  "requires": ["NodeRemove"],
   "check": {
     "fn": "CheckNewNode"
   },
