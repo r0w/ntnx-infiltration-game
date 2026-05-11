@@ -169,8 +169,8 @@ class GameContent(Package):
     @action
     def __install__(type="system"):
         # ─── Sequential prereq ─────────────────────────────────────────
-        # Get Cluster captures CLUSTERUUID, which `Remove 4th host
-        # (HPoC, idempotent)` needs to look up the host list. Everything else
+        # Get Cluster captures CLUSTERUUID, which `Remove 4th host on
+        # HPoC` needs to look up the host list. Everything else
         # (including Activate policy engine) lives in the parallel
         # block below. Get Cluster is fast (~5s API call), so paying
         # this single sequential tax doesn't meaningfully extend the
@@ -226,7 +226,7 @@ class GameContent(Package):
                 # shape. Idempotent (skip if no -4 host); gated by
                 # CLUSTER_PROFILE inside the script (skips on `other`).
                 CalmTask.Exec.escript.py3(
-                    name="Remove 4th host (HPoC, idempotent)",
+                    name="Remove 4th host on HPoC",
                     filename=os.path.join("scripts", "remove_node.py"),
                     target=ref(Game),
                 )
