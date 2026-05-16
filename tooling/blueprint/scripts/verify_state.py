@@ -49,10 +49,14 @@ def fetch(version, path):
     return r.json().get('data') or []
 
 
-def discover_unconfigured_nodes(cluster_uuid, timeout_secs=60):
+def discover_unconfigured_nodes(cluster_uuid, max_polls=60):
     """Fires the discover-unconfigured-nodes task + polls until SUCCEEDED.
     Returns (nodeList, err_msg). nodeList may be empty (= no spare nodes
-    on this cluster, legitimate on single-chassis HPoCs)."""
+    on this cluster, legitimate on single-chassis HPoCs).
+
+    Iteration-based (Calm escript sandbox: time.time() is a counter,
+    time.sleep() may no-op). Each /tasks GET takes ~0.5-1s naturally →
+    max_polls=60 is ~30-60 s real wall-clock without trusting sleep."""
     discover_url = (
         "%s/api/clustermgmt/v4.0.b2/config/clusters/%s/$actions/discover-unconfigured-nodes"
         % (PC_BASE, cluster_uuid)
@@ -70,23 +74,22 @@ def discover_unconfigured_nodes(cluster_uuid, timeout_secs=60):
     if not task_ext_id:
         return None, "discover task missing extId"
 
-    # Poll the task. Same Python semantics: 5 s interval, 3 min deadline.
     task_url = "%s/api/prism/v4.2/config/tasks/%s" % (PC_BASE, task_ext_id)
-    deadline = time.time() + timeout_secs
     last_status = None
-    while time.time() < deadline:
+    succeeded = False
+    for _ in range(max_polls):
         try:
             tr = requests.get(task_url, auth=AUTH, headers=HEADERS, verify=False, timeout=20)
             last_status = (tr.json().get('data') or {}).get('status')
             if last_status == 'SUCCEEDED':
+                succeeded = True
                 break
             if last_status in ('FAILED', 'CANCELED', 'CANCELLED'):
                 return None, "discover task %s" % last_status
         except Exception:
             pass
-        time.sleep(5)
-    else:
-        return None, "discover task timed out (last status: %s)" % last_status
+    if not succeeded:
+        return None, "discover task timed out after %d polls (last status: %s)" % (max_polls, last_status)
 
     short_id = task_ext_id.split(':')[-1]
     resp_url = (
