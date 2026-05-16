@@ -148,6 +148,7 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
       adminPassword: deps.adminPassword,
       service,
       nutanix: deps.nutanix,
+      serverMode,
       clusterProfile: deps.clusterProfile,
       capabilities: deps.capabilities,
       pcEndpoint: deps.clusterEndpoint,

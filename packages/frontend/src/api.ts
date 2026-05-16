@@ -228,8 +228,9 @@ export interface AdminPackPayload {
   brokenCount: number;
   /** Server's runtime clusterProfile. */
   clusterProfile: 'hpoc' | 'other';
-  /** Server's transport mode. `mock` means destructive gate is bypassed. */
-  mode: 'mock' | 'live';
+  /** Operator-facing server mode. `mock` bypasses the hpoc-only gate;
+   *  `test` and `live` both hit a real PC. */
+  mode: 'mock' | 'test' | 'live';
 }
 
 export interface AdminPackTogglePreview {

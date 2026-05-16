@@ -22,6 +22,11 @@ export interface AdminRoutesDeps {
   service: SessionService;
   /** Required for the /cluster-config refresh endpoint to re-probe live. */
   nutanix: NutanixClient;
+  /** Operator-facing server mode (`mock | test | live`). Surfaced on
+   *  /pack so the admin badge matches what the player sees and the
+   *  install BP's MODE variable. Distinct from `nutanix.mode` (transport
+   *  layer — `mock | live`) which collapses `test` and `live` together. */
+  serverMode: 'mock' | 'test' | 'live';
   /** Runtime clusterProfile (post mock-override). Surfaced on /pack. */
   clusterProfile: 'hpoc' | 'other';
   /** Boot-time capability flags from the cluster probe. Used by the
@@ -118,10 +123,11 @@ export interface AdminPackPayload {
    *  with each stage's `impact` it tells the operator which stages would
    *  be auto-skipped at session creation. */
   clusterProfile: 'hpoc' | 'other';
-  /** Server's transport mode. In `mock` the destructive gate is bypassed
-   *  (clusterProfile is forced to `hpoc` at boot) — surface this so the
-   *  /admin pack table can mute the "would be filtered" callout. */
-  mode: 'mock' | 'live';
+  /** Server mode (mock | test | live). In `mock` the hpoc-only gate is
+   *  bypassed (clusterProfile is forced to `hpoc` at boot) — surface this
+   *  so the /admin pack table can mute the "would be filtered" callout
+   *  and the operator badge matches the BP's MODE variable. */
+  mode: 'mock' | 'test' | 'live';
 }
 
 export interface AdminPackTogglePreview {
@@ -346,7 +352,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       stages: stagesPayload,
       brokenCount: analysis.broken.length,
       clusterProfile: deps.clusterProfile,
-      mode: deps.nutanix.mode,
+      mode: deps.serverMode,
     };
     return c.json(payload);
   });
