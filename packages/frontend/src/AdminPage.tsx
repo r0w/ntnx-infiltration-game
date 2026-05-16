@@ -810,10 +810,12 @@ function PackEditor({
                 <td>
                   <button
                     type="button"
-                    className={`pack-toggle ${s.active ? 'pack-toggle-on' : 'pack-toggle-off'} ${hpocOnlySkipped ? 'pack-toggle-filtered' : ''}`}
+                    className={`pack-toggle ${s.active ? 'pack-toggle-on' : 'pack-toggle-off'} ${(hpocOnlySkipped || capsMissing) ? 'pack-toggle-filtered' : ''}`}
                     disabled={busy}
                     title={
-                      hpocOnlySkipped
+                      capsMissing
+                        ? `active in pack but engine will skip — caps not detected on this cluster: ${s.missingCapabilities.join(', ')}`
+                        : hpocOnlySkipped
                         ? `active in pack (JSON default), but engine filters this stage for sessions with clusterProfile='${meta?.clusterProfile}' because impact='hpoc-only'`
                         : (s.activeOverridden ? 'overridden by operator (click to flip)' : 'using JSON default')
                     }
@@ -849,7 +851,16 @@ function PackEditor({
                       broken: {s.brokenMissingVars.join(', ')}
                     </span>
                   ) : inactive ? (
-                    <span className="c-dim">disabled</span>
+                    <span
+                      className="c-dim"
+                      title={
+                        s.activeOverridden
+                          ? 'turned off via the admin pack toggle (click the on/off button to flip back)'
+                          : 'inactive in pack JSON (active: false in the stage file)'
+                      }
+                    >
+                      disabled ({s.activeOverridden ? 'operator override' : 'off in pack'})
+                    </span>
                   ) : capsMissing ? (
                     <span
                       className="c-yellow"
