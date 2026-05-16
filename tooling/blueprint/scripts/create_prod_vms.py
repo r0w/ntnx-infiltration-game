@@ -140,10 +140,14 @@ def create_vm(spec, cat_uuid, subnet_uuid, image_uuid):
 
 def assign_project_and_power_on(vm_name):
     """Wait for the VM to appear, then PUT v3 with project + power_state=ON.
-    v4 doesn't expose project assignment yet — v3 round-trip required."""
-    deadline = time.time() + 300  # 5-min cap
+    v4 doesn't expose project assignment yet — v3 round-trip required.
+
+    Iteration-based poll (sandbox time.time() is a counter; time.sleep() may
+    no-op). Each /vms?$filter GET takes ~0.5-1s naturally → MAX_POLLS=300 is
+    ~3-5 min real wall-clock without trusting sleep."""
+    MAX_POLLS = 300
     vm_uuid = None
-    while time.time() < deadline:
+    for _ in range(MAX_POLLS):
         r = requests.get(
             "%s/api/vmm/v4.0/ahv/config/vms?$filter=name eq '%s'" % (BASE, vm_name),
             auth=AUTH, headers=HEADERS, verify=False, timeout=20,
@@ -153,9 +157,8 @@ def assign_project_and_power_on(vm_name):
             if data:
                 vm_uuid = data[0]['extId']
                 break
-        time.sleep(10)
     if not vm_uuid:
-        return False, "VM did not appear within 5 min"
+        return False, "VM did not appear within %d polls" % MAX_POLLS
 
     r = requests.get(
         "%s/api/nutanix/v3/vms/%s" % (BASE, vm_uuid),

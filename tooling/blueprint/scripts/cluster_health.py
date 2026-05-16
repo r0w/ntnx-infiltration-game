@@ -59,7 +59,7 @@ def get_aos_cluster_uuid():
     for cluster in (r.json().get('data') or []):
         if "AOS" in cluster.get('config', {}).get('clusterFunction', []):
             return cluster['extId'], cluster.get('name', '?')
-    raise RuntimeError("No AOS cluster found in PC %s" % PC_IP)
+    raise Exception("No AOS cluster found in PC %s" % PC_IP)
 
 
 def list_hosts(cluster_uuid):
