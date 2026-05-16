@@ -112,10 +112,10 @@ CREATE TABLE IF NOT EXISTS pack_pauses (
 
 -- Cluster-wide read-only snapshot, populated at boot (or via /admin
 -- refresh) so checks like CheckNewNode / CheckUpdates don't hit slow
--- live endpoints (rackable-units list / LCM inventory) on every
--- player attempt. Operator can edit values via /admin Cluster tab —
--- the boot probe never overwrites operator-set rows. Single namespace
--- per server, so no pack_id key here.
+-- live endpoints (discover-unconfigured-nodes + task poll / LCM
+-- inventory) on every player attempt. Operator can edit values via
+-- /admin Cluster tab — the boot probe never overwrites operator-set
+-- rows. Single namespace per server, so no pack_id key here.
 CREATE TABLE IF NOT EXISTS cluster_config (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL,           -- JSON-encoded

@@ -360,7 +360,7 @@ export const api = {
     adminGet<AdminClusterConfigPayload>('/admin/cluster-config', password),
   adminClusterConfigSave: (
     password: string,
-    body: { rackableUnitSerials?: string[]; lcmAvailableUpdates?: number | null },
+    body: { discoverableNodeSerials?: string[]; lcmAvailableUpdates?: number | null },
   ) =>
     fetch('/api/admin/cluster-config', {
       method: 'PUT',
@@ -374,10 +374,10 @@ export const api = {
 };
 
 export interface AdminClusterConfigPayload {
-  rackableUnitSerials: string[];
+  discoverableNodeSerials: string[];
   lcmAvailableUpdates: number | null;
   meta: {
-    rackableUnitSerials?: { source: 'probe' | 'admin'; updatedAt: number };
+    discoverableNodeSerials?: { source: 'probe' | 'admin'; updatedAt: number };
     lcmAvailableUpdates?: { source: 'probe' | 'admin'; updatedAt: number };
   };
 }

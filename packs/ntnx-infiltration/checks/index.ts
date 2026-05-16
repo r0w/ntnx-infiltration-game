@@ -1,6 +1,7 @@
 import type { CheckContext, CheckResult } from '@ntnx-game/engine';
 import {
   cacheEntity,
+  discoverableNodeSerials,
   getTrigram,
   listAll,
   listAllV3,
@@ -1216,9 +1217,13 @@ async function CheckReport(ctx: CheckContext): Promise<CheckResult> {
 /**
  * Stage 28 `expand-cluster` (CheckNewNode). Stage prose asks the player to
  * simulate expansion and type the new node's serial number via
- * `<input var='NodeSerial'/>`. We validate the captured input is a
- * non-empty alphanumeric string — no API call, the cluster state isn't
- * mutated (stage is a "take a screenshot" educational step).
+ * `<input var='NodeSerial'/>`. The submitted value must match a node
+ * currently DISCOVERABLE (rackmounted, not yet part of the cluster) — i.e.
+ * a real expand candidate. Old implementation matched against
+ * `/rackable-units` (chassis inventory including active nodes), which let
+ * the running node's serial pass — wrong. Aligned with the legacy Python
+ * `dev` branch (`ntnx-escape-game/functions.py:getNewNodeSerial`, commit
+ * e37ef0d) via `discoverableNodeSerials()` helper.
  */
 async function CheckNewNode(ctx: CheckContext): Promise<CheckResult> {
   const serial = ctx.vars.get('NodeSerial');
@@ -1236,54 +1241,32 @@ async function CheckNewNode(ctx: CheckContext): Promise<CheckResult> {
       retryFromVariable: 'NodeSerial',
     };
   }
-  // Always query live — operators want this stage to verify against the
-  // current cluster state (a node could have been added/removed between
-  // server boot and now). Boot-time cache was an optimization that hid
-  // recent topology changes; pay the round-trip per attempt instead.
+  // Always query live — discoverable set can change between server boot and
+  // now (operator just freed a node, etc.). The boot-time cache is a hint
+  // for the auto-fill prompt only, not the source of truth for the check.
   try {
-    // Need cluster UUID first.
-    const clusters = await ctx.nutanix.request<{ data?: Array<{ extId?: string }> }>(
-      'GET',
-      '/api/clustermgmt/v4.0/config/clusters',
-    );
-    const clusterUuid = clusters.data?.[0]?.extId;
-    if (!clusterUuid) {
-      return { pass: false, detail: 'Cluster UUID not found — capability probe failed?' };
-    }
-    let units: Array<{ serial?: string }> = [];
-    for (const v of ['v4.0.b2', 'v4.0', 'v4.2']) {
-      try {
-        const res = await ctx.nutanix.request<{ data?: Array<{ serial?: string }> }>(
-          'GET',
-          `/api/clustermgmt/${v}/config/clusters/${clusterUuid}/rackable-units`,
-        );
-        if (res?.data) {
-          units = res.data;
-          break;
-        }
-      } catch {
-        // try next version
-      }
-    }
-    if (units.length === 0) {
+    const discoverable = await discoverableNodeSerials(ctx.nutanix, ctx.logger);
+    if (discoverable.length === 0) {
       return {
         pass: false,
-        detail: `Could not list cluster rackable-units (no API version 4.0.b2 / 4.0 / 4.2 responded).`,
-      };
-    }
-    const submitted = serial.trim();
-    const found = units.some((u) => (u.serial ?? '').trim() === submitted);
-    if (!found) {
-      const seen = units.map((u) => u.serial).filter(Boolean).join(', ');
-      return {
-        pass: false,
-        detail: `Serial '${submitted}' not found in cluster rackable-units (saw: ${seen || '<none>'}).`,
+        detail:
+          `No discoverable nodes returned by the cluster — there is nothing ` +
+          `to expand with. Free a node first (stage 28 simulates adding a ` +
+          `previously-removed node back in).`,
         retryFromVariable: 'NodeSerial',
       };
     }
-    return { pass: true, detail: `Node serial '${submitted}' confirmed on cluster.` };
+    const submitted = serial.trim();
+    if (!discoverable.includes(submitted)) {
+      return {
+        pass: false,
+        detail: `Serial '${submitted}' is not currently discoverable on the cluster (saw: ${discoverable.join(', ')}).`,
+        retryFromVariable: 'NodeSerial',
+      };
+    }
+    return { pass: true, detail: `Discoverable node '${submitted}' confirmed.` };
   } catch (err) {
-    return { pass: false, detail: `Rackable-unit query failed: ${nutanixErrorDetail(err)}` };
+    return { pass: false, detail: `Discover-unconfigured-nodes query failed: ${nutanixErrorDetail(err)}` };
   }
 }
 

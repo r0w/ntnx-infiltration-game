@@ -44,11 +44,11 @@ export interface AdminClusterStatusPayload {
 }
 
 export interface AdminClusterConfigPayload {
-  rackableUnitSerials: string[];
+  discoverableNodeSerials: string[];
   lcmAvailableUpdates: number | null;
   /** Per-row metadata so /admin can show "edited by operator" vs probe-set. */
   meta: {
-    rackableUnitSerials?: { source: 'probe' | 'admin'; updatedAt: number };
+    discoverableNodeSerials?: { source: 'probe' | 'admin'; updatedAt: number };
     lcmAvailableUpdates?: { source: 'probe' | 'admin'; updatedAt: number };
   };
 }
@@ -418,23 +418,24 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
 
   // ─── cluster config (cached snapshot of slow PC queries) ────────────
   // Boot-populated, manually overridable. CheckNewNode and CheckUpdates
-  // read from here to skip the rackable-units / LCM-inventory live calls.
+  // read from here to skip the discover-unconfigured-nodes / LCM-inventory
+  // live calls.
   function readClusterConfig(): AdminClusterConfigPayload {
     const rows = deps.service.clusterConfig.list();
     const byKey = new Map(rows.map((r) => [r.key, r]));
-    const serialsRow = byKey.get('rackable_unit_serials');
+    const serialsRow = byKey.get('discoverable_node_serials');
     const lcmRow = byKey.get('lcm_available_updates');
     const serials = Array.isArray(serialsRow?.value)
       ? (serialsRow!.value.filter((s) => typeof s === 'string') as string[])
       : [];
     const lcm = typeof lcmRow?.value === 'number' ? lcmRow.value : null;
     return {
-      rackableUnitSerials: serials,
+      discoverableNodeSerials: serials,
       lcmAvailableUpdates: lcm,
       meta: {
         ...(serialsRow
           ? {
-              rackableUnitSerials: { source: serialsRow.source, updatedAt: serialsRow.updatedAt },
+              discoverableNodeSerials: { source: serialsRow.source, updatedAt: serialsRow.updatedAt },
             }
           : {}),
         ...(lcmRow
@@ -448,18 +449,18 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
 
   router.put('/cluster-config', async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as {
-      rackableUnitSerials?: unknown;
+      discoverableNodeSerials?: unknown;
       lcmAvailableUpdates?: unknown;
     };
-    if ('rackableUnitSerials' in body) {
-      if (!Array.isArray(body.rackableUnitSerials)) {
-        throw new HttpError(400, 'rackableUnitSerials must be an array of strings');
+    if ('discoverableNodeSerials' in body) {
+      if (!Array.isArray(body.discoverableNodeSerials)) {
+        throw new HttpError(400, 'discoverableNodeSerials must be an array of strings');
       }
-      const serials = body.rackableUnitSerials
+      const serials = body.discoverableNodeSerials
         .filter((s): s is string => typeof s === 'string')
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
-      deps.service.clusterConfig.set('rackable_unit_serials', serials, 'admin');
+      deps.service.clusterConfig.set('discoverable_node_serials', serials, 'admin');
     }
     if ('lcmAvailableUpdates' in body) {
       const v = body.lcmAvailableUpdates;
@@ -482,7 +483,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     // Force-refresh: drop existing rows so the probe re-populates from
     // the cluster (the probe's setIfAbsent semantics protect operator
     // edits, but here the operator explicitly asked to re-fetch).
-    deps.service.clusterConfig.delete('rackable_unit_serials');
+    deps.service.clusterConfig.delete('discoverable_node_serials');
     deps.service.clusterConfig.delete('lcm_available_updates');
     await probeClusterConfig({
       nutanix: deps.nutanix,

@@ -119,7 +119,7 @@ describe('e2e — mock auto-play (full pack)', () => {
           // Pure-input vars at stages 28 / 29 / 31 (NodeSerial /
           // NumberUpdates / Runway) — the player would type these.
           // Values match the canned mock-branch in `lookupRunway` +
-          // the rackable-units fixture serial.
+          // the discover-unconfigured-nodes task-response fixture.
           NodeSerial: 'AB12345DEMO',
           NumberUpdates: '4',
           Runway: '120',

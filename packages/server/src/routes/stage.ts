@@ -4,6 +4,7 @@ import { HttpError } from '../session-service';
 import type { LoadedPack } from '../pack-loader';
 import { NutanixTransportError } from '@ntnx-game/nutanix';
 import type { SubmitInputRequest } from '@ntnx-game/shared';
+import { discoverableNodeSerials } from '@ntnx-game/engine';
 
 export interface StageRoutesDeps {
   service: SessionService;
@@ -177,28 +178,15 @@ export function buildStageRoutes(deps: StageRoutesDeps): Hono {
   return router;
 }
 
-/** Live lookup for stage 28 — first rackable-unit serial on the largest
- *  cluster. Tries the same v4 spec versions as CheckNewNode. */
+/** Live lookup for stage 28 — first DISCOVERABLE (unconfigured) node serial.
+ *  Same data source as CheckNewNode so auto-fill ↔ validation stay aligned. */
 async function lookupNodeSerial(ctx: import('@ntnx-game/engine').CheckContext): Promise<string | null> {
-  const clusters = await ctx.nutanix.request<{ data?: Array<{ extId?: string }> }>(
-    'GET',
-    '/api/clustermgmt/v4.0/config/clusters',
-  );
-  const clusterUuid = clusters.data?.[0]?.extId;
-  if (!clusterUuid) return null;
-  for (const v of ['v4.0.b2', 'v4.0', 'v4.2']) {
-    try {
-      const res = await ctx.nutanix.request<{ data?: Array<{ serial?: string }> }>(
-        'GET',
-        `/api/clustermgmt/${v}/config/clusters/${clusterUuid}/rackable-units`,
-      );
-      const first = res?.data?.find((u) => u.serial)?.serial;
-      if (first) return first;
-    } catch {
-      // try next version
-    }
+  try {
+    const discoverable = await discoverableNodeSerials(ctx.nutanix, ctx.logger);
+    return discoverable[0] ?? null;
+  } catch {
+    return null;
   }
-  return null;
 }
 
 /** Live lookup for stage 29 — count LCM entities exposing availableVersions. */

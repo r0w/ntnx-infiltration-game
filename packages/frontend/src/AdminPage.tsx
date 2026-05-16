@@ -907,7 +907,7 @@ function ClusterConfigEditor({ password }: { password: string }) {
 
   const hydrate = useCallback((p: AdminClusterConfigPayload) => {
     setData(p);
-    setSerialsText(p.rackableUnitSerials.join('\n'));
+    setSerialsText(p.discoverableNodeSerials.join('\n'));
     setLcmText(p.lcmAvailableUpdates === null ? '' : String(p.lcmAvailableUpdates));
   }, []);
 
@@ -941,7 +941,7 @@ function ClusterConfigEditor({ password }: { password: string }) {
         throw new Error('LCM updates must be a non-negative integer (or empty to clear)');
       }
       const p = await api.adminClusterConfigSave(password, {
-        rackableUnitSerials: serials,
+        discoverableNodeSerials: serials,
         lcmAvailableUpdates: lcm,
       });
       hydrate(p);
@@ -975,21 +975,21 @@ function ClusterConfigEditor({ password }: { password: string }) {
       <IntelligentOpsStatus password={password} />
       <p className="admin-cluster-intro">
         <strong>Cached cluster snapshot</strong> · pre-loaded at boot to skip
-        the slow rackable-units / LCM-inventory queries inside checks. Operator
-        edits are sticky (the boot probe never overwrites them).
+        the slow discover-unconfigured-nodes / LCM-inventory queries inside
+        checks. Operator edits are sticky (the boot probe never overwrites them).
       </p>
       {error && <div className="app-error">{error}</div>}
       <div className="admin-cluster-section">
         <label className="admin-cluster-label">
-          rackable unit serials
-          {data?.meta.rackableUnitSerials && (
+          discoverable node serials (expand candidates)
+          {data?.meta.discoverableNodeSerials && (
             <span className="c-dim">
               {' · '}
-              <span className={`admin-cluster-source-${data.meta.rackableUnitSerials.source}`}>
-                {data.meta.rackableUnitSerials.source}
+              <span className={`admin-cluster-source-${data.meta.discoverableNodeSerials.source}`}>
+                {data.meta.discoverableNodeSerials.source}
               </span>
               {' · '}
-              {fmtAge(data.meta.rackableUnitSerials.updatedAt)}
+              {fmtAge(data.meta.discoverableNodeSerials.updatedAt)}
             </span>
           )}
         </label>
@@ -998,7 +998,7 @@ function ClusterConfigEditor({ password }: { password: string }) {
           value={serialsText}
           onChange={(e) => setSerialsText(e.target.value)}
           rows={Math.max(3, serialsText.split('\n').length)}
-          placeholder="one serial per line, e.g. 18SM6H110065"
+          placeholder="one serial per line — only nodes NOT in the cluster (i.e. expand-cluster candidates)"
           spellCheck={false}
         />
       </div>
