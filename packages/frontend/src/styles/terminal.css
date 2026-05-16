@@ -480,12 +480,22 @@ a.terminal-link:visited {
 .code-block {
   position: relative;
   margin: 8px 0;
-  padding: 10px 12px;
+  /* Right padding reserves space for the absolutely-positioned copy button
+     (26px wide + 6px right offset + 8px breathing). Without this, a width:
+     fit-content block would draw the button over the last character of a
+     short line. */
+  padding: 10px 44px 10px 12px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 4px;
   animation: code-block-in 560ms cubic-bezier(0.16, 0.84, 0.22, 1) both;
   transform-origin: top center;
+  /* Shrink to the widest line instead of spanning the terminal so the copy
+     icon is right next to the snippet — no need to cross the screen to
+     reach it on short blocks. Long lines still scroll inside via overflow-x
+     on .code-body; max-width caps the block at the terminal width. */
+  width: fit-content;
+  max-width: 100%;
 }
 @keyframes code-block-in {
   0% {
