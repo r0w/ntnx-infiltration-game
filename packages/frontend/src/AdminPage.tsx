@@ -719,11 +719,7 @@ function AdminDashboard({
             onLogout();
           }}
         >
-          <p>
-            You'll need to re-enter the admin password to come back. The
-            operator state (lunch lock, gate unlocks, pack overrides) stays
-            on the server — this only locks the local UI.
-          </p>
+          <p>You'll need to re-enter the admin password to come back.</p>
         </ConfirmModal>
       )}
     </div>
