@@ -265,12 +265,14 @@ export interface CheckContext {
 
 export interface ClusterConfig {
   /**
-   * Serials of rackable units present on the cluster — used by the
-   * `expand-cluster` stage to validate the player's NodeSerial answer
-   * without re-querying `/clustermgmt/.../rackable-units` (slow on
-   * populated clusters).
+   * Serials of nodes currently DISCOVERABLE (rackmounted, not yet in the
+   * cluster) — i.e. expand candidates for `expand-cluster`. Probed at boot
+   * via `discoverableNodeSerials()` (POST $actions/discover-unconfigured-
+   * nodes + task poll). May be empty on a single-node HPoC with no spare
+   * chassis — that's a legitimate "nothing to expand" state, not a probe
+   * failure.
    */
-  rackableUnitSerials?: string[];
+  discoverableNodeSerials?: string[];
   /**
    * Count of LCM-tracked entities exposing `availableVersions` — used
    * by `lcm-check-updates` so the player's NumberUpdates answer can be

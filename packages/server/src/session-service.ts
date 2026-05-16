@@ -452,10 +452,10 @@ export class SessionService {
     const interpolated = withVariableInterpolation(this.nutanix, () => vars.snapshot());
     const nutanix = withMockOverlay(interpolated, () => overlay.list());
     // Snapshot the cluster_config table once per check call. Two rows
-    // max (rackable_unit_serials, lcm_available_updates), so two cheap
+    // max (discoverable_node_serials, lcm_available_updates), so two cheap
     // SQLite reads — fine to do per check, no need for an in-memory
     // cache that would have to invalidate on /admin edits.
-    const rackable = this.clusterConfig.get<unknown>('rackable_unit_serials');
+    const discoverable = this.clusterConfig.get<unknown>('discoverable_node_serials');
     const lcm = this.clusterConfig.get<unknown>('lcm_available_updates');
     return {
       nutanix,
@@ -471,8 +471,8 @@ export class SessionService {
       logger: this.logger,
       sessionDirectory: this.sessionDirectory,
       clusterConfig: {
-        rackableUnitSerials: Array.isArray(rackable)
-          ? (rackable.filter((s) => typeof s === 'string') as string[])
+        discoverableNodeSerials: Array.isArray(discoverable)
+          ? (discoverable.filter((s) => typeof s === 'string') as string[])
           : undefined,
         lcmAvailableUpdates: typeof lcm === 'number' ? lcm : undefined,
       },
