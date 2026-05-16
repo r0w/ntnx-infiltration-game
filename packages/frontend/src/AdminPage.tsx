@@ -91,8 +91,10 @@ function AdminLogin({ onLoggedIn }: { onLoggedIn: (pw: string) => void }) {
             />
           </label>
           {error && <div className="login-error">{error}</div>}
-          <button type="submit" disabled={busy || !input}>
-            {busy ? 'Checking…' : 'Unlock'}
+          <button type="submit" className="login-submit" disabled={busy || !input}>
+            <span className="login-submit-prompt" aria-hidden>&gt;</span>
+            <span className="login-submit-cmd">{busy ? 'checking' : 'unlock'}</span>
+            <span className="login-submit-cursor" aria-hidden>▌</span>
           </button>
         </form>
         <p className="admin-back-link">
