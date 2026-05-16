@@ -119,7 +119,7 @@ function AdminDashboard({
   const [packBrokenCount, setPackBrokenCount] = useState(0);
   const [packMeta, setPackMeta] = useState<{
     clusterProfile: 'hpoc' | 'other';
-    mode: 'mock' | 'live';
+    mode: 'mock' | 'test' | 'live';
   } | null>(null);
   const [gateBusyId, setGateBusyId] = useState<string | null>(null);
   const [packBusyId, setPackBusyId] = useState<string | null>(null);
@@ -738,7 +738,7 @@ function PackEditor({
   onRequestDisable,
 }: {
   stages: AdminPackStageEntry[] | null;
-  meta: { clusterProfile: 'hpoc' | 'other'; mode: 'mock' | 'live' } | null;
+  meta: { clusterProfile: 'hpoc' | 'other'; mode: 'mock' | 'test' | 'live' } | null;
   busyId: string | null;
   onTogglePackField: (
     s: AdminPackStageEntry,
@@ -759,7 +759,7 @@ function PackEditor({
     <div className="admin-table-wrap">
       {meta && (
         <div className="admin-pack-meta c-dim">
-          mode: <span className={meta.mode === 'mock' ? 'c-yellow' : 'c-green'}>{meta.mode}</span>
+          mode: <span className={meta.mode === 'mock' ? 'c-yellow' : meta.mode === 'test' ? 'c-cyan' : 'c-green'}>{meta.mode}</span>
           {' · '}
           clusterProfile: <span className={meta.clusterProfile === 'hpoc' ? 'c-green' : 'c-yellow'}>{meta.clusterProfile}</span>
           {filtersHpocOnly && (
