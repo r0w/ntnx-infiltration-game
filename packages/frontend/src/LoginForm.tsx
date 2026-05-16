@@ -59,7 +59,7 @@ export function LoginForm({
           )}
           {error && <div className="login-error">{error}</div>}
           <button type="submit" className="login-submit" disabled={busy}>
-            <span className="login-submit-prompt" aria-hidden>$</span>
+            <span className="login-submit-prompt" aria-hidden>&gt;</span>
             <span className="login-submit-cmd">{busy ? 'connecting' : 'start'}</span>
             <span className="login-submit-cursor" aria-hidden>▌</span>
           </button>
