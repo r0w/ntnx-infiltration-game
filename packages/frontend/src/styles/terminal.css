@@ -169,21 +169,56 @@ html, body, #root {
   color: var(--fail);
   font-size: 12px;
 }
-.login button[type="submit"] {
+/* Terminal-prompt styled submit: matches the dropdown's monospace + cyan
+   accent and reads like a shell command. Default = outlined; hover/focus
+   inverts to a filled cyan button with a subtle glow. */
+.login-submit {
   width: 100%;
-  padding: 10px;
+  margin-top: 16px;
+  padding: 11px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+.login-submit:hover:not(:disabled),
+.login-submit:focus-visible:not(:disabled) {
   background: var(--accent);
   color: #001018;
-  border: none;
-  border-radius: 4px;
-  font-weight: 700;
-  cursor: pointer;
-  margin-top: 8px;
+  box-shadow: 0 0 14px rgba(124, 220, 254, 0.35);
+  outline: none;
 }
-.login button[type="submit"]:disabled {
-  background: #334;
+.login-submit:disabled {
   color: var(--dim);
-  cursor: not-allowed;
+  border-color: #1b232b;
+  background: transparent;
+  cursor: progress;
+}
+.login-submit-prompt {
+  opacity: 0.7;
+}
+.login-submit-cursor {
+  display: inline-block;
+  width: 0.55em;
+  margin-left: auto;
+  animation: login-submit-blink 1.05s steps(1) infinite;
+}
+.login-submit:disabled .login-submit-cursor {
+  animation: none;
+  opacity: 0.4;
+}
+@keyframes login-submit-blink {
+  50% { opacity: 0; }
 }
 
 .app {
