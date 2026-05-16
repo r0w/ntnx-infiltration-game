@@ -10,8 +10,8 @@
     "stage-028.line-04"
   ],
   "saveScore": false,
-  "impact": "destructive",
-  "requires": ["NodeRemove"],
+  "impact": "hpoc-only",
+  "requires": ["MultiNode", "NodeRemove"],
   "check": {
     "fn": "CheckNewNode"
   },

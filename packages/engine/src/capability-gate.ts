@@ -45,9 +45,17 @@ export function gateStage(
 ): GateVerdict {
   if (!stage.active) return { allowed: false, reason: 'inactive' };
   if (stage.id <= session.currentStage) return { allowed: false, reason: 'already-passed' };
-  const missing = (stage.requires ?? []).filter((c) => !session.capabilities.has(c));
+  // `requires` is always enforced. `requiresOnOther` adds extra caps only
+  // when the session is on a shared cluster — used by stages whose check
+  // depends on optional cluster features (e.g. Calm policy engine for
+  // create-approval-policy) that the HPoC install pipeline provides but
+  // shared clusters may not have.
+  const effectiveRequires = session.clusterProfile === 'other'
+    ? [...(stage.requires ?? []), ...(stage.requiresOnOther ?? [])]
+    : (stage.requires ?? []);
+  const missing = effectiveRequires.filter((c) => !session.capabilities.has(c));
   if (missing.length > 0) return { allowed: false, reason: 'missing-capability', missing };
-  if (stage.impact === 'destructive' && session.clusterProfile === 'other') {
+  if (stage.impact === 'hpoc-only' && session.clusterProfile === 'other') {
     return { allowed: false, reason: 'destructive-on-other' };
   }
   if (vars && stage.needs && stage.needs.length > 0) {

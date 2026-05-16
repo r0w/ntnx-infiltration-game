@@ -122,8 +122,8 @@ export interface PackInfo {
    */
   mode: 'mock' | 'test' | 'live';
   /** Server's runtime clusterProfile — `'other'` means the engine
-   *  filters destructive stages, `'hpoc'` means they play normally.
-   *  DevPanel uses this to dim destructive stage chips only when
+   *  filters `hpoc-only` stages, `'hpoc'` means they play normally.
+   *  DevPanel uses this to dim `hpoc-only` stage chips only when
    *  they would actually be skipped. */
   clusterProfile: 'hpoc' | 'other';
   defaultLocale: string;
@@ -131,7 +131,7 @@ export interface PackInfo {
   stages: Array<{
     name: string;
     active: boolean;
-    impact: 'safe' | 'destructive';
+    impact: 'safe' | 'hpoc-only';
     requires: string[];
     hasCheck: boolean;
     captures: string[];
@@ -204,14 +204,21 @@ export interface AdminPackStageEntry {
   stageName: string;
   active: boolean;
   adminGate: boolean;
-  /** Pack-declared `impact` ('safe' default, 'destructive' filtered on
+  /** Pack-declared `impact` ('safe' default, 'hpoc-only' filtered on
    *  shared clusters when `clusterProfile === 'other'`). */
-  impact: 'safe' | 'destructive';
+  impact: 'safe' | 'hpoc-only';
   activeOverridden: boolean;
   adminGateOverridden: boolean;
   needs: string[];
   captures: string[];
   brokenMissingVars: string[];
+  /** Always-enforced capability requirements. */
+  requires: string[];
+  /** Capability requirements only enforced when `clusterProfile === 'other'`. */
+  requiresOnOther: string[];
+  /** Caps the stage needs (after `requiresOnOther` overlay) that aren't
+   *  active on the server — non-empty → gate will skip the stage. */
+  missingCapabilities: string[];
 }
 
 export interface AdminPackPayload {

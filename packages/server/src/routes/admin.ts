@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Database } from 'bun:sqlite';
-import type { NutanixClient } from '@ntnx-game/engine';
+import type { CapabilityFlag, NutanixClient } from '@ntnx-game/engine';
 import { HttpError, type SessionService } from '../session-service';
 import { SessionQueries, type AdminSessionRow } from '../db/queries';
 import type { LoadedPack } from '../pack-loader';
@@ -24,6 +24,10 @@ export interface AdminRoutesDeps {
   nutanix: NutanixClient;
   /** Runtime clusterProfile (post mock-override). Surfaced on /pack. */
   clusterProfile: 'hpoc' | 'other';
+  /** Boot-time capability flags from the cluster probe. Used by the
+   *  `/pack` table to mark stages that would be skipped by the gate
+   *  for missing caps in the current profile. */
+  capabilities: CapabilityFlag[];
   /** Configured PC endpoint (e.g. `https://10.8.16.7:9440`). Used by
    *  `/cluster-status` to build the Prism UI deep-link to the IOps
    *  activation page. May be empty in mock mode. */
@@ -78,10 +82,10 @@ export interface AdminPackStageEntry {
   active: boolean;
   /** Effective adminGate value after overlay. */
   adminGate: boolean;
-  /** Pack-declared `impact` ('safe' default, 'destructive' filtered on
+  /** Pack-declared `impact` ('safe' default, 'hpoc-only' filtered on
    *  shared clusters). Surfaced so the operator can see at a glance which
    *  stages would skip when `clusterProfile === 'other'`. */
-  impact: 'safe' | 'destructive';
+  impact: 'safe' | 'hpoc-only';
   /** True iff the operator has overridden `active` (vs using the JSON value). */
   activeOverridden: boolean;
   /** True iff the operator has overridden `adminGate`. */
@@ -92,6 +96,16 @@ export interface AdminPackStageEntry {
   captures: string[];
   /** Vars in `needs` that have no surviving producer in the effective pack. */
   brokenMissingVars: string[];
+  /** Always-enforced capability requirements. */
+  requires: string[];
+  /** Capability requirements only enforced when `clusterProfile === 'other'`. */
+  requiresOnOther: string[];
+  /** Caps from `requires` (always) + `requiresOnOther` (only when
+   *  `clusterProfile === 'other'`) that are NOT currently activated on the
+   *  server. Non-empty → the gate will skip this stage at session-create
+   *  with `reason: 'missing-capability'`. The admin UI uses this to render
+   *  a `skipped (needs …)` status badge. */
+  missingCapabilities: string[];
 }
 
 export interface AdminPackPayload {
@@ -296,9 +310,20 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     const brokenByName = new Map(analysis.broken.map((b) => [b.stageName, b]));
     const baseByName = new Map(baseStages.map((s) => [s.name, s]));
 
+    const activeCaps = new Set(deps.capabilities);
     const stagesPayload: AdminPackStageEntry[] = effective.map((s) => {
       const o = overlay.get(s.name);
       const base = baseByName.get(s.name);
+      const requires = s.requires ?? [];
+      const requiresOnOther = s.requiresOnOther ?? [];
+      // Mirror the capability-gate logic: requires is always enforced;
+      // requiresOnOther only when the runtime cluster is shared. The admin
+      // table reports what WOULD happen for a new session on this server,
+      // so we evaluate against the boot-time profile + caps.
+      const effectiveRequires = deps.clusterProfile === 'other'
+        ? [...requires, ...requiresOnOther]
+        : requires;
+      const missingCapabilities = effectiveRequires.filter((c) => !activeCaps.has(c));
       return {
         stageName: s.name,
         active: s.active,
@@ -309,6 +334,9 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
         needs: s.needs ?? [],
         captures: s.captures ?? [],
         brokenMissingVars: brokenByName.get(s.name)?.missingVars ?? [],
+        requires,
+        requiresOnOther,
+        missingCapabilities,
       };
     });
 

@@ -89,6 +89,45 @@ const PROBES: SingleProbe[] = [
       };
     },
   },
+  {
+    // Same hit as NodeRemove today (>=2 nodes). Kept as a distinct flag so
+    // we can later tighten NodeRemove to mean "≥2 AND has a spare chassis
+    // slot" without affecting stages that only need multi-node (e.g.
+    // live-migrate-vm). The probe re-uses the same endpoint; the network
+    // round-trip is fast enough that running it twice is fine.
+    flag: 'MultiNode',
+    method: 'GET',
+    path: '/api/clustermgmt/v4.0/config/clusters',
+    interpret: (body) => {
+      const clusters = readArray(body, ['data']) ?? readArray(body, ['entities']);
+      if (!clusters) return { detected: false, detail: 'cluster list empty or missing' };
+      const maxNodes = clusters.reduce<number>((acc, c) => Math.max(acc, readNodeCount(c)), 0);
+      return {
+        detected: maxNodes >= 2,
+        detail: `largest cluster has ${maxNodes} node${maxNodes === 1 ? '' : 's'}`,
+      };
+    },
+  },
+  {
+    // Calm policy engine activation state. Same endpoint the BP's
+    // activate_policy_engine.py PUTs against; we just read it. `is_enabled`
+    // in `spec.feature_status` is the operator-set value (sticky); the
+    // `status.feature_status` mirror lags during a deploy. We trust `spec`
+    // here — if the operator (or the BP) flipped it on, the stage should be
+    // allowed even if the Policy VM is still bootstrapping (the in-game
+    // check has its own retry logic).
+    flag: 'ApprovalPolicy',
+    method: 'GET',
+    path: '/api/calm/v3.0/features/policy',
+    interpret: (body) => {
+      const enabled =
+        readBool(body, ['spec', 'feature_status', 'is_enabled']) ??
+        readBool(body, ['status', 'feature_status', 'is_enabled']);
+      if (enabled === true) return { detected: true, detail: 'policy engine is_enabled=true' };
+      if (enabled === false) return { detected: false, detail: 'policy engine is_enabled=false' };
+      return { detected: false, detail: 'policy feature endpoint did not surface is_enabled' };
+    },
+  },
 ];
 
 export async function probeCapabilities(deps: CapabilityProbeDeps): Promise<CapabilityProbeResult> {

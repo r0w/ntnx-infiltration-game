@@ -149,6 +149,7 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
       service,
       nutanix: deps.nutanix,
       clusterProfile: deps.clusterProfile,
+      capabilities: deps.capabilities,
       pcEndpoint: deps.clusterEndpoint,
     }),
   );

@@ -1082,7 +1082,7 @@ async function CheckProtectionPolicy(ctx: CheckContext): Promise<CheckResult> {
  * name — not namespaced by trigram because it's cluster-wide) exists and is
  * linked to the player's protection policy. Cluster-wide approval policies
  * are sensitive on shared profiles; this stage is a candidate for
- * `impact: 'destructive'` in Phase 11. Live path is
+ * `impact: 'hpoc-only'` in Phase 11. Live path is
  * `/api/security/v4.1/management/approval-policies` (approvals live inside
  * the security namespace on v4, not the guessed `/approvals/`).
  */

@@ -79,7 +79,7 @@ async function bootApp() {
     nutanix: baseClient,
     clusterEndpoint: '',
     clusterProfile: 'hpoc',
-    capabilities: ['CalmDSL', 'NodeRemove'],
+    capabilities: ['CalmDSL', 'NodeRemove', 'MultiNode', 'ApprovalPolicy'],
     adminPassword: ADMIN_PW,
     initialVariables: {
       // Same defaults the real boot wires for mock parity. Acts read

@@ -1024,7 +1024,7 @@ function formatDisableReason(
     case 'missing-capability':
       return `missing capability: ${verdict.missing.join(', ') || '(unspecified)'}`;
     case 'destructive-on-other':
-      return 'destructive on shared cluster';
+      return 'hpoc-only stage on shared cluster';
     case 'missing-upstream':
       return `missing upstream vars: ${verdict.missingVars.join(', ') || '(unspecified)'}`;
   }

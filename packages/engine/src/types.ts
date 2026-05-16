@@ -20,23 +20,33 @@ export interface LocaleBundle {
   catalogs: Record<Locale, LocaleCatalog>;
 }
 
-export type CapabilityFlag = 'NCM' | 'IO' | 'CalmDSL' | 'NodeRemove';
+export type CapabilityFlag =
+  | 'NCM'
+  | 'IO'
+  | 'CalmDSL'
+  | 'NodeRemove'
+  | 'MultiNode'
+  | 'ApprovalPolicy';
 
 /**
- * Cluster profile drives destructive-stage gating.
+ * Cluster profile drives `impact: 'hpoc-only'` gating.
  *
  *   `hpoc`  — recognized HPoC (DM3 / RNO / PHX IP ranges) reserved for the
- *             event. Operator has the keys; destructive stages run.
- *   `other` — anything else. Fail-safe: destructive stages are filtered.
- *             Default when the IP heuristic doesn't match a known HPoC.
+ *             event. Operator has the keys; `hpoc-only` stages run.
+ *   `other` — anything else. Fail-safe: `hpoc-only` stages are filtered
+ *             and `requiresOnOther` capability gates apply.
  *
- * Operators force-allow destructives on a non-HPoC dedicated cluster by
+ * Operators force-allow `hpoc-only` on a non-HPoC dedicated cluster by
  * setting `CLUSTER_PROFILE=hpoc` in the env explicitly (the heuristic
  * defers to the explicit value).
  */
 export type ClusterProfile = 'hpoc' | 'other';
 
-export type StageImpact = 'safe' | 'destructive';
+// 'hpoc-only' (formerly 'destructive') gates stages the engine refuses to
+// play on a shared cluster (cluster-shape-mutating: node remove, etc.).
+// Named from the operator's mental model — "this stage only runs on HPoC"
+// — instead of the scarier "destructive" tag.
+export type StageImpact = 'safe' | 'hpoc-only';
 
 export type StageStatus = 'passed' | 'skipped' | 'failed' | 'disabled';
 
@@ -62,6 +72,15 @@ export interface StageDefinition {
   name: string;
   active: boolean;
   requires?: CapabilityFlag[];
+  /**
+   * Extra capability requirements enforced ONLY when `clusterProfile === 'other'`.
+   * Lets a stage say "on HPoC we trust the install pipeline; on a shared
+   * cluster, only play if X is actually detected". Example: stage 21
+   * (create-approval-policy) needs the Calm policy engine — the BP install
+   * activates it on HPoC, but on `other` we must probe before letting the
+   * stage run. Empty/missing = no extra gate.
+   */
+  requiresOnOther?: CapabilityFlag[];
   impact?: StageImpact;
   prompt?: string;
   messages: string[];
