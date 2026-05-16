@@ -17,7 +17,7 @@ const stages: StageDefinition[] = [
   {
     id: 3,
     active: true,
-    impact: 'destructive',
+    impact: 'hpoc-only',
     messages: ['s3.destructive'],
     saveScore: true,
   },

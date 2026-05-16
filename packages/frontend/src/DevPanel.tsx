@@ -191,18 +191,18 @@ export function DevPanel({
                     // every downstream check fails).
                     const isCurrent = s.name === activeStageName;
                     const isForward = idx > activeIdx;
-                    // Only mark destructive stages red when the engine
+                    // Only mark hpoc-only stages red when the engine
                     // would actually skip them (clusterProfile=other).
                     // On hpoc those stages play normally and red is just
                     // visual noise.
-                    const destructiveFiltered = s.impact === 'destructive'
+                    const hpocOnlyFiltered = s.impact === 'hpoc-only'
                       && pack.clusterProfile === 'other';
                     const cls = [
                       'devpanel-stage',
                       isCurrent && 'devpanel-stage-current',
                       isForward && 'devpanel-stage-forward',
                       !s.active && 'devpanel-stage-inactive',
-                      destructiveFiltered && 'devpanel-stage-destructive',
+                      hpocOnlyFiltered && 'devpanel-stage-destructive',
                     ]
                       .filter(Boolean)
                       .join(' ');
@@ -216,8 +216,8 @@ export function DevPanel({
                         title={[
                           s.name,
                           isForward ? 'forward jump disabled' : null,
-                          destructiveFiltered
-                            ? `destructive (filtered on clusterProfile='${pack.clusterProfile}')`
+                          hpocOnlyFiltered
+                            ? `hpoc-only (filtered on clusterProfile='${pack.clusterProfile}')`
                             : null,
                           s.requires.length ? `requires: ${s.requires.join(', ')}` : null,
                           !s.active ? 'inactive' : null,

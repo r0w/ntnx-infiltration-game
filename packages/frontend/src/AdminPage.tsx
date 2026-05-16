@@ -749,12 +749,12 @@ function PackEditor({
 }) {
   if (stages === null) return <div className="admin-empty">loading pack…</div>;
   if (stages.length === 0) return <div className="admin-empty">empty pack.</div>;
-  // A stage is filtered at session-creation time when it's destructive AND
-  // the runtime cluster profile is `other`. In mock mode the destructive
+  // A stage is filtered at session-creation time when it's hpoc-only AND
+  // the runtime cluster profile is `other`. In mock mode the hpoc-only
   // gate is bypassed (cluster profile forced to `hpoc` at boot), so don't
   // mark anything filtered there — operator would otherwise wonder why the
   // tag is on stages that all play through.
-  const filtersDestructive = meta !== null && meta.clusterProfile === 'other';
+  const filtersHpocOnly = meta !== null && meta.clusterProfile === 'other';
   return (
     <div className="admin-table-wrap">
       {meta && (
@@ -762,10 +762,10 @@ function PackEditor({
           mode: <span className={meta.mode === 'mock' ? 'c-yellow' : 'c-green'}>{meta.mode}</span>
           {' · '}
           clusterProfile: <span className={meta.clusterProfile === 'hpoc' ? 'c-green' : 'c-yellow'}>{meta.clusterProfile}</span>
-          {filtersDestructive && (
+          {filtersHpocOnly && (
             <>
               {' · '}
-              <span className="c-yellow">destructive stages skipped at session start</span>
+              <span className="c-yellow">hpoc-only stages skipped at session start</span>
             </>
           )}
         </div>
@@ -787,19 +787,21 @@ function PackEditor({
           {stages.map((s, idx) => {
             const broken = s.brokenMissingVars.length > 0;
             const inactive = !s.active;
-            const destructiveSkipped = filtersDestructive && s.impact === 'destructive';
+            const hpocOnlySkipped = filtersHpocOnly && s.impact === 'hpoc-only';
+            const capsMissing = s.missingCapabilities.length > 0;
             const busy = busyId === s.stageName;
+            const rowSkipped = hpocOnlySkipped || capsMissing;
             return (
               <tr
                 key={s.stageName}
-                className={`pack-row ${inactive ? 'pack-row-off' : ''} ${broken ? 'pack-row-broken' : ''} ${destructiveSkipped ? 'pack-row-skipped' : ''}`}
+                className={`pack-row ${inactive ? 'pack-row-off' : ''} ${broken ? 'pack-row-broken' : ''} ${rowSkipped ? 'pack-row-skipped' : ''}`}
               >
                 <td className="pack-td-id c-dim">{idx + 1}</td>
                 <td className="pack-td-name">{s.stageName}</td>
                 <td>
-                  {s.impact === 'destructive' ? (
-                    <span className="c-yellow" title="impact='destructive' in pack JSON; filtered when clusterProfile === 'other'">
-                      destructive
+                  {s.impact === 'hpoc-only' ? (
+                    <span className="c-yellow" title="impact='hpoc-only' in pack JSON; filtered when clusterProfile === 'other'">
+                      hpoc-only
                     </span>
                   ) : (
                     <span className="c-dim">safe</span>
@@ -808,11 +810,11 @@ function PackEditor({
                 <td>
                   <button
                     type="button"
-                    className={`pack-toggle ${s.active ? 'pack-toggle-on' : 'pack-toggle-off'} ${destructiveSkipped ? 'pack-toggle-filtered' : ''}`}
+                    className={`pack-toggle ${s.active ? 'pack-toggle-on' : 'pack-toggle-off'} ${hpocOnlySkipped ? 'pack-toggle-filtered' : ''}`}
                     disabled={busy}
                     title={
-                      destructiveSkipped
-                        ? `active in pack (JSON default), but engine filters this stage for sessions with clusterProfile='${meta?.clusterProfile}' because impact='destructive'`
+                      hpocOnlySkipped
+                        ? `active in pack (JSON default), but engine filters this stage for sessions with clusterProfile='${meta?.clusterProfile}' because impact='hpoc-only'`
                         : (s.activeOverridden ? 'overridden by operator (click to flip)' : 'using JSON default')
                     }
                     onClick={() =>
@@ -848,9 +850,16 @@ function PackEditor({
                     </span>
                   ) : inactive ? (
                     <span className="c-dim">disabled</span>
-                  ) : destructiveSkipped ? (
-                    <span className="c-yellow" title="destructive impact + clusterProfile='other' → engine skips this stage at session-create">
-                      skipped (destructive)
+                  ) : capsMissing ? (
+                    <span
+                      className="c-yellow"
+                      title={`engine will skip — caps not detected on this cluster: ${s.missingCapabilities.join(', ')}`}
+                    >
+                      skipped (needs {s.missingCapabilities.join(', ')})
+                    </span>
+                  ) : hpocOnlySkipped ? (
+                    <span className="c-yellow" title="impact='hpoc-only' + clusterProfile='other' → engine skips this stage at session-create">
+                      skipped (hpoc-only)
                     </span>
                   ) : (
                     <span className="c-green">ok</span>
