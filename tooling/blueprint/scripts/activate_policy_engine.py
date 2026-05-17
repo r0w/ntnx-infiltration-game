@@ -13,10 +13,14 @@ reachable a minute later.
 Strategy:
   1. Skip if `is_enabled` is already true.
   2. PUT with target IP, increment spec_version.
-  3. Poll for up to 30 min: try `is_enabled`, but also TCP-probe :4202
-     on the target IP — if either flips true, we're done.
-  4. If both fail, retry once: delete the Policy VM, swap to a fallback
-     IP (.11 instead of .10 by default), re-PUT, poll again.
+  3. Poll up to 15 min for `state=COMPLETED && is_enabled` (or
+     `is_enabled` alone if Calm hasn't surfaced state yet). Fail-fast
+     on `state=ERROR` — Calm's own terminal signal.
+  4. If the failure is the "services failed to come online" pattern,
+     skip the fallback-IP retry (same AHV → same broken image, retry
+     would burn another 15 min for nothing). Otherwise: delete the
+     Policy VM, swap to fallback IP (.11 instead of .10), re-PUT,
+     poll again.
   5. Skip entirely on non-hpoc (stage 21 is filtered there anyway).
 
 Calm injects @@{PC_IP}@@, @@{PC_USERNAME}@@, @@{PC_PASSWORD}@@,
@@ -44,7 +48,10 @@ URL_VMS_LIST = "%s/api/nutanix/v3/vms/list" % BASE
 URL_VM = "%s/api/nutanix/v3/vms/%%s" % BASE
 
 POLL_INTERVAL_SEC = 30
-POLL_TIMEOUT_SEC = 5 * 60       # 5 min per attempt (10 min total with retry)
+# 15 min per attempt: validated 2026-05-17 on 10.55.89.7 where a healthy
+# Policy Engine deploy took 13 min to reach state=COMPLETED. The previous
+# 5-min cap timed out *successful* deploys mid-cycle.
+POLL_TIMEOUT_SEC = 15 * 60
 # Best-effort mode: when both retries fail (Policy VM image broken on
 # the cluster's AHV build, cf. memory project_calm_policy_vm_unstable),
 # exit 0 with a loud warning instead of FAILURE. The install runbook
@@ -139,42 +146,55 @@ def delete_policy_vm():
 
 
 def wait_until_ready(target_ip):
-    """Poll the policy feature status until any of:
+    """Poll the policy feature status until one of:
        (a) state == COMPLETED AND is_enabled — Calm's own done-signal,
            same one Prism UI uses to flip the activation bar to green.
        (b) is_enabled=true observed at least once — Calm has wired the
-           feature flag, even if state is still RUNNING (Calm's
-           sub-tasks are post-activation cleanup, not gating). Validated
-           2026-05-02 on 10.54.28.7 where the previous strict
-           "3 polls + :4202 open" requirement timed out on a
-           valid activation: is_enabled flapped True→False at +0s,
-           manual UI check confirmed activated. Drop the strict streak
-           + TCP probe gate — first positive is good enough; downstream
-           install tasks don't depend on policy engine timing.
-       Either is enough; the loop stops at the first hit."""
+           feature flag, even if state is still RUNNING (sub-tasks are
+           post-activation cleanup, not gating). Validated 2026-05-02
+           on 10.54.28.7 where is_enabled flapped True→False at +0s,
+           manual UI check confirmed activated.
+       (c) state == ERROR — Calm declared the deploy failed. Return
+           False immediately so main() decides retry-IP vs best-effort
+           without burning the full timeout. Validated 2026-05-17 on
+           10.8.24.7 where state hit ERROR at ~8 min with msg=
+           "Policy Engine services failed to come online" (the AHV
+           image-broken pattern from project_calm_policy_vm_unstable).
+       Info-only :4202 probe + status line printed once per transition
+       (state/state_message/progress changed), not every poll — keeps
+       the Calm runlog readable."""
     deadline_iter = POLL_TIMEOUT_SEC // POLL_INTERVAL_SEC
+    last_key = None
     for i in range(deadline_iter):
         elapsed = i * POLL_INTERVAL_SEC
         feature, err = get_feature()
         st = (feature or {}).get("status", {}).get("feature_status", {})
+        cfg = st.get("config") or {}
         enabled = (feature or {}).get("spec", {}).get("feature_status", {}).get("is_enabled")
-        state = (st.get("config") or {}).get("state")
-        port_ok = tcp_probe(target_ip, 4202, timeout=4)
+        state = cfg.get("state")
+        msg = cfg.get("state_message")
+        prog = cfg.get("progress") or {}
+        step = "%s/%s" % (prog.get("current_step"), prog.get("total_steps"))
 
-        # Path (a): Calm itself says COMPLETED — done.
         if state == "COMPLETED" and bool(enabled):
-            print("  [+%ds] is_enabled=true AND state=COMPLETED — done (UI-style verify)"
-                  % elapsed)
+            print("  [+%ds] step=%s msg=%s state=COMPLETED enabled=True — done"
+                  % (elapsed, step, msg))
             return True
-        # Path (b): is_enabled flipped True at any point. Trust it; the
-        # subsequent flap to False is Calm's internal poll noise, not a
-        # real "engine down" signal. :4202 reported as info only.
         if bool(enabled):
-            print("  [+%ds] is_enabled=true | :4202 %s | state=%s — done" %
-                  (elapsed, "OK" if port_ok else "no", state))
+            print("  [+%ds] step=%s msg=%s state=%s enabled=True — done"
+                  % (elapsed, step, msg, state))
             return True
-        print("  [+%ds] is_enabled=%s | :4202 %s | state=%s" %
-              (elapsed, enabled, "OK" if port_ok else "no", state))
+        if state == "ERROR":
+            print("  [+%ds] step=%s msg=%s state=ERROR — Calm declared failure, stopping early"
+                  % (elapsed, step, msg))
+            return False
+
+        key = (state, msg, step)
+        if key != last_key:
+            port_ok = tcp_probe(target_ip, 4202, timeout=4)
+            print("  [+%ds] step=%s msg=%s state=%s enabled=%s | :4202 %s"
+                  % (elapsed, step, msg, state, enabled, "OK" if port_ok else "no"))
+            last_key = key
         time.sleep(POLL_INTERVAL_SEC)
     return False
 
@@ -219,8 +239,8 @@ def attempt(label, target_ip):
     if wait_until_ready(target_ip):
         print("[%s] [ok] policy engine deploy is ready" % label)
         return True
-    print("[%s] [warn] timeout — policy services never came up at %s:4202" %
-          (label, target_ip))
+    print("[%s] [warn] policy engine did not become ready (Calm ERROR or %d-min timeout)" %
+          (label, POLL_TIMEOUT_SEC // 60))
     return False
 
 
@@ -238,14 +258,25 @@ def main():
     if attempt("try 1/2 (ip=%s)" % primary, primary):
         return 0
 
-    print("retry: deleting any stuck Policy VM + switching to fallback ip %s ..." % fallback)
-    ok, msg = delete_policy_vm()
-    print("  delete: %s%s" % ("ok" if ok else "skip", " — " + msg if msg else ""))
-    if ok:
-        time.sleep(POLL_INTERVAL_SEC)  # let DELETE settle
+    # Image-broken pattern? Same AHV build → fallback IP will reproduce
+    # the same failure (Policy VM boots COMPLETE/ON, but services never
+    # bind :4202). Skip the 15-min retry and go straight to best-effort.
+    # Validated 2026-05-17 on 10.8.24.7.
+    feat, _ = get_feature()
+    last_msg = ((((feat or {}).get("status") or {}).get("feature_status") or {})
+                .get("config", {}).get("state_message") or "")
+    if "services failed to come online" in last_msg.lower():
+        print("retry skipped: image-bug pattern (msg=%r) — fallback IP would reproduce same failure"
+              % last_msg)
+    else:
+        print("retry: deleting any stuck Policy VM + switching to fallback ip %s ..." % fallback)
+        ok, msg = delete_policy_vm()
+        print("  delete: %s%s" % ("ok" if ok else "skip", " — " + msg if msg else ""))
+        if ok:
+            time.sleep(POLL_INTERVAL_SEC)  # let DELETE settle
 
-    if attempt("try 2/2 (ip=%s)" % fallback, fallback):
-        return 0
+        if attempt("try 2/2 (ip=%s)" % fallback, fallback):
+            return 0
 
     if BEST_EFFORT:
         print(
