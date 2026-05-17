@@ -8,11 +8,12 @@ import {
   type AdminLunchStatus,
   type AdminPackStageEntry,
   type AdminPackTogglePreview,
+  type AdminPeerEntry,
   type AdminUserEntry,
 } from './api';
 import { ConfirmModal } from './Modal';
 
-type AdminTab = 'users' | 'pack' | 'cluster';
+type AdminTab = 'users' | 'pack' | 'cluster' | 'peers';
 
 const STORAGE_KEY = 'ntnx-infiltration-admin-pw';
 
@@ -385,6 +386,15 @@ function AdminDashboard({
           >
             cluster
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'peers'}
+            className={`admin-tab ${tab === 'peers' ? 'admin-tab-active' : ''}`}
+            onClick={() => setTab('peers')}
+          >
+            peers
+          </button>
         </nav>
         {lunch && (
           <button
@@ -621,6 +631,7 @@ function AdminDashboard({
         />
       )}
       {tab === 'cluster' && <ClusterConfigEditor password={password} />}
+      {tab === 'peers' && <PeersEditor password={password} />}
       {packDisableTarget && (
         <ConfirmModal
           title={<><span className="c-yellow">!</span> disable stage?</>}
@@ -1124,6 +1135,177 @@ function IntelligentOpsStatus({ password }: { password: string }) {
           </>
         )}
         {error && <div className="c-dim admin-cluster-iops-err">{error}</div>}
+      </div>
+    </div>
+  );
+}
+
+function PeersEditor({ password }: { password: string }) {
+  const [entries, setEntries] = useState<AdminPeerEntry[] | null>(null);
+  const [busy, setBusy] = useState<'load' | 'add' | 'mutate' | null>('load');
+  const [error, setError] = useState<string | null>(null);
+  const [label, setLabel] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
+
+  const load = useCallback(async () => {
+    setBusy('load');
+    setError(null);
+    try {
+      const p = await api.adminPeers(password);
+      setEntries(p.entries);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }, [password]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const add = async () => {
+    setBusy('add');
+    setError(null);
+    try {
+      const trimmedLabel = label.trim();
+      const trimmedUrl = baseUrl.trim();
+      if (!trimmedLabel) throw new Error('label is required');
+      if (!trimmedUrl) throw new Error('baseUrl is required');
+      await api.adminPeerAdd(password, { label: trimmedLabel, baseUrl: trimmedUrl });
+      setLabel('');
+      setBaseUrl('');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setBusy(null);
+    }
+  };
+
+  const toggle = async (peer: AdminPeerEntry) => {
+    setBusy('mutate');
+    setError(null);
+    try {
+      await api.adminPeerToggle(password, peer.id, !peer.enabled);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setBusy(null);
+    }
+  };
+
+  const remove = async (peer: AdminPeerEntry) => {
+    if (!window.confirm(`remove peer "${peer.label}" (${peer.baseUrl})?`)) return;
+    setBusy('mutate');
+    setError(null);
+    try {
+      await api.adminPeerDelete(password, peer.id);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setBusy(null);
+    }
+  };
+
+  if (!entries && busy === 'load') {
+    return <div className="admin-empty">loading peers…</div>;
+  }
+
+  return (
+    <div className="admin-cluster">
+      <p className="admin-cluster-intro">
+        <strong>Combined scoreboard peers</strong> · other ntnx-infiltration
+        instances whose <code>/api/scoreboard</code> is merged into this
+        server's combined view at{' '}
+        <Link to="/scoreboard?combined=1" target="_blank" rel="noreferrer">
+          /scoreboard?combined=1
+        </Link>
+        . Peers are fanned-out in parallel (5s timeout each); failures don't
+        break the aggregate. baseUrl example: <code>http://10.55.89.44:3000</code>.
+      </p>
+      {error && <div className="app-error">{error}</div>}
+
+      <div className="admin-cluster-section">
+        <label className="admin-cluster-label">add peer</label>
+        <div className="admin-peers-add-row">
+          <input
+            type="text"
+            className="admin-cluster-input"
+            placeholder="label (e.g. DM3-POC037)"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            disabled={busy !== null}
+          />
+          <input
+            type="text"
+            className="admin-cluster-input"
+            placeholder="http://10.55.89.44:3000"
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            disabled={busy !== null}
+            spellCheck={false}
+          />
+          <button
+            type="button"
+            className="modal-btn modal-btn-danger"
+            disabled={busy !== null}
+            onClick={() => void add()}
+          >
+            {busy === 'add' ? 'adding…' : 'add'}
+          </button>
+        </div>
+      </div>
+
+      <div className="admin-cluster-section">
+        <label className="admin-cluster-label">configured peers ({entries?.length ?? 0})</label>
+        {entries && entries.length === 0 ? (
+          <div className="c-dim">no peers configured — combined view shows only local entries.</div>
+        ) : (
+          <div className="admin-table-wrap">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Label</th>
+                  <th>baseUrl</th>
+                  <th>Added</th>
+                  <th>Enabled</th>
+                  <th aria-label="actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {entries?.map((p) => (
+                  <tr key={p.id}>
+                    <td className="admin-td-trigram">{p.label}</td>
+                    <td className="c-dim">{p.baseUrl}</td>
+                    <td className="c-dim">{fmtAge(p.addedAt)}</td>
+                    <td>
+                      <label className="modal-toggle" title="disabled peers are skipped on combined fan-out">
+                        <input
+                          type="checkbox"
+                          checked={p.enabled}
+                          disabled={busy !== null}
+                          onChange={() => void toggle(p)}
+                        />
+                        <span>{p.enabled ? <span className="c-green">on</span> : <span className="c-dim">off</span>}</span>
+                      </label>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="admin-delete"
+                        disabled={busy !== null}
+                        onClick={() => void remove(p)}
+                        title="remove this peer"
+                      >
+                        remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

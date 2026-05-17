@@ -122,3 +122,16 @@ CREATE TABLE IF NOT EXISTS cluster_config (
   updated_at INTEGER NOT NULL,
   source TEXT NOT NULL            -- 'probe' | 'admin'
 );
+
+-- Peer instances whose `/api/scoreboard` should be merged into the local
+-- combined view. Admin-curated via /admin Combined Scoreboards. `base_url`
+-- is the peer game's base (e.g. `http://10.55.89.44:3000`) — the combined
+-- endpoint appends `/api/scoreboard` internally. UNIQUE on base_url so the
+-- operator doesn't accidentally double-add the same HPoC.
+CREATE TABLE IF NOT EXISTS scoreboard_peers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  label TEXT NOT NULL,
+  base_url TEXT NOT NULL UNIQUE,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  added_at INTEGER NOT NULL
+);

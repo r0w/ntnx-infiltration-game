@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { api, type ScoreboardEntry, type ScoreboardPayload } from './api';
+import {
+  api,
+  type CombinedPeerStatus,
+  type ScoreboardEntry,
+} from './api';
 
 const REFRESH_MS = 5000;
 // Legacy Python scoreboard fit up to 8 rows per column and added columns as
@@ -12,7 +16,17 @@ const MAX_COLS = 5;
 // `?demo=N` bypasses the fetch and renders a canned roster — useful for
 // previewing the layout at different densities without seeding the DB.
 const DEMO_PARAM = 'demo';
+const COMBINED_PARAM = 'combined';
 const DEMO_PRESETS = [5, 12, 40] as const;
+
+interface DisplayPayload {
+  packId: string;
+  packName: string;
+  mode: 'mock' | 'live';
+  totalStages: number;
+  entries: Array<ScoreboardEntry & { peerLabel?: string | null }>;
+  peerStatus?: CombinedPeerStatus[];
+}
 
 export function Scoreboard() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -22,18 +36,19 @@ export function Scoreboard() {
     const n = Number.parseInt(demoRaw, 10);
     return Number.isFinite(n) && n > 0 ? Math.min(n, 40) : null;
   }, [demoRaw]);
-  const [livePayload, setLivePayload] = useState<ScoreboardPayload | null>(null);
+  const combined = searchParams.get(COMBINED_PARAM) === '1';
+  const [livePayload, setLivePayload] = useState<DisplayPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshAt, setLastRefreshAt] = useState<number>(Date.now());
 
   useEffect(() => {
-    document.title = 'NIG - scoreboard';
-  }, []);
+    document.title = combined ? 'NIG - combined scoreboard' : 'NIG - scoreboard';
+  }, [combined]);
 
   // Demo payload is memoized on demoCount so switching presets re-seeds
   // (different random elapsed times etc.) without flickering while we stay
   // on the same count.
-  const demoPayload = useMemo(
+  const demoPayload = useMemo<DisplayPayload | null>(
     () => (demoCount !== null ? makeDemoPayload(demoCount) : null),
     [demoCount],
   );
@@ -45,9 +60,9 @@ export function Scoreboard() {
     let timer: ReturnType<typeof setTimeout> | null = null;
     const tick = async () => {
       try {
-        const p = await api.scoreboard();
+        const p = combined ? await api.combinedScoreboard() : await api.scoreboard();
         if (!cancelled) {
-          setLivePayload(p);
+          setLivePayload(p as DisplayPayload);
           setError(null);
           setLastRefreshAt(Date.now());
         }
@@ -62,7 +77,7 @@ export function Scoreboard() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [demoCount]);
+  }, [demoCount, combined]);
 
   const count = payload?.entries.length ?? 0;
   const cols = count === 0 ? 1 : Math.min(Math.ceil(count / MAX_ROWS_PER_COL), MAX_COLS);
@@ -80,9 +95,27 @@ export function Scoreboard() {
     <div className="scoreboard-projector">
       <header className="scoreboard-header">
         <Link to="/" className="scoreboard-back" aria-label="back to game">←</Link>
-        <h1 className="scoreboard-title">Status of Undercover Agents</h1>
+        <h1 className="scoreboard-title">
+          {combined ? 'Combined Status of Undercover Agents' : 'Status of Undercover Agents'}
+        </h1>
+        <button
+          type="button"
+          className={`scoreboard-combined-toggle${combined ? ' is-active' : ''}`}
+          onClick={() => {
+            const next = new URLSearchParams(searchParams);
+            if (combined) next.delete(COMBINED_PARAM);
+            else next.set(COMBINED_PARAM, '1');
+            setSearchParams(next);
+          }}
+          title={combined ? 'show only this instance' : 'merge peer instances into the board'}
+        >
+          {combined ? 'combined ✓' : 'combined'}
+        </button>
         <LiveDot lastRefreshAt={lastRefreshAt} />
       </header>
+      {combined && payload?.peerStatus && payload.peerStatus.length > 0 && (
+        <CombinedPeersStrip peerStatus={payload.peerStatus} />
+      )}
       {error && <div className="scoreboard-error">scoreboard: {error}</div>}
       {!payload ? (
         <div className="scoreboard-empty">loading…</div>
@@ -151,7 +184,7 @@ function DemoSwitch({
   );
 }
 
-function AgentCard({ entry }: { entry: ScoreboardEntry }) {
+function AgentCard({ entry }: { entry: ScoreboardEntry & { peerLabel?: string | null } }) {
   // Percent is derived from (stagesPassed / engaged) where engaged subtracts
   // stages the engine gated for this session (e.g. `impact: destructive`
   // when `clusterProfile === 'other'`). Without that subtraction, a session
@@ -185,6 +218,11 @@ function AgentCard({ entry }: { entry: ScoreboardEntry }) {
           <span className="agent-username">{agentName}</span>
           <span className="agent-aka"> a.k.a. </span>
           <span className="agent-trigram">{trigramLabel}</span>
+          {entry.peerLabel && (
+            <span className="agent-peer" title={`from peer instance ${entry.peerLabel}`}>
+              · {entry.peerLabel}
+            </span>
+          )}
         </span>
         <span className="agent-percent">{percent}%</span>
       </div>
@@ -209,6 +247,28 @@ function AgentCard({ entry }: { entry: ScoreboardEntry }) {
   );
 }
 
+function CombinedPeersStrip({ peerStatus }: { peerStatus: CombinedPeerStatus[] }) {
+  return (
+    <div className="scoreboard-peers-strip" role="status">
+      {peerStatus.map((p) => (
+        <span
+          key={p.id}
+          className={`scoreboard-peer-pill ${p.ok ? 'is-ok' : 'is-down'}`}
+          title={
+            p.ok
+              ? `${p.entryCount} entries · ${p.durationMs}ms · ${p.baseUrl}`
+              : `${p.error ?? 'unknown error'} · ${p.baseUrl}`
+          }
+        >
+          <span className="scoreboard-peer-dot" />
+          {p.label}
+          {p.ok && <span className="c-dim"> · {p.entryCount}</span>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function LiveDot({ lastRefreshAt }: { lastRefreshAt: number }) {
   // Pulsing indicator next to the title so projector viewers know the board
   // is live (vs. a frozen screenshot). Small, not distracting.
@@ -224,7 +284,7 @@ function LiveDot({ lastRefreshAt }: { lastRefreshAt: number }) {
   );
 }
 
-function makeDemoPayload(count: number): ScoreboardPayload {
+function makeDemoPayload(count: number): DisplayPayload {
   // Deterministic-ish seed so re-renders stay stable within a session.
   const NAMES = [
     'Alice', 'Bob', 'Carol', 'David', 'Eve', 'Frank', 'Grace', 'Hank',

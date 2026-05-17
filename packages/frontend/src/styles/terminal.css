@@ -778,6 +778,57 @@ a.terminal-link:visited {
   margin-bottom: 16px;
   font-size: 14px;
 }
+.scoreboard-combined-toggle {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--dim);
+  color: var(--dim);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 120ms, border-color 120ms;
+}
+.scoreboard-combined-toggle:hover { color: var(--accent); border-color: var(--accent); }
+.scoreboard-combined-toggle.is-active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.scoreboard-peers-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+.scoreboard-peer-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--dim);
+  color: var(--fg);
+  background: rgba(255, 255, 255, 0.02);
+}
+.scoreboard-peer-pill.is-down {
+  border-color: var(--fail);
+  color: var(--fail);
+}
+.scoreboard-peer-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pass);
+}
+.scoreboard-peer-pill.is-down .scoreboard-peer-dot { background: var(--fail); }
+.agent-peer {
+  font-size: 0.7em;
+  color: var(--dim);
+  margin-left: 4px;
+}
 .scoreboard-empty {
   flex: 1 1 auto;
   display: flex;
@@ -1406,6 +1457,13 @@ a.terminal-link:visited {
   margin-top: 6px;
 }
 .admin-cluster-saved { font-size: 12px; }
+.admin-peers-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.admin-peers-add-row .admin-cluster-input { max-width: none; flex: 1 1 auto; }
 .admin-cluster-iops {
   font-size: 13px;
   display: flex;

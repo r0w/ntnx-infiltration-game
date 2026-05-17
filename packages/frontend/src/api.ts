@@ -163,6 +163,44 @@ export interface ScoreboardPayload {
   entries: ScoreboardEntry[];
 }
 
+/** Per-entry origin tag — `null` = this instance, string = peer label. */
+export interface CombinedScoreboardEntry extends ScoreboardEntry {
+  peerLabel: string | null;
+}
+
+export interface CombinedPeerStatus {
+  id: number;
+  label: string;
+  baseUrl: string;
+  enabled: boolean;
+  ok: boolean;
+  entryCount: number;
+  error?: string;
+  durationMs: number;
+}
+
+export interface CombinedScoreboardPayload {
+  packId: string;
+  packName: string;
+  mode: 'mock' | 'live';
+  totalStages: number;
+  entries: CombinedScoreboardEntry[];
+  /** One row per *enabled* peer — diagnostic for the admin view. */
+  peerStatus: CombinedPeerStatus[];
+}
+
+export interface AdminPeerEntry {
+  id: number;
+  label: string;
+  baseUrl: string;
+  enabled: boolean;
+  addedAt: number;
+}
+
+export interface AdminPeersPayload {
+  entries: AdminPeerEntry[];
+}
+
 export interface AdminUserEntry {
   sessionId: string;
   trigram: string | null;
@@ -289,6 +327,7 @@ export const api = {
     ),
   pack: () => get<PackInfo>('/pack'),
   scoreboard: () => get<ScoreboardPayload>('/scoreboard'),
+  combinedScoreboard: () => get<CombinedScoreboardPayload>('/scoreboard/combined'),
   sshPing: (target: string, signal?: AbortSignal) =>
     post<{
       ok: boolean;
@@ -371,6 +410,18 @@ export const api = {
     adminPost<AdminClusterConfigPayload>('/admin/cluster-config/refresh', password),
   adminClusterStatus: (password: string) =>
     adminGet<AdminClusterStatusPayload>('/admin/cluster-status', password),
+  adminPeers: (password: string) =>
+    adminGet<AdminPeersPayload>('/admin/peers', password),
+  adminPeerAdd: (password: string, body: { label: string; baseUrl: string }) =>
+    adminPost<AdminPeerEntry>('/admin/peers', password, body),
+  adminPeerDelete: (password: string, id: number) =>
+    adminDel<{ ok: true; id: number }>(`/admin/peers/${id}`, password),
+  adminPeerToggle: (password: string, id: number, enabled: boolean) =>
+    fetch(`/api/admin/peers/${id}`, {
+      method: 'PATCH',
+      headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    }).then((res) => handle<{ ok: true; id: number; enabled: boolean }>(res)),
 };
 
 export interface AdminClusterConfigPayload {
