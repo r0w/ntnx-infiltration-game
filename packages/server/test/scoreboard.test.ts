@@ -11,7 +11,7 @@ import {
   type StageDefinition,
 } from '@ntnx-game/engine';
 import { VariableQueries, HistoryQueries } from '../src/db/queries';
-import { buildScoreboardRoutes, type ScoreboardEntry } from '../src/routes/scoreboard';
+import { buildScoreboardRoutes, mergeScoreboards, type ScoreboardEntry } from '../src/routes/scoreboard';
 import type { LoadedPack } from '../src/pack-loader';
 
 const SCHEMA = readFileSync(
@@ -218,5 +218,63 @@ describe('GET /api/scoreboard', () => {
     });
     const entries = await fetchEntries(db);
     expect(entries.map((e) => e.trigram)).toEqual(['OUR']);
+  });
+});
+
+describe('mergeScoreboards', () => {
+  function entry(
+    partial: Partial<ScoreboardEntry> & { sessionId: string; peerLabel: string | null },
+  ): ScoreboardEntry & { peerLabel: string | null } {
+    return {
+      rank: 0,
+      trigram: 'AAA',
+      username: 'Anon',
+      stageName: null,
+      stagesPassed: 0,
+      stagesDisabled: 0,
+      totalStages: 10,
+      startedAt: 0,
+      finishedAt: null,
+      lastActivityAt: null,
+      status: 'playing',
+      ...partial,
+    };
+  }
+
+  test('sorts by stagesPassed desc, then earliest finish, then earliest start', () => {
+    const merged = mergeScoreboards([
+      entry({ sessionId: 'a', stagesPassed: 3, startedAt: 100, peerLabel: null }),
+      entry({ sessionId: 'b', stagesPassed: 5, finishedAt: 200, startedAt: 100, peerLabel: 'remote', status: 'finished' }),
+      entry({ sessionId: 'c', stagesPassed: 5, finishedAt: 150, startedAt: 100, peerLabel: null, status: 'finished' }),
+      entry({ sessionId: 'd', stagesPassed: 3, startedAt: 50, peerLabel: 'remote' }),
+    ]);
+    expect(merged.map((e) => e.rank)).toEqual([1, 2, 3, 4]);
+    // c finishes earlier than b at the same stagesPassed → ranks above.
+    expect(merged[0]!.sessionId).toBe('c');
+    expect(merged[1]!.sessionId).toBe('remote:b');
+    // d started before a at the same stagesPassed → ranks above.
+    expect(merged[2]!.sessionId).toBe('remote:d');
+    expect(merged[3]!.sessionId).toBe('a');
+  });
+
+  test('namespaces peer sessionIds; keeps local sessionIds untouched', () => {
+    const merged = mergeScoreboards([
+      entry({ sessionId: 'uuid-local', peerLabel: null }),
+      entry({ sessionId: 'uuid-peer', peerLabel: 'POC-37' }),
+    ]);
+    const local = merged.find((e) => e.peerLabel === null)!;
+    const peer = merged.find((e) => e.peerLabel === 'POC-37')!;
+    expect(local.sessionId).toBe('uuid-local');
+    expect(peer.sessionId).toBe('POC-37:uuid-peer');
+  });
+
+  test('handles a sessionId collision between local + peer without dropping either', () => {
+    const merged = mergeScoreboards([
+      entry({ sessionId: 'same-uuid', stagesPassed: 1, peerLabel: null }),
+      entry({ sessionId: 'same-uuid', stagesPassed: 2, peerLabel: 'POC-37' }),
+    ]);
+    // Both survive; rank order driven by stagesPassed.
+    expect(merged).toHaveLength(2);
+    expect(merged.map((e) => e.sessionId)).toEqual(['POC-37:same-uuid', 'same-uuid']);
   });
 });

@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Database } from 'bun:sqlite';
 import type { CapabilityFlag, NutanixClient } from '@ntnx-game/engine';
 import { HttpError, type SessionService } from '../session-service';
-import { SessionQueries, type AdminSessionRow } from '../db/queries';
+import { SessionQueries, ScoreboardPeerQueries, type AdminSessionRow, type ScoreboardPeerRow } from '../db/queries';
 import type { LoadedPack } from '../pack-loader';
 import { analyzeDeps, cascadeDisable, type BrokenStage } from '../dep-analysis';
 import { probeClusterConfig } from '../cluster-config-probe';
@@ -491,6 +491,81 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       logger: consoleLogger,
     });
     return c.json(readClusterConfig());
+  });
+
+  // ─── scoreboard peers ───────────────────────────────────────────────
+  // Admin-curated list of peer instances whose `/api/scoreboard` is
+  // merged into this server's `/api/scoreboard/combined`. baseUrl is the
+  // peer game's HTTP base (e.g. `http://10.55.89.44:3000`); the combined
+  // endpoint appends `/api/scoreboard` itself. No URL-reachability check
+  // on insert — the combined endpoint's `peerStatus[]` surfaces broken
+  // peers in real time, which is more honest than a one-time probe.
+  const peers = new ScoreboardPeerQueries(deps.db);
+
+  function rowToPeer(r: ScoreboardPeerRow) {
+    return {
+      id: r.id,
+      label: r.label,
+      baseUrl: r.baseUrl,
+      enabled: r.enabled,
+      addedAt: r.addedAt,
+    };
+  }
+
+  router.get('/peers', (c) => c.json({ entries: peers.list().map(rowToPeer) }));
+
+  router.post('/peers', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      label?: unknown;
+      baseUrl?: unknown;
+    };
+    const label = typeof body.label === 'string' ? body.label.trim() : '';
+    const baseUrl = typeof body.baseUrl === 'string' ? body.baseUrl.trim() : '';
+    if (!label) throw new HttpError(400, 'label is required');
+    if (!baseUrl) throw new HttpError(400, 'baseUrl is required');
+    // Accept http(s)://host[:port] with optional path; reject anything that
+    // doesn't parse. We strip any trailing slash in the route handler so
+    // the stored value is canonical.
+    let parsed: URL;
+    try {
+      parsed = new URL(baseUrl);
+    } catch {
+      throw new HttpError(400, 'baseUrl must be a valid http(s) URL');
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new HttpError(400, 'baseUrl protocol must be http or https');
+    }
+    const canonical = baseUrl.replace(/\/+$/, '');
+    try {
+      const row = peers.add(label, canonical);
+      return c.json(rowToPeer(row));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/UNIQUE/i.test(msg)) {
+        throw new HttpError(409, `peer with baseUrl ${canonical} already exists`);
+      }
+      throw err;
+    }
+  });
+
+  router.delete('/peers/:id', (c) => {
+    const id = Number.parseInt(c.req.param('id'), 10);
+    if (!Number.isFinite(id)) throw new HttpError(400, 'invalid peer id');
+    const ok = peers.remove(id);
+    if (!ok) throw new HttpError(404, `peer ${id} not found`);
+    return c.json({ ok: true, id });
+  });
+
+  router.patch('/peers/:id', async (c) => {
+    const id = Number.parseInt(c.req.param('id'), 10);
+    if (!Number.isFinite(id)) throw new HttpError(400, 'invalid peer id');
+    const body = (await c.req.json().catch(() => ({}))) as { enabled?: unknown };
+    if (typeof body.enabled !== 'boolean') {
+      throw new HttpError(400, 'enabled must be a boolean');
+    }
+    const ok = peers.setEnabled(id, body.enabled);
+    if (!ok) throw new HttpError(404, `peer ${id} not found`);
+    return c.json({ ok: true, id, enabled: body.enabled });
   });
 
   // ─── live cluster status (no DB) ────────────────────────────────────

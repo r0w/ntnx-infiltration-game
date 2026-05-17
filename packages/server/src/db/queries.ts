@@ -754,3 +754,81 @@ export class ClusterConfigQueries {
     this.db.prepare(`DELETE FROM cluster_config WHERE key = $k`).run({ $k: key });
   }
 }
+
+export interface ScoreboardPeerRow {
+  id: number;
+  label: string;
+  baseUrl: string;
+  enabled: boolean;
+  addedAt: number;
+}
+
+/**
+ * Peer instances whose `/api/scoreboard` should be merged into the local
+ * combined view. Curated via /admin. `baseUrl` is the peer game's base
+ * (e.g. `http://10.55.89.44:3000`); the combined endpoint appends
+ * `/api/scoreboard` internally.
+ */
+export class ScoreboardPeerQueries {
+  constructor(private readonly db: Database) {}
+
+  list(): ScoreboardPeerRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, label, base_url, enabled, added_at
+           FROM scoreboard_peers
+           ORDER BY added_at ASC`,
+      )
+      .all() as Array<{
+        id: number;
+        label: string;
+        base_url: string;
+        enabled: number;
+        added_at: number;
+      }>;
+    return rows.map((r) => ({
+      id: r.id,
+      label: r.label,
+      baseUrl: r.base_url,
+      enabled: r.enabled === 1,
+      addedAt: r.added_at,
+    }));
+  }
+
+  add(label: string, baseUrl: string, now = Date.now()): ScoreboardPeerRow {
+    const r = this.db
+      .prepare(
+        `INSERT INTO scoreboard_peers (label, base_url, enabled, added_at)
+         VALUES ($l, $u, 1, $at)
+         RETURNING id, label, base_url, enabled, added_at`,
+      )
+      .get({ $l: label, $u: baseUrl, $at: now }) as {
+        id: number;
+        label: string;
+        base_url: string;
+        enabled: number;
+        added_at: number;
+      };
+    return {
+      id: r.id,
+      label: r.label,
+      baseUrl: r.base_url,
+      enabled: r.enabled === 1,
+      addedAt: r.added_at,
+    };
+  }
+
+  remove(id: number): boolean {
+    const r = this.db
+      .prepare(`DELETE FROM scoreboard_peers WHERE id = $id`)
+      .run({ $id: id });
+    return r.changes > 0;
+  }
+
+  setEnabled(id: number, enabled: boolean): boolean {
+    const r = this.db
+      .prepare(`UPDATE scoreboard_peers SET enabled = $e WHERE id = $id`)
+      .run({ $id: id, $e: enabled ? 1 : 0 });
+    return r.changes > 0;
+  }
+}
