@@ -1363,7 +1363,7 @@ function PlannerConfigEditor({ password }: { password: string }) {
 }
 
 /**
- * Operator-facing view of the Calm Policy Engine state. Drives stage 21
+ * Operator-facing view of the Policy Engine state. Drives stage 21
  * (`create-approval-policy`) availability on shared clusters. When the
  * BP's `activate_policy_engine.py` couldn't bring the engine up in time
  * (Policy VM image flaky on some AHV builds), the operator activates it
@@ -1417,7 +1417,7 @@ function PolicyEngineStatus({ password }: { password: string }) {
   return (
     <div className="admin-cluster admin-cluster-block">
       <p className="admin-cluster-intro">
-        <strong>Calm Policy Engine</strong> · powers stage 21
+        <strong>Policy Engine</strong> · powers stage 21
         <span className="c-dim"> (create-approval-policy)</span> on shared
         clusters. Activate in Prism if needed, then re-check here.
       </p>
@@ -1432,7 +1432,7 @@ function PolicyEngineStatus({ password }: { password: string }) {
         )}
         <button
           type="button"
-          className="admin-cluster-iops-refresh"
+          className="app-reset admin-cluster-iops-refresh"
           disabled={busy !== null}
           onClick={() => void recheck()}
           title="re-query Prism for the current state"
