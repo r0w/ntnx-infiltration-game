@@ -232,6 +232,45 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     return c.json({ ok: true, sessionId: id });
   });
 
+  // Admin escape hatch: bump a player past the stage they're currently
+  // playing without them having to satisfy the check. Use case: a stage
+  // is unwinnable on this cluster (capability missing, API regressed,
+  // narrative blocker, …) and the operator wants the player to keep
+  // progressing. Reuses the existing `service.gotoStage` semantics —
+  // the skipped stage gets NO `stage_history` row, so `stagesPassed`
+  // (the score) is not incremented for it. Cleanly distinguishes
+  // "skipped by admin" from "passed legitimately".
+  //
+  // Mechanics: gotoStage(target) sets currentStage = target - 1. To
+  // skip the stage the player is about to play (= currentStage + 1),
+  // we target currentStage + 2. End-of-pack edge cases (no next stage,
+  // or skip would land past the last stage) return 400 — admin should
+  // delete-and-restart or accept the player as finished instead.
+  router.post('/users/:id/skip-current-stage', (c) => {
+    const sid = c.req.param('id');
+    const session = deps.service.getSession(sid); // throws 404 if not found
+    if (session.finishedAt !== null) {
+      throw new HttpError(400, 'session already finished');
+    }
+    const effective = deps.service.listEffectiveStages();
+    const curIdx = positionOf(session.currentStage);
+    const skipIdx = curIdx + 1;
+    if (skipIdx >= effective.length) {
+      throw new HttpError(400, 'player has no next stage to skip');
+    }
+    const skippedName = effective[skipIdx]!.name;
+    const targetIdx = skipIdx + 1;
+    if (targetIdx >= effective.length) {
+      throw new HttpError(
+        400,
+        `cannot skip the final stage '${skippedName}'; delete the session or let the player finish`,
+      );
+    }
+    const targetName = effective[targetIdx]!.name;
+    const r = deps.service.gotoStage(sid, targetName);
+    return c.json({ ok: true, sessionId: sid, skipped: skippedName, ...r });
+  });
+
   // ─── gates ──────────────────────────────────────────────────────────
   // Stages with adminGate=true (after overlay) are listed here. We read
   // from `service.listEffectiveStages()` — NOT from the JSON-loaded
