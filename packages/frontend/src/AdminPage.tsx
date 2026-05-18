@@ -742,8 +742,9 @@ function AdminDashboard({
           danger
           busy={packBusyId === packDisableTarget.stage.stageName}
           confirmLabel={`disable + cascade (${packDisableTarget.preview.cascade.length})`}
-          cancelLabel="just this one"
-          onCancel={() => void confirmDisable(false)}
+          secondaryLabel="just this one"
+          onCancel={() => setPackDisableTarget(null)}
+          onSecondary={() => void confirmDisable(false)}
           onConfirm={() => void confirmDisable(true)}
         >
           <p>
@@ -762,10 +763,11 @@ function AdminDashboard({
             ))}
           </ul>
           <p className="c-dim modal-cascade-hint">
-            <strong>cancel</strong> = disable only this stage (downstream stages
-            stay on but will surface "missing-upstream" at runtime).{' '}
-            <strong>confirm</strong> = also disable the {packDisableTarget.preview.cascade.length}{' '}
-            cascade stage(s).
+            <strong>just this one</strong> = disable only this stage (downstream
+            stages stay on but will surface "missing-upstream" at runtime).{' '}
+            <strong>disable + cascade</strong> = also disable the{' '}
+            {packDisableTarget.preview.cascade.length} cascade stage(s).{' '}
+            <strong>cancel</strong> = close without changing anything.
           </p>
         </ConfirmModal>
       )}

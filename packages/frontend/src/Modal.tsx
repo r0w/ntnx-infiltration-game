@@ -41,6 +41,14 @@ type ConfirmModalProps = {
   children: ReactNode;
   confirmLabel: ReactNode;
   cancelLabel?: ReactNode;
+  /** Optional 3rd button between cancel and confirm — useful when the
+   *  dialog needs to offer a middle-ground action (e.g. "just this
+   *  one" vs "with cascade"). When set, cancel reverts to its plain
+   *  "close without doing anything" semantics; the previous 2-button
+   *  hack of repurposing cancel as a secondary action loses the real
+   *  bail-out path. Omit to keep the 2-button layout. */
+  onSecondary?: () => void;
+  secondaryLabel?: ReactNode;
   danger?: boolean;
   busy?: boolean;
   onConfirm: () => void;
@@ -52,6 +60,8 @@ export function ConfirmModal({
   children,
   confirmLabel,
   cancelLabel = 'cancel',
+  onSecondary,
+  secondaryLabel,
   danger = false,
   busy = false,
   onConfirm,
@@ -80,6 +90,16 @@ export function ConfirmModal({
         >
           {cancelLabel}
         </button>
+        {onSecondary && (
+          <button
+            type="button"
+            className="modal-btn"
+            onClick={onSecondary}
+            disabled={busy}
+          >
+            {secondaryLabel}
+          </button>
+        )}
         <button
           type="button"
           className={danger ? 'modal-btn modal-btn-danger' : 'modal-btn'}
