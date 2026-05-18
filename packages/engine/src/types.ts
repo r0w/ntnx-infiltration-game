@@ -26,7 +26,15 @@ export type CapabilityFlag =
   | 'CalmDSL'
   | 'NodeRemove'
   | 'MultiNode'
-  | 'ApprovalPolicy';
+  | 'ApprovalPolicy'
+  // Secondary PC ("Planner") is wired with non-empty host + user +
+  // password. Config-driven (no HTTP probe) — gating stages 31
+  // (capacity-runway, live runway query against the OldPC) + 32
+  // (resource-optimization, narrative continuation on the same
+  // Planner cluster). When unwired, both stages auto-skip via the
+  // capability gate instead of leaving the player with a broken
+  // prompt (empty `{OldPCPassword}` in the displayed creds).
+  | 'PlannerCluster';
 
 /**
  * Cluster profile drives `impact: 'hpoc-only'` gating.

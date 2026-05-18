@@ -102,10 +102,26 @@ async function main() {
     }
   }
 
+  // Seed secondary-PC ("Planner") config into cluster_config so /admin
+  // can edit it post-launch and the change propagates to new sessions.
+  // setIfAbsent: never overwrite an admin edit. Skip empty env values
+  // so unset operators don't pin "" rows the admin would then have to
+  // clear. The PlannerCluster capability is computed from these.
+  {
+    const { ClusterConfigQueries } = await import('./db/queries');
+    const cfgQ = new ClusterConfigQueries(db);
+    if (cfg.gameOldPc) cfgQ.setIfAbsent('old_pc', cfg.gameOldPc);
+    if (cfg.gameOldPcUsername) cfgQ.setIfAbsent('old_pc_username', cfg.gameOldPcUsername);
+    if (cfg.gameOldPcPassword) cfgQ.setIfAbsent('old_pc_password', cfg.gameOldPcPassword);
+  }
+
   // Seed template-facing variables from env so `{PC}` / `{PCUser}` /
   // `{PCPassword}` / `{Vlanid}` / `{ImageURL}` render something instead of
   // leaving a hole in the prompt. Empty strings are kept (template renders ''),
   // which is the same behavior the player sees pre-login anyway.
+  // OldPC* are NOT in this map — they're projected from cluster_config at
+  // session-create instead, so admin edits via /admin → cluster apply
+  // without a server restart.
   const initialVariables: Record<string, unknown> = {
     PC: cfg.pcEndpoint,
     PCUser: cfg.pcUser,
@@ -116,9 +132,6 @@ async function main() {
     ProdUsername: cfg.gameProdUsername,
     ProdPassword: cfg.gameProdPassword,
     frontendHost: cfg.gameFrontendHost,
-    OldPC: cfg.gameOldPc,
-    OldPCUsername: cfg.gameOldPcUsername,
-    OldPCPassword: cfg.gameOldPcPassword,
   };
 
   const { app } = buildApp({
