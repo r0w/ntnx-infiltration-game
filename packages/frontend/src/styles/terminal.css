@@ -1648,6 +1648,25 @@ a.terminal-link:visited {
   opacity: 0.4;
   cursor: wait;
 }
+.admin-skip {
+  background: transparent;
+  color: var(--dim);
+  border: 1px solid #1b232b;
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  margin-right: 6px;
+}
+.admin-skip:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--dim);
+}
+.admin-skip:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 .admin-back-link {
   margin: 16px 0 0;
   text-align: center;

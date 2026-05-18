@@ -215,6 +215,11 @@ export interface AdminUserEntry {
   /** Name of the stage the player is ABOUT to play. null when finished. */
   nextStageName: string | null;
   stagesPassed: number;
+  /** Stages the engine gated for this session (capability missing,
+   *  destructive-on-other, missing-upstream). Subtracted from
+   *  `totalStages` to get the denominator the player can actually
+   *  reach on this cluster. */
+  stagesDisabled: number;
   totalStages: number;
   startedAt: number;
   finishedAt: number | null;
@@ -356,6 +361,13 @@ export const api = {
     adminGet<AdminUsersPayload>('/admin/users', password),
   adminDelete: (password: string, sessionId: string) =>
     adminDel<{ ok: true; sessionId: string }>(`/admin/users/${sessionId}`, password),
+  adminSkipCurrentStage: (password: string, sessionId: string) =>
+    adminPost<{
+      ok: true;
+      sessionId: string;
+      skipped: string;
+      currentStage: string | null;
+    }>(`/admin/users/${sessionId}/skip-current-stage`, password),
   adminGates: (password: string) =>
     adminGet<AdminGatesPayload>('/admin/gates', password),
   adminUnlockGate: (password: string, stageName: string) =>

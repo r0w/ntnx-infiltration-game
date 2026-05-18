@@ -141,6 +141,10 @@ function AdminDashboard({
   const [error, setError] = useState<string | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<AdminUserEntry | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Admin escape hatch — bump a stuck player past their current stage.
+  // Separate confirm dialog so a misclick can't bypass a player by accident.
+  const [skipTarget, setSkipTarget] = useState<AdminUserEntry | null>(null);
+  const [skippingId, setSkippingId] = useState<string | null>(null);
   // Toggle in the delete dialog — when on AND the session has a trigram, fire
   // /seed/cleanup-all/:trigram before the row delete so PC-side resources are
   // torn down too. Always resets to false when the dialog opens (cleanup-all
@@ -359,6 +363,21 @@ function AdminDashboard({
     } finally {
       setDeletingId(null);
       setCleanupStatus(null);
+    }
+  };
+
+  const performSkip = async (entry: AdminUserEntry) => {
+    setSkippingId(entry.sessionId);
+    try {
+      await api.adminSkipCurrentStage(password, entry.sessionId);
+      setSkipTarget(null);
+      void refresh();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`skip failed: ${msg}`);
+      setSkipTarget(null);
+    } finally {
+      setSkippingId(null);
     }
   };
 
@@ -635,14 +654,44 @@ function AdminDashboard({
                       e.nextStageName ?? <span className="c-dim">pre-game</span>
                     )}
                   </td>
-                  <td>
-                    {e.stagesPassed} / {e.totalStages}
+                  <td title={
+                    e.stagesDisabled > 0
+                      ? `${e.stagesPassed} passed / ${Math.max(1, e.totalStages - e.stagesDisabled)} reachable (${e.stagesDisabled} stages filtered for this cluster) — raw pack total: ${e.totalStages}`
+                      : `${e.stagesPassed} passed / ${e.totalStages} total`
+                  }>
+                    {e.stagesPassed} / {Math.max(1, e.totalStages - e.stagesDisabled)}
                   </td>
                   <td className="c-dim">{fmtAge(e.startedAt)}</td>
                   <td className="admin-td-sid c-dim" title={e.sessionId}>
                     {e.sessionId.slice(0, 8)}
                   </td>
                   <td>
+                    <button
+                      type="button"
+                      className="admin-skip"
+                      disabled={
+                        skippingId === e.sessionId ||
+                        e.finishedAt !== null ||
+                        e.nextStageName === null
+                      }
+                      onClick={() => setSkipTarget(e)}
+                      title={
+                        e.finishedAt !== null
+                          ? 'session already finished'
+                          : e.nextStageName === null
+                            ? 'no next stage to skip'
+                            : `skip stage '${e.nextStageName}' — player moves to the one after`
+                      }
+                    >
+                      {skippingId === e.sessionId ? (
+                        <>
+                          <span className="modal-spinner" aria-hidden="true" />
+                          skipping…
+                        </>
+                      ) : (
+                        'skip stage'
+                      )}
+                    </button>
                     <button
                       type="button"
                       className="admin-delete"
@@ -773,6 +822,44 @@ function AdminDashboard({
               )}
             </span>
           </label>
+        </ConfirmModal>
+      )}
+      {skipTarget && (
+        <ConfirmModal
+          title={<><span className="c-yellow">!</span> skip current stage?</>}
+          busy={skippingId === skipTarget.sessionId}
+          confirmLabel={
+            skippingId === skipTarget.sessionId ? (
+              <>
+                <span className="modal-spinner" aria-hidden="true" />
+                skipping…
+              </>
+            ) : (
+              `skip '${skipTarget.nextStageName}'`
+            )
+          }
+          onCancel={() => setSkipTarget(null)}
+          onConfirm={() => void performSkip(skipTarget)}
+        >
+          <dl className="modal-meta">
+            <dt>agent</dt>
+            <dd>{skipTarget.username ?? <span className="c-dim">—</span>}</dd>
+            <dt>trigram</dt>
+            <dd className="modal-trigram">{skipTarget.trigram ?? <span className="c-dim">—</span>}</dd>
+            <dt>stage to skip</dt>
+            <dd className="modal-trigram">{skipTarget.nextStageName}</dd>
+          </dl>
+          <p className="modal-warn">
+            moves the player past this stage without playing it. The stage is{' '}
+            <span className="c-yellow">not counted in the score</span> (no{' '}
+            <code>passed</code> history row written). Use when the stage is
+            unwinnable on this cluster (broken API, missing capability,
+            narrative blocker, …).
+          </p>
+          <p className="c-dim">
+            Player must reload their browser tab (or take their next action) to
+            pick up the new position.
+          </p>
         </ConfirmModal>
       )}
       {logoutPrompt && (
