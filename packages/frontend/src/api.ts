@@ -184,6 +184,10 @@ export interface CombinedScoreboardPayload {
   packName: string;
   mode: 'mock' | 'live';
   totalStages: number;
+  /** Cluster label for this instance — surfaced on local entries (entries
+   *  with `peerLabel === null`) so the player can see which cluster
+   *  they're on. `null` when no `SELF_LABEL` env var is set. */
+  selfLabel: string | null;
   entries: CombinedScoreboardEntry[];
   /** One row per *enabled* peer — diagnostic for the admin view. */
   peerStatus: CombinedPeerStatus[];
@@ -422,7 +426,49 @@ export const api = {
       headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
     }).then((res) => handle<{ ok: true; id: number; enabled: boolean }>(res)),
+  adminSelfLabel: (password: string) =>
+    adminGet<{ label: string | null }>('/admin/self-label', password),
+  adminSelfLabelSave: (password: string, label: string | null) =>
+    fetch('/api/admin/self-label', {
+      method: 'PUT',
+      headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label }),
+    }).then((res) => handle<{ label: string | null }>(res)),
+  adminPlannerConfig: (password: string) =>
+    adminGet<AdminPlannerConfigPayload>('/admin/planner-config', password),
+  adminPlannerConfigSave: (
+    password: string,
+    body: { oldPc?: string | null; oldPcUsername?: string | null; oldPcPassword?: string | null },
+  ) =>
+    fetch('/api/admin/planner-config', {
+      method: 'PUT',
+      headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((res) => handle<AdminPlannerConfigPayload>(res)),
+  adminCapabilities: (password: string) =>
+    adminGet<{ flags: string[] }>('/admin/capabilities', password),
+  adminCapabilitiesRefresh: (password: string) =>
+    adminPost<AdminCapabilitiesRefreshPayload>('/admin/capabilities/refresh', password),
 };
+
+export interface AdminCapabilitiesRefreshPayload {
+  flags: string[];
+  added: string[];
+  removed: string[];
+  probed: Array<{
+    flag: string;
+    detected: boolean;
+    detail: string;
+    transportError?: boolean;
+    transportCode?: string;
+  }>;
+}
+
+export interface AdminPlannerConfigPayload {
+  oldPc: string;
+  oldPcUsername: string;
+  oldPcPassword: string;
+}
 
 export interface AdminClusterConfigPayload {
   discoverableNodeSerials: string[];

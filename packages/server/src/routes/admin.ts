@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Database } from 'bun:sqlite';
 import type { CapabilityFlag, NutanixClient } from '@ntnx-game/engine';
+import { probeCapabilities, type CapabilityProbeDetail } from '@ntnx-game/nutanix';
 import { HttpError, type SessionService } from '../session-service';
 import { SessionQueries, ScoreboardPeerQueries, type AdminSessionRow, type ScoreboardPeerRow } from '../db/queries';
 import type { LoadedPack } from '../pack-loader';
@@ -316,7 +317,14 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     const brokenByName = new Map(analysis.broken.map((b) => [b.stageName, b]));
     const baseByName = new Map(baseStages.map((s) => [s.name, s]));
 
-    const activeCaps = new Set(deps.capabilities);
+    // Merge boot-probed caps with dynamic ones (currently only
+    // PlannerCluster — flips on when admin saves the Planner creds in
+    // cluster_config). Mirrors session-service.create() so the badges
+    // shown here match the gate the next session will actually hit.
+    // `new Set(undefined)` is the historical undefined-tolerant guard
+    // (some test harnesses build deps without `capabilities`).
+    const activeCaps = new Set<CapabilityFlag>(deps.capabilities ?? []);
+    for (const c of deps.service.computeDynamicCapabilities()) activeCaps.add(c);
     const stagesPayload: AdminPackStageEntry[] = effective.map((s) => {
       const o = overlay.get(s.name);
       const base = baseByName.get(s.name);
@@ -502,6 +510,33 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   // peers in real time, which is more honest than a one-time probe.
   const peers = new ScoreboardPeerQueries(deps.db);
 
+  // Self-label = the name surfaced on this instance's own entries in
+  // the combined view (so the player can spot their own cluster vs
+  // peer-fetched ones). Persisted in cluster_config so a restart keeps
+  // the operator's value; same key the /combined route reads.
+  router.get('/self-label', (c) => {
+    const label = deps.service.clusterConfig.get<string>('self_label') ?? null;
+    return c.json({ label });
+  });
+
+  router.put('/self-label', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { label?: unknown };
+    if (body.label === null || body.label === '') {
+      deps.service.clusterConfig.delete('self_label');
+      return c.json({ label: null });
+    }
+    if (typeof body.label !== 'string') {
+      throw new HttpError(400, 'label must be a string or null');
+    }
+    const trimmed = body.label.trim();
+    if (!trimmed) {
+      deps.service.clusterConfig.delete('self_label');
+      return c.json({ label: null });
+    }
+    deps.service.clusterConfig.set('self_label', trimmed, 'admin');
+    return c.json({ label: trimmed });
+  });
+
   function rowToPeer(r: ScoreboardPeerRow) {
     return {
       id: r.id,
@@ -566,6 +601,112 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     const ok = peers.setEnabled(id, body.enabled);
     if (!ok) throw new HttpError(404, `peer ${id} not found`);
     return c.json({ ok: true, id, enabled: body.enabled });
+  });
+
+  // ─── Planner (secondary PC) creds ────────────────────────────────────
+  // Persisted in cluster_config; consumed by session-service.create() to
+  // (1) compute the PlannerCluster capability flag (gates stages 31 +
+  // 32 in the pack) and (2) project the 3 vars (OldPC / OldPCUsername /
+  // OldPCPassword) into per-session variables so CheckRunway has a
+  // current creds set. Editing here re-enables those stages on fresh
+  // sessions without a server restart.
+  router.get('/planner-config', (c) => {
+    const cfg = deps.service.clusterConfig;
+    return c.json({
+      oldPc: cfg.get<string>('old_pc') ?? '',
+      oldPcUsername: cfg.get<string>('old_pc_username') ?? '',
+      oldPcPassword: cfg.get<string>('old_pc_password') ?? '',
+    });
+  });
+
+  router.put('/planner-config', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      oldPc?: unknown;
+      oldPcUsername?: unknown;
+      oldPcPassword?: unknown;
+    };
+    const cfg = deps.service.clusterConfig;
+    // Per-field semantics: explicit string sets, explicit `null` clears,
+    // missing key leaves the existing value untouched. Empty string = clear
+    // (so the operator's "I cleared the field" matches the wire shape).
+    const apply = (incoming: unknown, key: string) => {
+      if (incoming === undefined) return;
+      if (incoming === null || (typeof incoming === 'string' && incoming.trim() === '')) {
+        cfg.delete(key);
+      } else if (typeof incoming === 'string') {
+        cfg.set(key, incoming, 'admin');
+      } else {
+        throw new HttpError(400, `${key} must be a string or null`);
+      }
+    };
+    apply(body.oldPc, 'old_pc');
+    apply(body.oldPcUsername, 'old_pc_username');
+    apply(body.oldPcPassword, 'old_pc_password');
+    return c.json({
+      oldPc: cfg.get<string>('old_pc') ?? '',
+      oldPcUsername: cfg.get<string>('old_pc_username') ?? '',
+      oldPcPassword: cfg.get<string>('old_pc_password') ?? '',
+    });
+  });
+
+  // ─── capabilities ───────────────────────────────────────────────────
+  // GET returns the merged active set (HTTP-probed + dynamic config-
+  // driven) — what /admin/pack uses when computing missingCapabilities.
+  // Useful as the "is the engine really on, right now?" view alongside
+  // the per-stage badges.
+  router.get('/capabilities', (c) => {
+    const merged = new Set<CapabilityFlag>(deps.capabilities ?? []);
+    for (const cf of deps.service.computeDynamicCapabilities()) merged.add(cf);
+    return c.json({ flags: Array.from(merged) });
+  });
+
+  // ─── capabilities re-probe ──────────────────────────────────────────
+  // Re-runs the boot-time capability probe (capability-probe.ts) and
+  // overwrites `deps.capabilities` in place. Used when the operator
+  // flips a feature in Prism mid-event — e.g. activates the Calm
+  // Policy Engine manually after the BP `activate_policy_engine.py`
+  // gave up in best-effort mode (project_calm_policy_vm_unstable),
+  // or enables Intelligent Operations. Without this, the new state
+  // requires a server restart to take effect on /admin/pack +
+  // session-create gating.
+  //
+  // PlannerCluster is NOT touched here — it's already config-driven
+  // via cluster_config (see /planner-config above), recomputed on
+  // every session.create(). The re-probe only refreshes the
+  // HTTP-detected flags (NCM / IO / CalmDSL / NodeRemove /
+  // MultiNode / ApprovalPolicy).
+  router.post('/capabilities/refresh', async (c) => {
+    const before = new Set(deps.capabilities);
+    const probe = await probeCapabilities({
+      nutanix: deps.nutanix,
+      logger: consoleLogger,
+    });
+    // Mutate in place so the array reference shared by /pack + session
+    // route immediately sees the new contents — no need to thread a
+    // setter through every consumer.
+    deps.capabilities.splice(0, deps.capabilities.length, ...probe.flags);
+    const after = new Set(probe.flags);
+    const added = probe.flags.filter((f) => !before.has(f));
+    const removed = Array.from(before).filter((f) => !after.has(f));
+    consoleLogger.info('capabilities re-probed via admin', {
+      flags: probe.flags,
+      added,
+      removed,
+    });
+    return c.json({
+      flags: probe.flags,
+      added,
+      removed,
+      // Same shape as /api/health.capabilityProbe — gives the operator
+      // a per-flag verdict so they can see WHICH probe answered what.
+      probed: probe.details.map((d) => ({
+        flag: d.flag,
+        detected: d.detected,
+        detail: d.detail,
+        transportError: d.transportError,
+        transportCode: d.transportCode,
+      })),
+    });
   });
 
   // ─── live cluster status (no DB) ────────────────────────────────────

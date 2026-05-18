@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   api,
   type AdminClusterConfigPayload,
@@ -13,7 +13,7 @@ import {
 } from './api';
 import { ConfirmModal } from './Modal';
 
-type AdminTab = 'users' | 'pack' | 'cluster' | 'peers';
+type AdminTab = 'users' | 'pack' | 'cluster' | 'scoreboard';
 
 const STORAGE_KEY = 'ntnx-infiltration-admin-pw';
 
@@ -113,7 +113,15 @@ function AdminDashboard({
   password: string;
   onLogout: () => void;
 }) {
-  const [tab, setTab] = useState<AdminTab>('users');
+  // Tab persisted in the URL so a hard refresh / shared link lands on
+  // the right section. Unknown / missing → users (safe default).
+  const navigate = useNavigate();
+  const { tab: tabParam } = useParams<{ tab?: string }>();
+  const VALID_TABS = ['users', 'pack', 'cluster', 'scoreboard'] as const;
+  const tab: AdminTab = (VALID_TABS as readonly string[]).includes(tabParam ?? '')
+    ? (tabParam as AdminTab)
+    : 'users';
+  const setTab = (next: AdminTab) => navigate(`/admin/${next}`);
   const [entries, setEntries] = useState<AdminUserEntry[] | null>(null);
   const [gates, setGates] = useState<AdminGateEntry[] | null>(null);
   const [lunch, setLunch] = useState<AdminLunchStatus | null>(null);
@@ -143,6 +151,9 @@ function AdminDashboard({
   // delete (the operator usually has a working tab open and a misclick
   // on `logout` would force a re-auth + lose any unsaved page state).
   const [logoutPrompt, setLogoutPrompt] = useState(false);
+  const [lunchPrompt, setLunchPrompt] = useState(false);
+  const [selfLabel, setSelfLabel] = useState<string | null>(null);
+  const [hasPeers, setHasPeers] = useState(false);
   // Users tab default-hides sessions that haven't captured a trigram yet
   // (= still on the lore prelude / login). Operator can flip the toggle
   // to debug stuck pre-identity sessions. Persisted in sessionStorage so
@@ -165,11 +176,13 @@ function AdminDashboard({
 
   const refresh = useCallback(async () => {
     try {
-      const [usersPayload, gatesPayload, packPayload, lunchPayload] = await Promise.all([
+      const [usersPayload, gatesPayload, packPayload, lunchPayload, selfPayload, peersPayload] = await Promise.all([
         api.adminUsers(password),
         api.adminGates(password),
         api.adminPack(password),
         api.adminLunchStatus(password),
+        api.adminSelfLabel(password),
+        api.adminPeers(password),
       ]);
       setEntries(usersPayload.entries);
       setGates(gatesPayload.entries);
@@ -177,6 +190,8 @@ function AdminDashboard({
       setPackBrokenCount(packPayload.brokenCount);
       setPackMeta({ clusterProfile: packPayload.clusterProfile, mode: packPayload.mode });
       setLunch(lunchPayload);
+      setSelfLabel(selfPayload.label);
+      setHasPeers(peersPayload.entries.length > 0);
       setError(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -351,8 +366,18 @@ function AdminDashboard({
   return (
     <div className="admin">
       <header className="admin-header">
-        <Link to="/" className="admin-back" aria-label="back to game">←</Link>
-        <h1 className="admin-title">admin</h1>
+        <div className="admin-header-id">
+          <Link to="/" className="admin-back" aria-label="back to game">←</Link>
+          <h1 className="admin-title">
+            <span className="admin-title-prompt">▎</span>admin
+            {selfLabel && (
+              <span className="admin-title-self" title="this cluster's label">
+                {' '}@ {selfLabel}
+              </span>
+            )}
+          </h1>
+        </div>
+
         <nav className="admin-tabs" role="tablist">
           <button
             type="button"
@@ -389,43 +414,73 @@ function AdminDashboard({
           <button
             type="button"
             role="tab"
-            aria-selected={tab === 'peers'}
-            className={`admin-tab ${tab === 'peers' ? 'admin-tab-active' : ''}`}
-            onClick={() => setTab('peers')}
+            aria-selected={tab === 'scoreboard'}
+            className={`admin-tab ${tab === 'scoreboard' ? 'admin-tab-active' : ''}`}
+            onClick={() => setTab('scoreboard')}
           >
-            peers
+            scoreboard
           </button>
         </nav>
+
+        <span className="app-spacer" />
+
         {lunch && (
+          <div className="admin-header-group admin-header-group-actions">
+            <button
+              type="button"
+              className={`admin-lunch-btn ${lunch.paused ? 'admin-lunch-btn-active' : ''}`}
+              disabled={lunchBusy}
+              onClick={() => {
+                // Lock is destructive (parks every session) → confirm.
+                // Unlock is benign (everyone resumes) → fire immediately.
+                if (lunch.paused) void toggleLunch();
+                else setLunchPrompt(true);
+              }}
+              title={
+                lunch.paused
+                  ? 'lift the pause — players resume on their next poll'
+                  : 'pause every active session at the next stage transition'
+              }
+            >
+              <span className="admin-lunch-icon" aria-hidden="true">🍽</span>
+              {lunchBusy
+                ? '…'
+                : lunch.paused
+                  ? `resume (${lunch.affectedCount} paused)`
+                  : 'lunch lock'}
+            </button>
+          </div>
+        )}
+
+        <div className="admin-header-group admin-header-group-links">
+          <Link to="/" className="admin-header-link" target="_blank" rel="noreferrer">
+            game<span className="admin-header-link-arrow" aria-hidden="true">↗</span>
+          </Link>
+          <Link to="/scoreboard" className="admin-header-link" target="_blank" rel="noreferrer">
+            scoreboard<span className="admin-header-link-arrow" aria-hidden="true">↗</span>
+          </Link>
+          {hasPeers && (
+            <Link
+              to="/scoreboard?combined=1"
+              className="admin-header-link"
+              target="_blank"
+              rel="noreferrer"
+            >
+              combined<span className="admin-header-link-arrow" aria-hidden="true">↗</span>
+            </Link>
+          )}
+        </div>
+
+        <div className="admin-header-group admin-header-group-utility">
           <button
             type="button"
-            className={`admin-lunch-btn ${lunch.paused ? 'admin-lunch-btn-active' : ''}`}
-            disabled={lunchBusy}
-            onClick={() => void toggleLunch()}
-            title={
-              lunch.paused
-                ? 'lift the pause — players resume on their next poll'
-                : 'pause every active session at the next stage transition'
-            }
+            className="admin-header-util"
+            onClick={() => setLogoutPrompt(true)}
+            title="clear stashed admin password"
           >
-            <span className="admin-lunch-icon" aria-hidden="true">🍽</span>
-            {lunchBusy
-              ? '…'
-              : lunch.paused
-                ? `resume (${lunch.affectedCount} paused)`
-                : 'lunch lock'}
+            logout
           </button>
-        )}
-        <Link to="/scoreboard" className="app-reset" target="_blank" rel="noreferrer">
-          scoreboard
-        </Link>
-        <span className="app-spacer" />
-        <button type="button" className="app-reset" onClick={() => void refresh()}>
-          refresh
-        </button>
-        <button type="button" className="app-reset" onClick={() => setLogoutPrompt(true)}>
-          logout
-        </button>
+        </div>
       </header>
       {lunch?.paused && (
         <div className="admin-lunch-strip" role="status">
@@ -631,7 +686,7 @@ function AdminDashboard({
         />
       )}
       {tab === 'cluster' && <ClusterConfigEditor password={password} />}
-      {tab === 'peers' && <PeersEditor password={password} />}
+      {tab === 'scoreboard' && <PeersEditor password={password} />}
       {packDisableTarget && (
         <ConfirmModal
           title={<><span className="c-yellow">!</span> disable stage?</>}
@@ -733,6 +788,27 @@ function AdminDashboard({
           }}
         >
           <p>You'll need to re-enter the admin password to come back.</p>
+        </ConfirmModal>
+      )}
+      {lunchPrompt && lunch && (
+        <ConfirmModal
+          title={<><span className="c-yellow">🍽</span> lock the room?</>}
+          danger
+          busy={lunchBusy}
+          confirmLabel={lunchBusy ? '…' : 'lock'}
+          cancelLabel="cancel"
+          onCancel={() => setLunchPrompt(false)}
+          onConfirm={async () => {
+            await toggleLunch();
+            setLunchPrompt(false);
+          }}
+        >
+          <p>
+            Every active session will be parked at the next stage transition.
+            Players can still finish their current stage; only the move to
+            the next stage is blocked. Use this for a lunch break or a
+            room-wide theory recap.
+          </p>
         </ConfirmModal>
       )}
     </div>
@@ -980,82 +1056,88 @@ function ClusterConfigEditor({ password }: { password: string }) {
     return <div className="admin-empty">loading cluster config…</div>;
   }
   return (
-    <div className="admin-cluster">
-      <IntelligentOpsStatus password={password} />
-      <p className="admin-cluster-intro">
-        <strong>Cached cluster snapshot</strong> · pre-loaded at boot to skip
-        the slow discover-unconfigured-nodes / LCM-inventory queries inside
-        checks. Operator edits are sticky (the boot probe never overwrites them).
-      </p>
-      {error && <div className="app-error">{error}</div>}
-      <div className="admin-cluster-section">
-        <label className="admin-cluster-label">
-          discoverable node serials (expand candidates)
-          {data?.meta.discoverableNodeSerials && (
-            <span className="c-dim">
-              {' · '}
-              <span className={`admin-cluster-source-${data.meta.discoverableNodeSerials.source}`}>
-                {data.meta.discoverableNodeSerials.source}
-              </span>
-              {' · '}
-              {fmtAge(data.meta.discoverableNodeSerials.updatedAt)}
-            </span>
-          )}
-        </label>
-        <textarea
-          className="admin-cluster-textarea"
-          value={serialsText}
-          onChange={(e) => setSerialsText(e.target.value)}
-          rows={Math.max(3, serialsText.split('\n').length)}
-          placeholder="one serial per line — only nodes NOT in the cluster (i.e. expand-cluster candidates)"
-          spellCheck={false}
-        />
+    <div className="admin-cluster admin-cluster-grid">
+      <div className="admin-cluster-col">
+        <IntelligentOpsStatus password={password} />
+        <PolicyEngineStatus password={password} />
+        <PlannerConfigEditor password={password} />
       </div>
-      <div className="admin-cluster-section">
-        <label className="admin-cluster-label">
-          LCM available updates count
-          {data?.meta.lcmAvailableUpdates && (
-            <span className="c-dim">
-              {' · '}
-              <span className={`admin-cluster-source-${data.meta.lcmAvailableUpdates.source}`}>
-                {data.meta.lcmAvailableUpdates.source}
+      <div className="admin-cluster-col">
+        <p className="admin-cluster-intro">
+          <strong>Cached cluster snapshot</strong> · pre-loaded at boot to skip
+          the slow discover-unconfigured-nodes / LCM-inventory queries inside
+          checks. Operator edits are sticky (the boot probe never overwrites them).
+        </p>
+        {error && <div className="app-error">{error}</div>}
+        <div className="admin-cluster-section">
+          <label className="admin-cluster-label">
+            discoverable node serials (expand candidates)
+            {data?.meta.discoverableNodeSerials && (
+              <span className="c-dim">
+                {' · '}
+                <span className={`admin-cluster-source-${data.meta.discoverableNodeSerials.source}`}>
+                  {data.meta.discoverableNodeSerials.source}
+                </span>
+                {' · '}
+                {fmtAge(data.meta.discoverableNodeSerials.updatedAt)}
               </span>
-              {' · '}
-              {fmtAge(data.meta.lcmAvailableUpdates.updatedAt)}
-            </span>
+            )}
+          </label>
+          <textarea
+            className="admin-cluster-textarea"
+            value={serialsText}
+            onChange={(e) => setSerialsText(e.target.value)}
+            rows={Math.max(3, serialsText.split('\n').length)}
+            placeholder="one serial per line — only nodes NOT in the cluster (i.e. expand-cluster candidates)"
+            spellCheck={false}
+          />
+        </div>
+        <div className="admin-cluster-section">
+          <label className="admin-cluster-label">
+            LCM available updates count
+            {data?.meta.lcmAvailableUpdates && (
+              <span className="c-dim">
+                {' · '}
+                <span className={`admin-cluster-source-${data.meta.lcmAvailableUpdates.source}`}>
+                  {data.meta.lcmAvailableUpdates.source}
+                </span>
+                {' · '}
+                {fmtAge(data.meta.lcmAvailableUpdates.updatedAt)}
+              </span>
+            )}
+          </label>
+          <input
+            type="number"
+            min={0}
+            step={1}
+            className="admin-cluster-input"
+            value={lcmText}
+            onChange={(e) => setLcmText(e.target.value)}
+            placeholder="leave empty to clear (falls back to live query)"
+          />
+        </div>
+        <div className="admin-cluster-actions">
+          <button
+            type="button"
+            className="app-reset"
+            disabled={busy !== null}
+            onClick={() => void refresh()}
+            title="re-fetch from cluster, overwriting current values"
+          >
+            {busy === 'refresh' ? 'refreshing…' : 'refresh from cluster'}
+          </button>
+          <button
+            type="button"
+            className="modal-btn modal-btn-danger"
+            disabled={busy !== null}
+            onClick={() => void save()}
+          >
+            {busy === 'save' ? 'saving…' : 'save'}
+          </button>
+          {savedAt && busy === null && (
+            <span className="c-green admin-cluster-saved">saved {fmtAge(savedAt)}</span>
           )}
-        </label>
-        <input
-          type="number"
-          min={0}
-          step={1}
-          className="admin-cluster-input"
-          value={lcmText}
-          onChange={(e) => setLcmText(e.target.value)}
-          placeholder="leave empty to clear (falls back to live query)"
-        />
-      </div>
-      <div className="admin-cluster-actions">
-        <button
-          type="button"
-          className="app-reset"
-          disabled={busy !== null}
-          onClick={() => void refresh()}
-          title="re-fetch from cluster, overwriting current values"
-        >
-          {busy === 'refresh' ? 'refreshing…' : 'refresh from cluster'}
-        </button>
-        <button
-          type="button"
-          className="modal-btn modal-btn-danger"
-          disabled={busy !== null}
-          onClick={() => void save()}
-        >
-          {busy === 'save' ? 'saving…' : 'save'}
-        </button>
-        {savedAt && busy === null && (
-          <span className="c-green admin-cluster-saved">saved {fmtAge(savedAt)}</span>
-        )}
+        </div>
       </div>
     </div>
   );
@@ -1140,19 +1222,25 @@ function IntelligentOpsStatus({ password }: { password: string }) {
   );
 }
 
-function PeersEditor({ password }: { password: string }) {
-  const [entries, setEntries] = useState<AdminPeerEntry[] | null>(null);
-  const [busy, setBusy] = useState<'load' | 'add' | 'mutate' | null>('load');
+function PlannerConfigEditor({ password }: { password: string }) {
+  const [oldPc, setOldPc] = useState('');
+  const [oldUser, setOldUser] = useState('');
+  const [oldPass, setOldPass] = useState('');
+  const [saved, setSaved] = useState<{ oldPc: string; oldPcUsername: string; oldPcPassword: string } | null>(null);
+  const [busy, setBusy] = useState<'load' | 'save' | null>('load');
   const [error, setError] = useState<string | null>(null);
-  const [label, setLabel] = useState('');
-  const [baseUrl, setBaseUrl] = useState('');
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [showPass, setShowPass] = useState(false);
 
   const load = useCallback(async () => {
     setBusy('load');
     setError(null);
     try {
-      const p = await api.adminPeers(password);
-      setEntries(p.entries);
+      const p = await api.adminPlannerConfig(password);
+      setOldPc(p.oldPc);
+      setOldUser(p.oldPcUsername);
+      setOldPass(p.oldPcPassword);
+      setSaved(p);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1163,6 +1251,250 @@ function PeersEditor({ password }: { password: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const save = async () => {
+    setBusy('save');
+    setError(null);
+    try {
+      const p = await api.adminPlannerConfigSave(password, {
+        oldPc: oldPc.trim() || null,
+        oldPcUsername: oldUser.trim() || null,
+        oldPcPassword: oldPass.trim() || null,
+      });
+      setOldPc(p.oldPc);
+      setOldUser(p.oldPcUsername);
+      setOldPass(p.oldPcPassword);
+      setSaved(p);
+      setSavedAt(Date.now());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const allSet = oldPc.trim() && oldUser.trim() && oldPass.trim();
+  const allSaved = saved && saved.oldPc && saved.oldPcUsername && saved.oldPcPassword;
+  const dirty =
+    saved !== null &&
+    (oldPc.trim() !== saved.oldPc ||
+      oldUser.trim() !== saved.oldPcUsername ||
+      oldPass.trim() !== saved.oldPcPassword);
+
+  return (
+    <div className="admin-cluster admin-cluster-block">
+      <p className="admin-cluster-intro">
+        <strong>Planner (secondary PC)</strong> · powers stages 31
+        <span className="c-dim"> (capacity-runway)</span> + 32
+        <span className="c-dim"> (resource-optimization)</span>. When all 3
+        fields are saved, the <code>PlannerCluster</code> capability flips
+        on for <em>new</em> sessions and the stages become playable. Leave
+        empty (or clear) to auto-skip them.{' '}
+        {allSaved ? (
+          <span className="c-green">● wired</span>
+        ) : (
+          <span className="c-yellow">● not wired — stages 31/32 auto-skip</span>
+        )}
+      </p>
+      {error && <div className="app-error">{error}</div>}
+      <div className="admin-cluster-section">
+        <label className="admin-cluster-label">Planner PC endpoint</label>
+        <input
+          type="text"
+          className="admin-cluster-input admin-planner-input"
+          placeholder="https://10.55.82.39:9440 (or bare host)"
+          value={oldPc}
+          onChange={(e) => setOldPc(e.target.value)}
+          disabled={busy !== null}
+          spellCheck={false}
+        />
+      </div>
+      <div className="admin-cluster-section">
+        <label className="admin-cluster-label">Planner username</label>
+        <input
+          type="text"
+          className="admin-cluster-input admin-planner-input"
+          placeholder="local user with read access"
+          value={oldUser}
+          onChange={(e) => setOldUser(e.target.value)}
+          disabled={busy !== null}
+          spellCheck={false}
+          autoComplete="off"
+        />
+      </div>
+      <div className="admin-cluster-section">
+        <label className="admin-cluster-label">
+          Planner password
+          <button
+            type="button"
+            className="admin-planner-reveal"
+            onClick={() => setShowPass((s) => !s)}
+            title={showPass ? 'hide' : 'show'}
+          >
+            {showPass ? 'hide' : 'show'}
+          </button>
+        </label>
+        <input
+          type={showPass ? 'text' : 'password'}
+          className="admin-cluster-input admin-planner-input"
+          value={oldPass}
+          onChange={(e) => setOldPass(e.target.value)}
+          disabled={busy !== null}
+          spellCheck={false}
+          autoComplete="new-password"
+        />
+      </div>
+      <div className="admin-cluster-actions">
+        <button
+          type="button"
+          className="modal-btn modal-btn-danger"
+          disabled={busy !== null || !dirty}
+          onClick={() => void save()}
+          title={!allSet ? 'empty fields will clear the stored value' : undefined}
+        >
+          {busy === 'save' ? 'saving…' : 'save'}
+        </button>
+        {savedAt && busy === null && (
+          <span className="c-green admin-cluster-saved">saved {fmtAge(savedAt)}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Operator-facing view of the Calm Policy Engine state. Drives stage 21
+ * (`create-approval-policy`) availability on shared clusters. When the
+ * BP's `activate_policy_engine.py` couldn't bring the engine up in time
+ * (Policy VM image flaky on some AHV builds), the operator activates it
+ * manually in Prism — re-check here to flip the cap on without a server
+ * restart. Hides the underlying "capabilities probe" jargon: the
+ * operator sees one fact (enabled/disabled), one button (re-check).
+ */
+function PolicyEngineStatus({ password }: { password: string }) {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState<'load' | 'check' | null>('load');
+  const [error, setError] = useState<string | null>(null);
+  const [justFlipped, setJustFlipped] = useState<'on' | 'off' | null>(null);
+  const [checkedAt, setCheckedAt] = useState<number | null>(null);
+
+  const load = useCallback(async () => {
+    setBusy('load');
+    setError(null);
+    try {
+      const p = await api.adminCapabilities(password);
+      setEnabled(p.flags.includes('ApprovalPolicy'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }, [password]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const recheck = async () => {
+    setBusy('check');
+    setError(null);
+    try {
+      const p = await api.adminCapabilitiesRefresh(password);
+      const next = p.flags.includes('ApprovalPolicy');
+      if (enabled !== null && next !== enabled) {
+        setJustFlipped(next ? 'on' : 'off');
+        setTimeout(() => setJustFlipped(null), 1500);
+      }
+      setEnabled(next);
+      setCheckedAt(Date.now());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="admin-cluster admin-cluster-block">
+      <p className="admin-cluster-intro">
+        <strong>Calm Policy Engine</strong> · powers stage 21
+        <span className="c-dim"> (create-approval-policy)</span> on shared
+        clusters. Activate in Prism if needed, then re-check here.
+      </p>
+      <div className="admin-cluster-iops">
+        state:{' '}
+        {enabled === null ? (
+          <span className="c-dim">checking…</span>
+        ) : enabled ? (
+          <span className={`c-green${justFlipped === 'on' ? ' admin-state-flash' : ''}`}>● enabled</span>
+        ) : (
+          <span className={`c-yellow${justFlipped === 'off' ? ' admin-state-flash' : ''}`}>● disabled</span>
+        )}
+        <button
+          type="button"
+          className="admin-cluster-iops-refresh"
+          disabled={busy !== null}
+          onClick={() => void recheck()}
+          title="re-query Prism for the current state"
+        >
+          {busy === 'check' ? '…' : '↻'}
+        </button>
+        {checkedAt && busy === null && (
+          <span className="c-dim"> · checked {fmtAge(checkedAt)}</span>
+        )}
+        {error && <div className="c-dim admin-cluster-iops-err">{error}</div>}
+      </div>
+    </div>
+  );
+}
+
+function PeersEditor({ password }: { password: string }) {
+  const [entries, setEntries] = useState<AdminPeerEntry[] | null>(null);
+  const [busy, setBusy] = useState<'load' | 'add' | 'mutate' | null>('load');
+  const [error, setError] = useState<string | null>(null);
+  const [label, setLabel] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
+  const [selfLabel, setSelfLabel] = useState<string>('');
+  const [selfLabelSaved, setSelfLabelSaved] = useState<string | null>(null);
+  const [selfBusy, setSelfBusy] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<AdminPeerEntry | null>(null);
+
+  const load = useCallback(async () => {
+    setBusy('load');
+    setError(null);
+    try {
+      const [peersPayload, selfPayload] = await Promise.all([
+        api.adminPeers(password),
+        api.adminSelfLabel(password),
+      ]);
+      setEntries(peersPayload.entries);
+      setSelfLabel(selfPayload.label ?? '');
+      setSelfLabelSaved(selfPayload.label);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }, [password]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const saveSelfLabel = async () => {
+    setSelfBusy(true);
+    setError(null);
+    try {
+      const trimmed = selfLabel.trim();
+      const p = await api.adminSelfLabelSave(password, trimmed || null);
+      setSelfLabelSaved(p.label);
+      setSelfLabel(p.label ?? '');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSelfBusy(false);
+    }
+  };
 
   const add = async () => {
     setBusy('add');
@@ -1194,12 +1526,13 @@ function PeersEditor({ password }: { password: string }) {
     }
   };
 
-  const remove = async (peer: AdminPeerEntry) => {
-    if (!window.confirm(`remove peer "${peer.label}" (${peer.baseUrl})?`)) return;
+  const confirmRemove = async () => {
+    if (!removeTarget) return;
     setBusy('mutate');
     setError(null);
     try {
-      await api.adminPeerDelete(password, peer.id);
+      await api.adminPeerDelete(password, removeTarget.id);
+      setRemoveTarget(null);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -1208,25 +1541,50 @@ function PeersEditor({ password }: { password: string }) {
   };
 
   if (!entries && busy === 'load') {
-    return <div className="admin-empty">loading peers…</div>;
+    return <div className="admin-empty">loading clusters…</div>;
   }
+
+  const selfLabelDirty = (selfLabel.trim() || null) !== selfLabelSaved;
 
   return (
     <div className="admin-cluster">
       <p className="admin-cluster-intro">
-        <strong>Combined scoreboard peers</strong> · other ntnx-infiltration
-        instances whose <code>/api/scoreboard</code> is merged into this
-        server's combined view at{' '}
+        Clusters merged into the{' '}
         <Link to="/scoreboard?combined=1" target="_blank" rel="noreferrer">
-          /scoreboard?combined=1
+          combined scoreboard
         </Link>
-        . Peers are fanned-out in parallel (5s timeout each); failures don't
-        break the aggregate. baseUrl example: <code>http://10.55.89.44:3000</code>.
+        . baseUrl example: <code>http://10.55.89.44:3000</code>.
       </p>
       {error && <div className="app-error">{error}</div>}
 
       <div className="admin-cluster-section">
-        <label className="admin-cluster-label">add peer</label>
+        <label className="admin-cluster-label">
+          this cluster's name
+          <span className="c-dim"> · shown as the cluster tag on local entries in the combined view</span>
+        </label>
+        <div className="admin-peers-add-row">
+          <input
+            type="text"
+            className="admin-cluster-input"
+            placeholder="e.g. DM3-POC037 (leave empty for no tag)"
+            value={selfLabel}
+            onChange={(e) => setSelfLabel(e.target.value)}
+            disabled={selfBusy}
+            spellCheck={false}
+          />
+          <button
+            type="button"
+            className="modal-btn modal-btn-danger"
+            disabled={selfBusy || !selfLabelDirty}
+            onClick={() => void saveSelfLabel()}
+          >
+            {selfBusy ? 'saving…' : 'save'}
+          </button>
+        </div>
+      </div>
+
+      <div className="admin-cluster-section">
+        <label className="admin-cluster-label">add cluster</label>
         <div className="admin-peers-add-row">
           <input
             type="text"
@@ -1257,9 +1615,9 @@ function PeersEditor({ password }: { password: string }) {
       </div>
 
       <div className="admin-cluster-section">
-        <label className="admin-cluster-label">configured peers ({entries?.length ?? 0})</label>
+        <label className="admin-cluster-label">configured clusters ({entries?.length ?? 0})</label>
         {entries && entries.length === 0 ? (
-          <div className="c-dim">no peers configured — combined view shows only local entries.</div>
+          <div className="c-dim">no clusters configured — combined view shows only this cluster.</div>
         ) : (
           <div className="admin-table-wrap">
             <table className="admin-table">
@@ -1279,7 +1637,7 @@ function PeersEditor({ password }: { password: string }) {
                     <td className="c-dim">{p.baseUrl}</td>
                     <td className="c-dim">{fmtAge(p.addedAt)}</td>
                     <td>
-                      <label className="modal-toggle" title="disabled peers are skipped on combined fan-out">
+                      <label className="modal-toggle" title="disabled clusters are skipped on combined fan-out">
                         <input
                           type="checkbox"
                           checked={p.enabled}
@@ -1294,8 +1652,8 @@ function PeersEditor({ password }: { password: string }) {
                         type="button"
                         className="admin-delete"
                         disabled={busy !== null}
-                        onClick={() => void remove(p)}
-                        title="remove this peer"
+                        onClick={() => setRemoveTarget(p)}
+                        title="remove this cluster"
                       >
                         remove
                       </button>
@@ -1307,6 +1665,30 @@ function PeersEditor({ password }: { password: string }) {
           </div>
         )}
       </div>
+
+      {removeTarget && (
+        <ConfirmModal
+          title={<><span className="c-red">!</span> remove cluster?</>}
+          danger
+          busy={busy === 'mutate'}
+          confirmLabel={busy === 'mutate' ? 'removing…' : `remove ${removeTarget.label}`}
+          cancelLabel="cancel"
+          onCancel={() => setRemoveTarget(null)}
+          onConfirm={() => void confirmRemove()}
+        >
+          <dl className="modal-meta">
+            <dt>label</dt>
+            <dd className="modal-trigram">{removeTarget.label}</dd>
+            <dt>baseUrl</dt>
+            <dd className="c-dim">{removeTarget.baseUrl}</dd>
+          </dl>
+          <p className="modal-warn">
+            this cluster's entries will stop appearing on the combined
+            scoreboard. <span className="c-red">cannot be undone</span> — re-adding
+            requires re-entering the baseUrl.
+          </p>
+        </ConfirmModal>
+      )}
     </div>
   );
 }

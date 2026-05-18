@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   api,
-  type CombinedPeerStatus,
   type ScoreboardEntry,
 } from './api';
 
@@ -25,7 +24,9 @@ interface DisplayPayload {
   mode: 'mock' | 'live';
   totalStages: number;
   entries: Array<ScoreboardEntry & { peerLabel?: string | null }>;
-  peerStatus?: CombinedPeerStatus[];
+  /** Set in combined mode; identifies the cluster this server runs on so
+   *  local entries (peerLabel === null) can still be cluster-tagged. */
+  selfLabel?: string | null;
 }
 
 export function Scoreboard() {
@@ -42,15 +43,15 @@ export function Scoreboard() {
   const [lastRefreshAt, setLastRefreshAt] = useState<number>(Date.now());
 
   useEffect(() => {
-    document.title = combined ? 'NIG - combined scoreboard' : 'NIG - scoreboard';
-  }, [combined]);
+    document.title = 'NIG - scoreboard';
+  }, []);
 
-  // Demo payload is memoized on demoCount so switching presets re-seeds
-  // (different random elapsed times etc.) without flickering while we stay
-  // on the same count.
+  // Demo payload is memoized on (demoCount, combined) so switching either
+  // re-seeds without flickering while we stay on the same combo. Combined
+  // demo spreads entries across a few fake clusters for layout validation.
   const demoPayload = useMemo<DisplayPayload | null>(
-    () => (demoCount !== null ? makeDemoPayload(demoCount) : null),
-    [demoCount],
+    () => (demoCount !== null ? makeDemoPayload(demoCount, combined) : null),
+    [demoCount, combined],
   );
   const payload = demoPayload ?? livePayload;
 
@@ -95,27 +96,9 @@ export function Scoreboard() {
     <div className="scoreboard-projector">
       <header className="scoreboard-header">
         <Link to="/" className="scoreboard-back" aria-label="back to game">←</Link>
-        <h1 className="scoreboard-title">
-          {combined ? 'Combined Status of Undercover Agents' : 'Status of Undercover Agents'}
-        </h1>
-        <button
-          type="button"
-          className={`scoreboard-combined-toggle${combined ? ' is-active' : ''}`}
-          onClick={() => {
-            const next = new URLSearchParams(searchParams);
-            if (combined) next.delete(COMBINED_PARAM);
-            else next.set(COMBINED_PARAM, '1');
-            setSearchParams(next);
-          }}
-          title={combined ? 'show only this instance' : 'merge peer instances into the board'}
-        >
-          {combined ? 'combined ✓' : 'combined'}
-        </button>
+        <h1 className="scoreboard-title">Status of Undercover Agents</h1>
         <LiveDot lastRefreshAt={lastRefreshAt} />
       </header>
-      {combined && payload?.peerStatus && payload.peerStatus.length > 0 && (
-        <CombinedPeersStrip peerStatus={payload.peerStatus} />
-      )}
       {error && <div className="scoreboard-error">scoreboard: {error}</div>}
       {!payload ? (
         <div className="scoreboard-empty">loading…</div>
@@ -132,15 +115,29 @@ export function Scoreboard() {
           }}
         >
           {payload.entries.map((e) => (
-            <AgentCard key={e.sessionId} entry={e} />
+            <AgentCard
+              key={e.sessionId}
+              entry={e}
+              clusterLabel={combined ? (e.peerLabel ?? payload.selfLabel ?? null) : null}
+            />
           ))}
         </div>
       )}
       {(demoCount !== null || livePayload?.mode === 'mock') && (
         <DemoSwitch
           current={demoCount}
-          onPick={(n) => setSearchParams({ [DEMO_PARAM]: String(n) })}
-          onExit={() => setSearchParams({})}
+          onPick={(n) => {
+            // Preserve ?combined=1 across demo-preset clicks so the
+            // combined layout can be previewed at different densities.
+            const next = new URLSearchParams(searchParams);
+            next.set(DEMO_PARAM, String(n));
+            setSearchParams(next);
+          }}
+          onExit={() => {
+            const next = new URLSearchParams(searchParams);
+            next.delete(DEMO_PARAM);
+            setSearchParams(next);
+          }}
         />
       )}
     </div>
@@ -184,7 +181,17 @@ function DemoSwitch({
   );
 }
 
-function AgentCard({ entry }: { entry: ScoreboardEntry & { peerLabel?: string | null } }) {
+function AgentCard({
+  entry,
+  clusterLabel,
+}: {
+  entry: ScoreboardEntry & { peerLabel?: string | null };
+  /** Resolved cluster tag to render on the card. `null` in non-combined
+   *  mode (single-instance view doesn't need the tag); a string in
+   *  combined mode — either the peer label for remote entries or the
+   *  server's `selfLabel` for local entries. */
+  clusterLabel: string | null;
+}) {
   // Percent is derived from (stagesPassed / engaged) where engaged subtracts
   // stages the engine gated for this session (e.g. `impact: destructive`
   // when `clusterProfile === 'other'`). Without that subtraction, a session
@@ -218,9 +225,9 @@ function AgentCard({ entry }: { entry: ScoreboardEntry & { peerLabel?: string | 
           <span className="agent-username">{agentName}</span>
           <span className="agent-aka"> a.k.a. </span>
           <span className="agent-trigram">{trigramLabel}</span>
-          {entry.peerLabel && (
-            <span className="agent-peer" title={`from peer instance ${entry.peerLabel}`}>
-              · {entry.peerLabel}
+          {clusterLabel && (
+            <span className="agent-cluster" title={`cluster: ${clusterLabel}`}>
+              · {clusterLabel}
             </span>
           )}
         </span>
@@ -247,28 +254,6 @@ function AgentCard({ entry }: { entry: ScoreboardEntry & { peerLabel?: string | 
   );
 }
 
-function CombinedPeersStrip({ peerStatus }: { peerStatus: CombinedPeerStatus[] }) {
-  return (
-    <div className="scoreboard-peers-strip" role="status">
-      {peerStatus.map((p) => (
-        <span
-          key={p.id}
-          className={`scoreboard-peer-pill ${p.ok ? 'is-ok' : 'is-down'}`}
-          title={
-            p.ok
-              ? `${p.entryCount} entries · ${p.durationMs}ms · ${p.baseUrl}`
-              : `${p.error ?? 'unknown error'} · ${p.baseUrl}`
-          }
-        >
-          <span className="scoreboard-peer-dot" />
-          {p.label}
-          {p.ok && <span className="c-dim"> · {p.entryCount}</span>}
-        </span>
-      ))}
-    </div>
-  );
-}
-
 function LiveDot({ lastRefreshAt }: { lastRefreshAt: number }) {
   // Pulsing indicator next to the title so projector viewers know the board
   // is live (vs. a frozen screenshot). Small, not distracting.
@@ -284,7 +269,7 @@ function LiveDot({ lastRefreshAt }: { lastRefreshAt: number }) {
   );
 }
 
-function makeDemoPayload(count: number): DisplayPayload {
+function makeDemoPayload(count: number, combined: boolean): DisplayPayload {
   // Deterministic-ish seed so re-renders stay stable within a session.
   const NAMES = [
     'Alice', 'Bob', 'Carol', 'David', 'Eve', 'Frank', 'Grace', 'Hank',
@@ -307,8 +292,13 @@ function makeDemoPayload(count: number): DisplayPayload {
     'sched-day2', 'update-blueprint', 'mission-report', 'outro',
   ];
   const TOTAL = STAGE_NAMES.length;
+  // In combined mode, sprinkle entries across a fixed set of fake clusters
+  // so the cluster-tag rendering can be validated at any density. First
+  // slot is `null` (= local) so the player's own cluster tag is also
+  // exercised by the demo via `selfLabel` below.
+  const FAKE_PEERS: Array<string | null> = [null, 'POC-37', 'DM3-POC042', 'EMEA-LAB-7'];
   const now = Date.now();
-  const entries: ScoreboardEntry[] = Array.from({ length: count }, (_, i) => {
+  const entries: Array<ScoreboardEntry & { peerLabel?: string | null }> = Array.from({ length: count }, (_, i) => {
     // Distribute progress across the roster: top few near-finished, a
     // cluster mid-game, some just started, 1-2 finished at the very top,
     // 1 idle. Anonymous (pre-trigram) entries are filtered out of the
@@ -327,6 +317,7 @@ function makeDemoPayload(count: number): DisplayPayload {
       : isIdle
         ? now - 4 * 60_000
         : now - Math.floor(Math.random() * 40_000);
+    const peerLabel = combined ? FAKE_PEERS[i % FAKE_PEERS.length]! : null;
     return {
       rank: i + 1,
       sessionId: `demo-${i + 1}`,
@@ -340,6 +331,7 @@ function makeDemoPayload(count: number): DisplayPayload {
       finishedAt,
       lastActivityAt,
       status: finishedAt !== null ? 'finished' : 'playing',
+      peerLabel,
     };
   });
   return {
@@ -347,6 +339,9 @@ function makeDemoPayload(count: number): DisplayPayload {
     packName: 'Demo Roster',
     mode: 'mock',
     totalStages: TOTAL,
+    // Self-label shows up on local (peerLabel === null) entries in the
+    // demo so the player-perspective cluster tag is also covered.
+    selfLabel: combined ? 'THIS-DEMO' : null,
     entries,
   };
 }

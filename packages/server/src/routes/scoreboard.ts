@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Database } from 'bun:sqlite';
 import type { NutanixClient } from '@ntnx-game/engine';
-import { SessionQueries, ScoreboardPeerQueries } from '../db/queries';
+import { SessionQueries, ScoreboardPeerQueries, ClusterConfigQueries } from '../db/queries';
 import type { LoadedPack } from '../pack-loader';
 import { consoleLogger } from '../logger';
 
@@ -13,6 +13,12 @@ export interface ScoreboardRoutesDeps {
    *  opt in via URL param). Inferred from the NutanixClient at wire-up. */
   mode: NutanixClient['mode'];
 }
+
+/** Persisted key for the operator-set cluster label, surfaced as
+ *  `selfLabel` on the `/combined` response. Stored in `cluster_config`
+ *  (same table as other admin-managed runtime config) so a restart
+ *  doesn't drop the value. */
+const SELF_LABEL_KEY = 'self_label';
 
 /** Per-peer fetch outcome for the combined endpoint's diagnostic panel. */
 export interface CombinedPeerStatus {
@@ -56,6 +62,7 @@ export function buildScoreboardRoutes(deps: ScoreboardRoutesDeps): Hono {
   const router = new Hono();
   const sessions = new SessionQueries(deps.db);
   const peers = new ScoreboardPeerQueries(deps.db);
+  const clusterConfig = new ClusterConfigQueries(deps.db);
   // Pack order is the source of truth for "next stage after X". Keep a
   // positional index so the scoreboard row doesn't need to re-scan the
   // array for each session.
@@ -122,11 +129,13 @@ export function buildScoreboardRoutes(deps: ScoreboardRoutesDeps): Hono {
     );
     const peerEntries = results.flatMap((r) => r.entries);
     const merged = mergeScoreboards([...local, ...peerEntries]);
+    const selfLabel = clusterConfig.get<string>(SELF_LABEL_KEY) ?? null;
     return c.json({
       packId: deps.pack.manifest.id,
       packName: deps.pack.manifest.name,
       mode: deps.mode,
       totalStages,
+      selfLabel,
       entries: merged,
       peerStatus: results.map((r) => r.status),
     });
