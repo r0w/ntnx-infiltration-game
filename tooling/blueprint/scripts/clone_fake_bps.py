@@ -10,9 +10,16 @@ Skips silently if `CloneProd` hasn't been uploaded yet — it's an
 operator-managed prereq (uploaded once per fresh PC via Prism UI from
 the release asset prereqs/CloneProd.tgz).
 
+Skips entirely on CLUSTER_PROFILE=other to keep the shared cluster's
+Self-Service catalog clean. The 10 fake BPs are pure immersion — no
+pack stage checks for them — so skipping them on shared clusters costs
+nothing functionally. Same gate pattern as remove_node.py and
+activate_policy_engine.py.
+
 Idempotent: skips per-name if a BP with that name already exists.
 
-Calm injects @@{PC_IP}@@, @@{PC_USERNAME}@@, @@{PC_PASSWORD}@@.
+Calm injects @@{PC_IP}@@, @@{PC_USERNAME}@@, @@{PC_PASSWORD}@@,
+@@{CLUSTER_PROFILE}@@.
 """
 
 import json
@@ -26,6 +33,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 PC_IP = '@@{PC_IP}@@'
 PC_USERNAME = '@@{PC_USERNAME}@@'
 PC_PASSWORD = '@@{PC_PASSWORD}@@'
+CLUSTER_PROFILE = '@@{CLUSTER_PROFILE}@@'
 
 FAKE_NAMES = [
     "ApacheServer",
@@ -57,6 +65,14 @@ def list_bps():
 
 
 def main():
+    if CLUSTER_PROFILE != 'hpoc':
+        print(
+            "[skip] CLUSTER_PROFILE=%r — fake-BP cloning is pure immersion for "
+            "vanilla HPoC; on a shared cluster it just pollutes the Self-Service "
+            "catalog and no pack stage depends on these BPs." % CLUSTER_PROFILE
+        )
+        return 0
+
     bps = list_bps()
     by_name = {(b.get('status', {}).get('name') or b.get('metadata', {}).get('name')): b for b in bps}
 
