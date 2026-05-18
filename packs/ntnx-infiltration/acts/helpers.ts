@@ -132,7 +132,7 @@ export async function ensure<T>(opts: {
 /**
  * POST to a v4 endpoint and return the parsed response body. Wraps direct
  * fetch (not `rest.request()`) because several v4 domains — notably
- * `datapolicies` and `opsmgmt` — require an `NTNX-Request-Id` UUID header
+ * `datapolicies` and `opsmgmt` — require an `Ntnx-Request-Id` UUID header
  * for idempotency on every mutating call, which the `rest-adapter` doesn't
  * set. Using fetch directly lets us add it without bloating the shared
  * rest transport.
@@ -162,7 +162,7 @@ export async function postV4<T = unknown>(
       Authorization: auth,
       'Content-Type': 'application/json',
       Accept: 'application/json',
-      'NTNX-Request-Id': crypto.randomUUID(),
+      'Ntnx-Request-Id': crypto.randomUUID(),
     },
     body: JSON.stringify(body),
     tls: { rejectUnauthorized: false },
@@ -219,7 +219,7 @@ export async function postV4Action<T = unknown>(
   const headers: Record<string, string> = {
     Authorization: auth,
     'If-Match': etag,
-    'NTNX-Request-Id': crypto.randomUUID(),
+    'Ntnx-Request-Id': crypto.randomUUID(),
     Accept: 'application/json',
   };
   const init: {
@@ -283,7 +283,7 @@ export async function putV4<T = unknown>(
         'Content-Type': 'application/json',
         Accept: 'application/json',
         'If-Match': ifMatch,
-        'NTNX-Request-Id': crypto.randomUUID(),
+        'Ntnx-Request-Id': crypto.randomUUID(),
       },
       body: JSON.stringify(body),
       tls: { rejectUnauthorized: false },
@@ -389,7 +389,7 @@ export async function deleteV4Entity(
         // Mutating v4 endpoints in datapolicies/opsmgmt/security require
         // an idempotency UUID; IAM and vmm don't care but tolerate the
         // header. Add universally.
-        'NTNX-Request-Id': crypto.randomUUID(),
+        'Ntnx-Request-Id': crypto.randomUUID(),
       },
       tls: { rejectUnauthorized: false },
     }) as const;
@@ -404,11 +404,14 @@ export async function deleteV4Entity(
   if (delRes.ok || delRes.status === 204) return true;
   if (delRes.status === 404) return true;
   const body = await delRes.text().catch(() => '');
-  ctx.logger.warn('deleteV4Entity DELETE failed', {
-    path,
-    extId,
-    status: delRes.status,
-    body: body.slice(0, 200),
-  });
-  return false;
+  // Throw so the per-stage `try/catch` in `/cleanup-all/:trigram` surfaces
+  // this as `ok:false` in the results — previously we returned false and
+  // the caller (`deleteByName`) swallowed it, leaving operators with a
+  // misleading "all clean" report while resources stayed on the cluster.
+  // Live regression: 2026-05-18 on 10.38.66.7 where networking v4 DELETEs
+  // rejected `NTNX-Request-Id` (case-sensitive — `Ntnx-Request-Id` works) →
+  // silently failed → VPCs/subnets leaked despite `failures: 0` reporting.
+  throw new Error(
+    `deleteV4Entity ${path}/${extId}: HTTP ${delRes.status} — ${body.slice(0, 200)}`,
+  );
 }
