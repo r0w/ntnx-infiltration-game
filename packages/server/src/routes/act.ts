@@ -331,20 +331,26 @@ export function buildActRoutes(deps: ActRoutesDeps): Hono {
   router.post('/cleanup-all/:trigram', async (c) => {
     const trigram = c.req.param('trigram');
     const ctx = makeContext(trigram);
-    const stagesReverse = [...deps.pack.stages].reverse();
+    // Iterate the pack's CleanupRegistry in its insertion order — the pack
+    // owns the cleanup sequence. Reverse-stage-order doesn't work for
+    // cross-stage dependencies (e.g. `create-vm` (stage 12) must run
+    // BEFORE `create-category` (stage 15) because the VM holds a tag
+    // reference that blocks the category delete — pure reverse would
+    // try create-category first and fail with HTTP 400).
+    const cleanupOrder = deps.pack.cleanups.names();
 
     const results: Array<{ stage: string; ok: boolean; error?: string; durationMs: number }> =
       [];
-    for (const stage of stagesReverse) {
-      const fn = deps.pack.cleanups.get(stage.name);
+    for (const stageName of cleanupOrder) {
+      const fn = deps.pack.cleanups.get(stageName);
       if (!fn) continue;
       const started = Date.now();
       try {
         await fn(ctx);
-        results.push({ stage: stage.name, ok: true, durationMs: Date.now() - started });
+        results.push({ stage: stageName, ok: true, durationMs: Date.now() - started });
       } catch (err) {
         results.push({
-          stage: stage.name,
+          stage: stageName,
           ok: false,
           error: err instanceof Error ? err.message : String(err),
           durationMs: Date.now() - started,
