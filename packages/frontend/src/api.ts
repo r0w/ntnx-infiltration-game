@@ -410,7 +410,7 @@ export const api = {
       cleanedStages: number;
       failures: number;
       results: Array<{ stage: string; ok: boolean; error?: string; durationMs: number }>;
-    }>(`/seed/cleanup-all/${encodeURIComponent(trigram)}`, password),
+    }>(`/act/cleanup-all/${encodeURIComponent(trigram)}`, password),
   adminClusterConfig: (password: string) =>
     adminGet<AdminClusterConfigPayload>('/admin/cluster-config', password),
   adminClusterConfigSave: (
