@@ -359,6 +359,52 @@ export class SessionService {
     return allSet ? ['PlannerCluster'] : [];
   }
 
+  /**
+   * How many stages will a fresh session on this cluster *actually* play?
+   *
+   * Used as the score denominator in `/admin → users` (cell "Progress")
+   * and `/scoreboard` (percentage). Without this, both views divided by
+   * the raw pack length (39), so a player on a cluster where 3 stages
+   * are filtered for cluster reasons (e.g. no Policy Engine + no spare
+   * chassis slot) would top out at 36/39 ≈ 92% even after legitimately
+   * passing everything they could.
+   *
+   * The pre-existing per-session `stagesDisabled` counter only grows
+   * when the engine actually walks past a gated stage during `advance()`
+   * — for in-progress sessions, all FUTURE disabled stages still count
+   * against the player. This method shortcuts that by simulating the
+   * gate against current cluster state for every pack stage:
+   *
+   *   - excludes `active: false` (operator overlay or pack-default off)
+   *   - excludes `requires` not in caps (always)
+   *   - excludes `requiresOnOther` not in caps when profile=other
+   *   - excludes `impact: hpoc-only` when profile=other
+   *   - INCLUDES `adminGate: true` (operator can unlock; counts as
+   *     reachable)
+   *   - INCLUDES `needs`-broken (dynamic per-session; not a cluster fact)
+   *
+   * Merging boot-probed caps with `computeDynamicCapabilities()` here
+   * mirrors `create()` exactly, so admin edits via /admin → cluster
+   * propagate to the denominator on the next render.
+   */
+  effectivePlayableCount(
+    bootCaps: readonly CapabilityFlag[],
+    profile: ClusterProfile,
+  ): number {
+    const caps = new Set<CapabilityFlag>([...bootCaps, ...this.computeDynamicCapabilities()]);
+    let count = 0;
+    for (const s of this.runner.listStages()) {
+      if (!s.active) continue;
+      const required = profile === 'other'
+        ? [...(s.requires ?? []), ...(s.requiresOnOther ?? [])]
+        : (s.requires ?? []);
+      if (required.some((c) => !caps.has(c))) continue;
+      if (s.impact === 'hpoc-only' && profile === 'other') continue;
+      count++;
+    }
+    return count;
+  }
+
   getSession(id: string): SessionRecord {
     const session = this.sessions.byId(id);
     if (!session) throw new HttpError(404, 'Session not found');

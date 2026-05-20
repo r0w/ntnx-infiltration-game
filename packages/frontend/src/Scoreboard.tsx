@@ -192,14 +192,20 @@ function AgentCard({
    *  server's `selfLabel` for local entries. */
   clusterLabel: string | null;
 }) {
-  // Percent is derived from (stagesPassed / engaged) where engaged subtracts
-  // stages the engine gated for this session (e.g. `impact: destructive`
-  // when `clusterProfile === 'other'`). Without that subtraction, a session
-  // that reached `mission-complete` could still display 95% because two
-  // stages were filtered out before they could ever be played. We never
-  // surface the total — the player sees their relative rank + progress,
-  // not the scenario length (keeps the "how much is left?" suspense).
-  const engaged = Math.max(1, entry.totalStages - entry.stagesDisabled);
+  // Percent denominator = `effectiveTotalStages` from the server (raw pack
+  // total minus stages filtered for cluster reasons: missing caps,
+  // destructive-on-other, pack-disabled by overlay). Earlier we computed
+  // `engaged = totalStages - stagesDisabled` client-side, but
+  // `stagesDisabled` only grows when the engine actually walks past a
+  // gated stage during `advance()` — for an in-progress session at stage
+  // 3, all FUTURE filtered stages still counted against the player and
+  // capped them at e.g. 3/39 ≈ 8% instead of 3/36 ≈ 8.3% (same here)
+  // … but more importantly capped a finished session at 36/39 ≈ 92%
+  // instead of the correct 36/36 = 100% when the engine had skipped
+  // mid-run rather than recording every disable. We never surface the
+  // total — the player sees their relative rank + progress, not the
+  // scenario length (keeps the "how much is left?" suspense).
+  const engaged = Math.max(1, entry.effectiveTotalStages);
   const percent = Math.min(100, Math.round((entry.stagesPassed / engaged) * 100));
   const tier = progressTier(percent);
   const agentName = entry.username ?? 'anonymous';
@@ -327,6 +333,7 @@ function makeDemoPayload(count: number, combined: boolean): DisplayPayload {
       stagesPassed,
       stagesDisabled: 0,
       totalStages: TOTAL,
+      effectiveTotalStages: TOTAL,
       startedAt,
       finishedAt,
       lastActivityAt,
