@@ -58,6 +58,13 @@ export interface AdminUserEntry extends AdminSessionRow {
   /** Name of the stage the player is ABOUT to play (i.e. after currentStage). */
   nextStageName: string | null;
   totalStages: number;
+  /** Stages this cluster will let a fresh session actually play (raw pack
+   *  total minus stages filtered for cluster reasons — capability missing,
+   *  destructive-on-other, pack-disabled by overlay). Same for every entry
+   *  on a given snapshot; per-entry to keep the row self-contained. Used
+   *  as the denominator in the "Progress" cell so a player who legitimately
+   *  passed everything reachable shows N/N instead of N/39. */
+  effectiveTotalStages: number;
 }
 
 export interface AdminGateEntry {
@@ -204,6 +211,11 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   router.get('/users', (c) => {
     const effective = deps.service.listEffectiveStages();
     const rows = sessions.listAdmin(deps.pack.manifest.id);
+    // Compute once per request — same value for every row on this snapshot.
+    const effectiveTotalStages = deps.service.effectivePlayableCount(
+      deps.capabilities ?? [],
+      deps.clusterProfile,
+    );
     const entries: AdminUserEntry[] = rows.map((row) => {
       let nextStageName: string | null = null;
       if (row.finishedAt === null) {
@@ -215,6 +227,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
         ...row,
         nextStageName,
         totalStages,
+        effectiveTotalStages,
       };
     });
     return c.json({

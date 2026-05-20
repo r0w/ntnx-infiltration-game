@@ -91,7 +91,19 @@ function seed(db: Database, input: SeedInput): void {
 }
 
 async function fetchEntries(db: Database): Promise<ScoreboardEntry[]> {
-  const router = buildScoreboardRoutes({ db, pack: fakePack(), mode: 'mock' });
+  const router = buildScoreboardRoutes({
+    db,
+    pack: fakePack(),
+    mode: 'mock',
+    // Minimal stub — the scoreboard route only invokes
+    // `effectivePlayableCount`. Returning `stages.length` mirrors the
+    // pre-tightening behaviour these tests baked in.
+    service: { effectivePlayableCount: () => stages.length } as unknown as Parameters<
+      typeof buildScoreboardRoutes
+    >[0]['service'],
+    capabilities: [],
+    clusterProfile: 'hpoc',
+  });
   const res = await router.request('/');
   const body = (await res.json()) as {
     entries: ScoreboardEntry[];

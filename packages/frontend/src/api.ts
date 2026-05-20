@@ -146,9 +146,14 @@ export interface ScoreboardEntry {
   stageName: string | null;
   stagesPassed: number;
   /** Stages the engine gated for this session (e.g. destructive on `other`).
-   *  Subtracted from `totalStages` when computing the percent display. */
+   *  Kept for telemetry — the percent display now divides by
+   *  `effectiveTotalStages` (more accurate for in-progress sessions). */
   stagesDisabled: number;
   totalStages: number;
+  /** Cluster-aware playable count — see backend doc. The percent display
+   *  divides by this so an in-progress player doesn't dip to 92% when
+   *  3 stages are filtered but not yet walked-past. */
+  effectiveTotalStages: number;
   startedAt: number;
   finishedAt: number | null;
   lastActivityAt: number | null;
@@ -216,11 +221,16 @@ export interface AdminUserEntry {
   nextStageName: string | null;
   stagesPassed: number;
   /** Stages the engine gated for this session (capability missing,
-   *  destructive-on-other, missing-upstream). Subtracted from
-   *  `totalStages` to get the denominator the player can actually
-   *  reach on this cluster. */
+   *  destructive-on-other, missing-upstream). Kept for telemetry —
+   *  `effectiveTotalStages` is the denominator the UI uses for the
+   *  Progress cell. */
   stagesDisabled: number;
   totalStages: number;
+  /** Cluster-aware playable count — see backend doc. The Progress cell
+   *  in /admin uses this as the denominator so an in-progress session
+   *  doesn't display N/39 when 3 stages are filtered for cluster
+   *  reasons but not yet walked-past. */
+  effectiveTotalStages: number;
   startedAt: number;
   finishedAt: number | null;
   lastActivityAt: number | null;

@@ -655,11 +655,11 @@ function AdminDashboard({
                     )}
                   </td>
                   <td title={
-                    e.stagesDisabled > 0
-                      ? `${e.stagesPassed} passed / ${Math.max(1, e.totalStages - e.stagesDisabled)} reachable (${e.stagesDisabled} stages filtered for this cluster) — raw pack total: ${e.totalStages}`
+                    e.effectiveTotalStages < e.totalStages
+                      ? `${e.stagesPassed} passed / ${e.effectiveTotalStages} reachable on this cluster (${e.totalStages - e.effectiveTotalStages} filtered) — raw pack total: ${e.totalStages}`
                       : `${e.stagesPassed} passed / ${e.totalStages} total`
                   }>
-                    {e.stagesPassed} / {Math.max(1, e.totalStages - e.stagesDisabled)}
+                    {e.stagesPassed} / {e.effectiveTotalStages}
                   </td>
                   <td className="c-dim">{fmtAge(e.startedAt)}</td>
                   <td className="admin-td-sid c-dim" title={e.sessionId}>

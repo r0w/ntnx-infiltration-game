@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
 import type { Database } from 'bun:sqlite';
-import type { NutanixClient } from '@ntnx-game/engine';
+import type { CapabilityFlag, ClusterProfile, NutanixClient } from '@ntnx-game/engine';
 import { SessionQueries, ScoreboardPeerQueries, ClusterConfigQueries } from '../db/queries';
 import type { LoadedPack } from '../pack-loader';
+import type { SessionService } from '../session-service';
 import { consoleLogger } from '../logger';
 
 export interface ScoreboardRoutesDeps {
@@ -12,6 +13,11 @@ export interface ScoreboardRoutesDeps {
    *  switcher whenever the backend is running in mock mode (no need to
    *  opt in via URL param). Inferred from the NutanixClient at wire-up. */
   mode: NutanixClient['mode'];
+  /** Needed for `effectivePlayableCount` — the denominator used by the
+   *  frontend's percent computation. */
+  service: SessionService;
+  capabilities: readonly CapabilityFlag[];
+  clusterProfile: ClusterProfile;
 }
 
 /** Persisted key for the operator-set cluster label, surfaced as
@@ -49,9 +55,18 @@ export interface ScoreboardEntry {
   stageName: string | null;
   stagesPassed: number;
   /** Stages the engine gated for this session (e.g. destructive on `other`).
-   *  Frontend subtracts these from `totalStages` for the percent display. */
+   *  Retained for telemetry — `effectiveTotalStages` is the denominator
+   *  the frontend percent display uses now (more accurate for in-progress
+   *  sessions, see field doc). */
   stagesDisabled: number;
   totalStages: number;
+  /** Stages this cluster will let a fresh session actually play (raw pack
+   *  total minus stages filtered for cluster reasons — capability missing,
+   *  destructive-on-other, pack-disabled by overlay). Same value for every
+   *  row on a given snapshot. Used as the percent denominator instead of
+   *  `totalStages - stagesDisabled` so in-progress sessions don't dip to
+   *  92% when they're actually on track for 100%. */
+  effectiveTotalStages: number;
   startedAt: number;
   finishedAt: number | null;
   lastActivityAt: number | null;
@@ -72,6 +87,11 @@ export function buildScoreboardRoutes(deps: ScoreboardRoutesDeps): Hono {
 
   function buildLocalEntries(): ScoreboardEntry[] {
     const rows = sessions.listScoreboard(deps.pack.manifest.id);
+    // Compute once per request — same value across every row.
+    const effectiveTotalStages = deps.service.effectivePlayableCount(
+      deps.capabilities,
+      deps.clusterProfile,
+    );
     // Public scoreboard hides anonymous (= pre-trigram-capture) sessions.
     // The query keeps surfacing them for /admin's debug view; the filter
     // lives at the route layer so the projector display only shows
@@ -95,6 +115,7 @@ export function buildScoreboardRoutes(deps: ScoreboardRoutesDeps): Hono {
         stagesPassed: row.stagesPassed,
         stagesDisabled: row.stagesDisabled,
         totalStages,
+        effectiveTotalStages,
         startedAt: row.startedAt,
         finishedAt: row.finishedAt,
         lastActivityAt: row.lastActivityAt,
