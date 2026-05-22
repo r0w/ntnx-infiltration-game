@@ -40,6 +40,11 @@ HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
 
 def find_existing_project():
+    """Return the uuid of the `production` project if it exists in a HEALTHY
+    state. If the project exists but state == ERROR (e.g. previous deploy hit
+    a Calm policy-engine-not-ready race during create), delete it and return
+    None so the caller re-creates a clean one. Recreating without deleting
+    would 409 on duplicate name."""
     r = requests.post(
         "%s/api/nutanix/v3/projects/list" % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
@@ -47,9 +52,32 @@ def find_existing_project():
     )
     r.raise_for_status()
     entities = r.json().get('entities') or []
-    if entities:
-        return entities[0]['metadata']['uuid']
-    return None
+    if not entities:
+        return None
+    p = entities[0]
+    state = (p.get('status') or {}).get('state')
+    uuid = p['metadata']['uuid']
+    if state == 'ERROR':
+        print("  [recover] existing project %s in state=ERROR — deleting before recreate" % uuid)
+        dr = requests.delete(
+            "%s/api/nutanix/v3/projects/%s" % (BASE, uuid),
+            auth=AUTH, headers=HEADERS, verify=False, timeout=30,
+        )
+        if dr.status_code >= 400:
+            raise Exception("could not delete ERROR-state project %s: %d %s" % (uuid, dr.status_code, dr.text[:200]))
+        # Wait briefly for the delete task to settle so the subsequent create
+        # doesn't 409 on duplicate name. Iteration-based (sandbox sleep is
+        # unreliable); MAX_POLLS=30 ≈ 15-30 s real wall-clock.
+        for _ in range(30):
+            chk = requests.post(
+                "%s/api/nutanix/v3/projects/list" % BASE,
+                auth=AUTH, headers=HEADERS, verify=False, timeout=20,
+                data=json.dumps({"kind": "project", "filter": "name==%s" % PROJECT_NAME}),
+            )
+            if chk.status_code == 200 and not (chk.json().get('entities') or []):
+                break
+        return None
+    return uuid
 
 
 def get_account_uuid():
@@ -62,7 +90,7 @@ def get_account_uuid():
     for e in r.json().get('entities') or []:
         if e.get('metadata', {}).get('name') == 'NTNX_LOCAL_AZ':
             return e['metadata']['uuid']
-    raise RuntimeError("NTNX_LOCAL_AZ account not found")
+    raise Exception("NTNX_LOCAL_AZ account not found")
 
 
 def get_subnet_uuid(name):
@@ -124,11 +152,17 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
         data=json.dumps(body),
     )
     if r.status_code >= 400:
-        raise RuntimeError("create project failed: %d %s" % (r.status_code, r.text[:300]))
+        raise Exception("create project failed: %d %s" % (r.status_code, r.text[:300]))
     task_uuid = r.json()["status"]["execution_context"]["task_uuid"]
 
-    deadline = time.time() + 60
-    while time.time() < deadline:
+    # Iteration-based, NOT wall-clock-based. The sandbox rewrites time.time()
+    # to a 1-incrementing counter and time.sleep() to a TCP-timeout that
+    # often returns instantly — a `deadline = time.time() + 60` loop blasts
+    # through 60 iterations in milliseconds and times out before PC finishes
+    # the project create task. Each /tasks GET takes ~0.5-1s naturally, so
+    # MAX_POLLS=120 is ~60-120 s of real wall-clock without trusting sleep.
+    MAX_POLLS = 120
+    for poll in range(MAX_POLLS):
         r = requests.get(
             "%s/api/nutanix/v3/tasks/%s" % (BASE, task_uuid),
             auth=AUTH, headers=HEADERS, verify=False, timeout=20,
@@ -138,9 +172,8 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
         if task.get("status") == "SUCCEEDED":
             return task["entity_reference_list"][0]["uuid"]
         if task.get("status") == "FAILED":
-            raise RuntimeError("project create task failed: %s" % task)
-        time.sleep(3)
-    raise RuntimeError("project create task timed out")
+            raise Exception("project create task failed: %s" % task)
+    raise Exception("project create task timed out after %d polls" % MAX_POLLS)
 
 
 def get_project_spec_version(project_uuid):

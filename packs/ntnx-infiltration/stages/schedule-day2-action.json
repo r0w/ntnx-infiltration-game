@@ -13,6 +13,7 @@
   ],
   "saveScore": false,
   "waitForInputValue": "Ok",
+  "requiresOnOther": ["ApprovalPolicy"],
   "check": {
     "fn": "CheckSchedDay2"
   },

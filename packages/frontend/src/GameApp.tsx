@@ -246,6 +246,7 @@ export function GameApp() {
           awaitingVariable={session.awaitingVariable}
           busy={session.busy}
           autoPlay={autoPlay}
+          autoPlayActing={autoPlayActing}
           mode={pack?.mode === 'live' ? undefined : pack?.mode}
           onGoto={handleGoto}
         />

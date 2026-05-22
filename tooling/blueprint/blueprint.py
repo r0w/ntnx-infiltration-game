@@ -57,6 +57,8 @@ Launch (headless):
 import os
 
 from calm.dsl.builtins import *  # noqa
+from calm.dsl.builtins.models.action import parallel  # noqa
+from calm.dsl.builtins.models.runbook import branch  # noqa
 
 
 # ── External endpoints ─────────────────────────────────────────────────
@@ -166,155 +168,230 @@ class GameContent(Package):
 
     @action
     def __install__(type="system"):
-        # **Best-effort:** PUTs is_enabled=true + polls the Policy VM
-        # for ~10 min total (5 min × 2 retries on .10 then .11). The
-        # script (`scripts/activate_policy_engine.py`) has BEST_EFFORT
-        # =True, so when both retries fail it exits 0 with a loud
-        # `[best-effort WARN]` line instead of FAILURE — the install
-        # runbook continues. On clusters with a healthy Policy VM
-        # image: SUCCESS in ~30s. On clusters where the cloud-init
-        # bug hits the Policy VM (live-confirmed 2026-05-01: VM ON
-        # but services never bind :4202, Calm rolls back is_enabled),
-        # ~10 min wasted then warn-and-continue. Operator activates
-        # manually via Prism UI Settings → Calm
-        # (https://<pc>:9440/dm/settings/policy_enablement) when the
-        # upstream image fix lands. Stage 21 (create-approval-policy)
-        # stays unplayable on hpoc until then; gated when other.
-        CalmTask.Exec.escript.py3(
-            name="Activate policy engine",
-            filename=os.path.join("scripts", "activate_policy_engine.py"),
-            target=ref(Game),
-        )
-        # SET_VAR escript: captures CLUSTERNAME + CLUSTERUUID onto the
-        # Profile vars. Cycle-fix shape: vars live on Profile (not
-        # Service); SET_VAR target stays Service so Calm executes the
-        # task — the eval-var-not-on-Service warning at validate time
-        # is benign (the cycle is avoided because scripts read bare
-        # `@@{X}@@`, not `@@{Game.X}@@`). See `cycle_check.py` spike.
+        # ─── Sequential prereq ─────────────────────────────────────────
+        # Get Cluster captures CLUSTERUUID, which `Remove 4th host on
+        # HPoC` needs to look up the host list. Everything else
+        # (including Activate policy engine) lives in the parallel
+        # block below. Get Cluster is fast (~5s API call), so paying
+        # this single sequential tax doesn't meaningfully extend the
+        # critical path.
+        #
+        # Cycle-fix shape: vars live on Profile (not Service); SET_VAR
+        # target stays Service so Calm executes the task — the eval-
+        # var-not-on-Service warning at validate time is benign (the
+        # cycle is avoided because scripts read bare `@@{X}@@`, not
+        # `@@{Game.X}@@`). See `cycle_check.py` spike.
         CalmTask.SetVariable.escript.py3(
             name="Get Cluster",
             filename=os.path.join("scripts", "get_cluster.py"),
             target=ref(Game),
             variables=["CLUSTERNAME", "CLUSTERUUID"],
         )
-        # Idempotent: ensures `secondary` subnet is advanced-networking
-        # + creates `TestNetwork` (used by stage 35 of the game).
-        CalmTask.Exec.escript.py3(
-            name="Setup subnets",
-            filename=os.path.join("scripts", "setup_subnets.py"),
-            target=ref(Game),
-        )
-        # SET_VAR: creates the `production` Calm project + ACP that
-        # grants `thebadguy` Project Admin, captures ProjectUUID.
-        CalmTask.SetVariable.escript.py3(
-            name="Setup production project",
-            filename=os.path.join("scripts", "setup_production_project.py"),
-            target=ref(Game),
-            variables=["ProjectUUID"],
-        )
-        # 3 stock approver users (charlie/thom/william) for stage 21.
-        CalmTask.Exec.escript.py3(
-            name="Create Local users",
-            filename=os.path.join("scripts", "create_local_users.py"),
-            target=ref(Game),
-        )
-        # Async LCM inventory scan — populates stage 29's update count.
-        CalmTask.Exec.escript.py3(
-            name="Trigger LCM inventory",
-            filename=os.path.join("scripts", "trigger_lcm_inventory.py"),
-            target=ref(Game),
-        )
-        # Calm endpoint named `jumphost` — used by CloneProd day-2.
-        CalmTask.Exec.escript.py3(
-            name="Setup jumphost endpoint",
-            filename=os.path.join("scripts", "setup_jumphost_endpoint.py"),
-            target=ref(Game),
-        )
-        # Read-only cluster probes (PC reachable, hosts NORMAL, free
-        # chassis slot). Best-effort convergence check; the operator-
-        # facing `Verify State` day-2 action below is the on-demand one.
-        CalmTask.Exec.escript.py3(
-            name="Verify final state",
-            filename=os.path.join("scripts", "verify_state.py"),
-            target=ref(Game),
-        )
-        # 7 hardcoded prod VMs in `production` project tagged
-        # Environment=Production. Heavy v4 VMM POST — schema sensitive
-        # to PC version (cf. memory project_calm_75_bp_rework, blind-
-        # port to v4 schema validated 2026-05-01 on PC 7.5).
-        CalmTask.Exec.escript.py3(
-            name="Create Prod VMs",
-            filename=os.path.join("scripts", "create_prod_vms.py"),
-            target=ref(Game),
-        )
-        # PowerShell against the AD endpoint (creates `thebadguy` +
-        # `theprojectmanager` AD users for stage 13). inherit_target=
-        # False is critical — without it Calm inherits the substrate
-        # os_type=Linux and rejects npsscript with "Linux os cannot
-        # have script type as powershell". target=Game is the anchor;
-        # target_endpoint=AD is where the script actually runs.
-        CalmTask.Exec.powershell(
-            name="Add AD users",
-            filename=os.path.join("scripts", "add_ad_users.ps1"),
-            target=ref(Game),
-            target_endpoint=ref(AD),
-            inherit_target=False,
-        )
-        # ssh on the deployed VM. install_docker.sh idempotent (skip-
-        # if-installed). run_container.sh does docker login →
-        # pull → run -d with PC + GAME_* env injected.
-        CalmTask.Exec.ssh(
-            name="Install Docker",
-            filename=os.path.join("scripts", "install_docker.sh"),
-            cred=ref(BP_CRED_NUTANIX),
-            target=ref(Game),
-        )
-        CalmTask.Exec.ssh(
-            name="Run game container",
-            filename=os.path.join("scripts", "run_container.sh"),
-            cred=ref(BP_CRED_NUTANIX),
-            target=ref(Game),
-        )
-        # Push CloneProd + BlankVM-source prereq blueprints. v2's
-        # working pattern (legacy ntnx-escape-game style): sh runs ON
-        # THE VM (post Install Docker, no escript sandbox), decodes
-        # base64-inlined .tgz blobs, sed-substitutes placeholders, and
-        # uploads via `calm create bp` from a `ntnx/calm-dsl:latest`
-        # docker container. Bypasses both Calm's /import_file API
-        # (rejects raw .tgz) and the escript sandbox (can't run
-        # calm-dsl). Idempotent: --force on each `calm create bp`.
-        # The push_prereq_bps.sh file is generated at compile time
-        # from `scripts/push_prereq_bps.sh.template`
-        # by compile.sh (base64 blobs inlined into placeholders).
-        CalmTask.Exec.ssh(
-            name="Push prereq BPs",
-            filename=os.path.join("scripts", "push_prereq_bps.sh"),
-            cred=ref(BP_CRED_NUTANIX),
-            target=ref(Game),
-        )
-        # 10 fake-named BPs (ApacheServer / Wordpress / PrimaryAD / …)
-        # cloned from CloneProd via /api/nutanix/v3/blueprints/{uuid}/clone.
-        # Pure immersion — surfaces a realistic Self-Service catalog on
-        # PC for stage 35 narrative. Idempotent. Requires CloneProd to
-        # exist on PC (so this task runs after Push prereq BPs).
-        CalmTask.Exec.escript.py3(
-            name="Clone fake BPs",
-            filename=os.path.join("scripts", "clone_fake_bps.py"),
-            target=ref(Game),
-        )
-        # DESTRUCTIVE — shrinks cluster from 4 → 3 nodes by removing
-        # host-4. Idempotent (skip if no -4 host); gated by
-        # CLUSTER_PROFILE in the script itself (early-exits if != hpoc).
-        # ~16 min wall-clock real on NX-3060 per memory
-        # project_bp_v2_zero_touch; 40 min cap in the script's polling
-        # loop. Last task in the install runbook because it's the only
-        # destructive one — keeps everything else idempotent and
-        # re-runnable up to here.
-        CalmTask.Exec.escript.py3(
-            name="Ensure host 4 removed",
-            filename=os.path.join("scripts", "remove_node.py"),
-            target=ref(Game),
-        )
+
+        # ─── Parallel branches ─────────────────────────────────────────
+        # The two long-running ops (node-remove ~16-40 min in Branch 1
+        # and Activate policy engine ~30s-10min in Branch 2) start at
+        # the same time. The shorter branches (IAM/AD/LCM) finish well
+        # before either. Branch 1 is the critical path; the container
+        # chain sits at its tail so the deploy is "done" only when the
+        # cluster has its final 3-node shape AND the game URL is up.
+        # Branch 2's Activate policy engine almost always finishes
+        # before Branch 1 reaches its container tail, so by then the
+        # policy MSP is also up — stage 21 (create-approval-policy)
+        # plays without manual UI intervention.
+        with parallel() as p0:
+
+            # Branch 1 — cluster prep + production world + container.
+            # The destructive node-remove is the long pole (~16-40 min);
+            # the container chain at the end runs only AFTER the
+            # cluster is fully ready, so the deploy is "done" only when
+            # the game URL is up AND the cluster shape is final.
+            #
+            # That's deliberate: stage 28 (`expand-cluster`) prompts
+            # the player for a node serial that only exists once the
+            # node has been freed by the shrink. If we exposed the game
+            # URL before the shrink finished, players could reach stage
+            # 28 prematurely and the in-game lookup would 404. Putting
+            # the container at the end of Branch 1 guarantees that by
+            # the time anyone can hit `http://<vm>:3000/`, the cluster
+            # is in its final 3-node shape with a free chassis slot.
+            #
+            # Container chain (Install Docker → Push prereq BPs → Clone
+            # fake BPs → Run game container) sits after Verify final
+            # state so a verify failure never ships a game on a broken
+            # cluster.
+            with branch(p0):
+                # DESTRUCTIVE — shrinks 4→3 nodes. Early in the branch
+                # so the rest of it runs against the final cluster
+                # shape. Idempotent (skip if no -4 host); gated by
+                # CLUSTER_PROFILE inside the script (skips on `other`).
+                CalmTask.Exec.escript.py3(
+                    name="Remove 4th host on HPoC",
+                    filename=os.path.join("scripts", "remove_node.py"),
+                    target=ref(Game),
+                )
+                # Polls /clustermgmt/.../hosts until all NORMAL +
+                # maintenanceState=normal. Necessary because the script
+                # above only fires the remove-node API and exits — the
+                # actual rebalance + reassign-on-host takes additional
+                # minutes during which subsequent v4 VMM calls would
+                # 503 / partial-fail.
+                CalmTask.Exec.escript.py3(
+                    name="Wait for cluster health",
+                    filename=os.path.join("scripts", "cluster_health.py"),
+                    target=ref(Game),
+                )
+                # Idempotent: ensures `secondary` subnet is advanced-
+                # networking + creates `TestNetwork` (used by stage 35
+                # of the game).
+                CalmTask.Exec.escript.py3(
+                    name="Setup subnets",
+                    filename=os.path.join("scripts", "setup_subnets.py"),
+                    target=ref(Game),
+                )
+                # SET_VAR: creates the `production` Calm project + ACP
+                # that grants `thebadguy` Project Admin, captures
+                # ProjectUUID.
+                CalmTask.SetVariable.escript.py3(
+                    name="Setup production project",
+                    filename=os.path.join("scripts", "setup_production_project.py"),
+                    target=ref(Game),
+                    variables=["ProjectUUID"],
+                )
+                # 7 hardcoded prod VMs in `production` project tagged
+                # Environment=Production. Heavy v4 VMM POST — schema
+                # sensitive to PC version (cf. memory
+                # project_calm_75_bp_rework, blind-port to v4 schema
+                # validated 2026-05-01 on PC 7.5).
+                CalmTask.Exec.escript.py3(
+                    name="Create Prod VMs",
+                    filename=os.path.join("scripts", "create_prod_vms.py"),
+                    target=ref(Game),
+                )
+                # Calm endpoint named `jumphost` — used by CloneProd
+                # day-2 action.
+                CalmTask.Exec.escript.py3(
+                    name="Setup jumphost endpoint",
+                    filename=os.path.join("scripts", "setup_jumphost_endpoint.py"),
+                    target=ref(Game),
+                )
+                # ─── Game prereqs on the deployed VM ───────────────────
+                # SSH on the Calm-provisioned VM. install_docker.sh
+                # idempotent (skip-if-installed).
+                CalmTask.Exec.ssh(
+                    name="Install Docker",
+                    filename=os.path.join("scripts", "install_docker.sh"),
+                    cred=ref(BP_CRED_NUTANIX),
+                    target=ref(Game),
+                )
+                # Push CloneProd + BlankVM-source via ntnx/calm-dsl
+                # container (.tgz → .json → /api/nutanix/v3/blueprints).
+                # Why a sh task on the VM (and not a Calm escript): PC
+                # v3.x's /import_file endpoint rejects raw .tgz with
+                # "Uploaded file is not valid json" (validated 2026-
+                # 05-09). The ntnx/calm-dsl container does the .tgz →
+                # JSON conversion locally before POSTing.
+                #
+                # The .sh writes ~/.calm/config.ini directly inside the
+                # mounted volume instead of calling `calm init dsl`.
+                # `init dsl` probes /api/calm/v3.0/features/approval_policy
+                # at startup, which 30s-timeouts while the policy engine
+                # MSP is still bootstrapping (cf memory
+                # project_calm_policy_vm_unstable). `calm create bp`
+                # itself doesn't probe approval_policy.
+                CalmTask.Exec.ssh(
+                    name="Push prereq BPs",
+                    filename=os.path.join("scripts", "push_prereq_bps.sh"),
+                    cred=ref(BP_CRED_NUTANIX),
+                    target=ref(Game),
+                )
+                # 10 fake-named BPs (ApacheServer / Wordpress /
+                # PrimaryAD / …) cloned from CloneProd via
+                # /api/nutanix/v3/blueprints/{uuid}/clone. Pure
+                # immersion — surfaces a realistic Self-Service catalog
+                # on PC for stage 35 narrative. Idempotent. Requires
+                # CloneProd to exist on PC.
+                CalmTask.Exec.escript.py3(
+                    name="Clone fake BPs",
+                    filename=os.path.join("scripts", "clone_fake_bps.py"),
+                    target=ref(Game),
+                )
+                # ─── Final-gate verify + game container ────────────────
+                # Verify reads PC/cluster state (PC reachable, hosts
+                # NORMAL, rackable-units endpoint responsive). Sits
+                # right before Run game container so a verify failure
+                # hard-stops the deploy — no game URL on a broken
+                # cluster. The day-2 `VerifyState` action (below) runs
+                # this same script on demand.
+                CalmTask.Exec.escript.py3(
+                    name="Verify final state",
+                    filename=os.path.join("scripts", "verify_state.py"),
+                    target=ref(Game),
+                )
+                # FINAL — game container deploy. docker login → pull →
+                # run -d with PC + GAME_* env injected. The "deploy
+                # done" signal: once this returns SUCCESS, the BP app
+                # state flips to `running` and the operator hands out
+                # http://<vm>:3000/ to players.
+                CalmTask.Exec.ssh(
+                    name="Run game container",
+                    filename=os.path.join("scripts", "run_container.sh"),
+                    cred=ref(BP_CRED_NUTANIX),
+                    target=ref(Game),
+                )
+
+            # Branch 2 — Activate policy engine (~30s if already on,
+            # up to ~10 min if MSP boot retries — see memory
+            # project_calm_policy_vm_unstable). Best-effort: the
+            # script exits 0 with a loud `[best-effort WARN]` if both
+            # retries time out, so the install runbook keeps going.
+            # Ideal placement is parallel-with-Branch-1 so the MSP has
+            # the full ~16-40 min cluster-shrink window to come up;
+            # by the time Branch 1 reaches `Run game container`, the
+            # policy engine is up and stage 21 (create-approval-
+            # policy) is playable without operator intervention.
+            with branch(p0):
+                CalmTask.Exec.escript.py3(
+                    name="Activate policy engine",
+                    filename=os.path.join("scripts", "activate_policy_engine.py"),
+                    target=ref(Game),
+                )
+
+            # Branch 3 — local IAM users (~30 s, independent of cluster
+            # path). 3 stock approver users (charlie/thom/william) for
+            # stage 21.
+            with branch(p0):
+                CalmTask.Exec.escript.py3(
+                    name="Create Local users",
+                    filename=os.path.join("scripts", "create_local_users.py"),
+                    target=ref(Game),
+                )
+
+            # Branch 4 — AD users on the AD endpoint (~30 s). PowerShell
+            # against the AD endpoint creates `thebadguy` +
+            # `theprojectmanager` (stage 13). inherit_target=False is
+            # critical — without it Calm inherits the substrate
+            # os_type=Linux and rejects npsscript with "Linux os cannot
+            # have script type as powershell". target=Game is the
+            # anchor; target_endpoint=AD is where the script runs.
+            with branch(p0):
+                CalmTask.Exec.powershell(
+                    name="Add AD users",
+                    filename=os.path.join("scripts", "add_ad_users.ps1"),
+                    target=ref(Game),
+                    target_endpoint=ref(AD),
+                    inherit_target=False,
+                )
+
+            # Branch 5 — fire async LCM inventory scan (~5 s API call,
+            # PC runs it in background). Populates stage 29's update
+            # count when the player checks LCM later.
+            with branch(p0):
+                CalmTask.Exec.escript.py3(
+                    name="Trigger LCM inventory",
+                    filename=os.path.join("scripts", "trigger_lcm_inventory.py"),
+                    target=ref(Game),
+                )
 
 
 # ── Deployment ─────────────────────────────────────────────────────────
@@ -442,7 +519,7 @@ class DefaultProfile(Profile):
         "thebadguy", is_mandatory=False, runtime=False, is_hidden=True,
     )
     GAME_OLD_PC = CalmVariable.Simple(
-        "", is_mandatory=False, runtime=False, is_hidden=True,
+        "10.55.82.39", is_mandatory=False, runtime=False, is_hidden=True,
     )
     GAME_OLD_PC_USERNAME = CalmVariable.Simple(
         "planner", is_mandatory=False, runtime=False, is_hidden=True,

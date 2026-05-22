@@ -173,13 +173,15 @@
       { "extId": "dm-mock-1", "name": "mock-pc" }
     ]
   },
-  "GET /api/clustermgmt/v4.0/config/clusters/cluster-mock-1/rackable-units": {
-    "data": [
-      { "serial": "AB12345DEMO" },
-      { "serial": "CD67890DEMO" },
-      { "serial": "EF13579DEMO" },
-      { "serial": "GH24680DEMO" }
-    ]
+  "GET /api/clustermgmt/v4.2/config/task-response/mock-discover-task?taskResponseType=UNCONFIGURED_NODES": {
+    "data": {
+      "response": {
+        "nodeList": [
+          { "rackableUnitSerial": "AB12345DEMO" },
+          { "rackableUnitSerial": "CD67890DEMO" }
+        ]
+      }
+    }
   },
   "GET /api/lifecycle/v4.0/resources/entities": {
     "data": [

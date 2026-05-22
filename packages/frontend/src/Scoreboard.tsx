@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { api, type ScoreboardEntry, type ScoreboardPayload } from './api';
+import {
+  api,
+  type ScoreboardEntry,
+} from './api';
 
 const REFRESH_MS = 5000;
 // Legacy Python scoreboard fit up to 8 rows per column and added columns as
@@ -12,7 +15,19 @@ const MAX_COLS = 5;
 // `?demo=N` bypasses the fetch and renders a canned roster — useful for
 // previewing the layout at different densities without seeding the DB.
 const DEMO_PARAM = 'demo';
+const COMBINED_PARAM = 'combined';
 const DEMO_PRESETS = [5, 12, 40] as const;
+
+interface DisplayPayload {
+  packId: string;
+  packName: string;
+  mode: 'mock' | 'live';
+  totalStages: number;
+  entries: Array<ScoreboardEntry & { peerLabel?: string | null }>;
+  /** Set in combined mode; identifies the cluster this server runs on so
+   *  local entries (peerLabel === null) can still be cluster-tagged. */
+  selfLabel?: string | null;
+}
 
 export function Scoreboard() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -22,7 +37,8 @@ export function Scoreboard() {
     const n = Number.parseInt(demoRaw, 10);
     return Number.isFinite(n) && n > 0 ? Math.min(n, 40) : null;
   }, [demoRaw]);
-  const [livePayload, setLivePayload] = useState<ScoreboardPayload | null>(null);
+  const combined = searchParams.get(COMBINED_PARAM) === '1';
+  const [livePayload, setLivePayload] = useState<DisplayPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshAt, setLastRefreshAt] = useState<number>(Date.now());
 
@@ -30,12 +46,12 @@ export function Scoreboard() {
     document.title = 'NIG - scoreboard';
   }, []);
 
-  // Demo payload is memoized on demoCount so switching presets re-seeds
-  // (different random elapsed times etc.) without flickering while we stay
-  // on the same count.
-  const demoPayload = useMemo(
-    () => (demoCount !== null ? makeDemoPayload(demoCount) : null),
-    [demoCount],
+  // Demo payload is memoized on (demoCount, combined) so switching either
+  // re-seeds without flickering while we stay on the same combo. Combined
+  // demo spreads entries across a few fake clusters for layout validation.
+  const demoPayload = useMemo<DisplayPayload | null>(
+    () => (demoCount !== null ? makeDemoPayload(demoCount, combined) : null),
+    [demoCount, combined],
   );
   const payload = demoPayload ?? livePayload;
 
@@ -45,9 +61,9 @@ export function Scoreboard() {
     let timer: ReturnType<typeof setTimeout> | null = null;
     const tick = async () => {
       try {
-        const p = await api.scoreboard();
+        const p = combined ? await api.combinedScoreboard() : await api.scoreboard();
         if (!cancelled) {
-          setLivePayload(p);
+          setLivePayload(p as DisplayPayload);
           setError(null);
           setLastRefreshAt(Date.now());
         }
@@ -62,7 +78,7 @@ export function Scoreboard() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [demoCount]);
+  }, [demoCount, combined]);
 
   const count = payload?.entries.length ?? 0;
   const cols = count === 0 ? 1 : Math.min(Math.ceil(count / MAX_ROWS_PER_COL), MAX_COLS);
@@ -99,15 +115,29 @@ export function Scoreboard() {
           }}
         >
           {payload.entries.map((e) => (
-            <AgentCard key={e.sessionId} entry={e} />
+            <AgentCard
+              key={e.sessionId}
+              entry={e}
+              clusterLabel={combined ? (e.peerLabel ?? payload.selfLabel ?? null) : null}
+            />
           ))}
         </div>
       )}
       {(demoCount !== null || livePayload?.mode === 'mock') && (
         <DemoSwitch
           current={demoCount}
-          onPick={(n) => setSearchParams({ [DEMO_PARAM]: String(n) })}
-          onExit={() => setSearchParams({})}
+          onPick={(n) => {
+            // Preserve ?combined=1 across demo-preset clicks so the
+            // combined layout can be previewed at different densities.
+            const next = new URLSearchParams(searchParams);
+            next.set(DEMO_PARAM, String(n));
+            setSearchParams(next);
+          }}
+          onExit={() => {
+            const next = new URLSearchParams(searchParams);
+            next.delete(DEMO_PARAM);
+            setSearchParams(next);
+          }}
         />
       )}
     </div>
@@ -151,15 +181,31 @@ function DemoSwitch({
   );
 }
 
-function AgentCard({ entry }: { entry: ScoreboardEntry }) {
-  // Percent is derived from (stagesPassed / engaged) where engaged subtracts
-  // stages the engine gated for this session (e.g. `impact: destructive`
-  // when `clusterProfile === 'other'`). Without that subtraction, a session
-  // that reached `mission-complete` could still display 95% because two
-  // stages were filtered out before they could ever be played. We never
-  // surface the total — the player sees their relative rank + progress,
-  // not the scenario length (keeps the "how much is left?" suspense).
-  const engaged = Math.max(1, entry.totalStages - entry.stagesDisabled);
+function AgentCard({
+  entry,
+  clusterLabel,
+}: {
+  entry: ScoreboardEntry & { peerLabel?: string | null };
+  /** Resolved cluster tag to render on the card. `null` in non-combined
+   *  mode (single-instance view doesn't need the tag); a string in
+   *  combined mode — either the peer label for remote entries or the
+   *  server's `selfLabel` for local entries. */
+  clusterLabel: string | null;
+}) {
+  // Percent denominator = `effectiveTotalStages` from the server (raw pack
+  // total minus stages filtered for cluster reasons: missing caps,
+  // destructive-on-other, pack-disabled by overlay). Earlier we computed
+  // `engaged = totalStages - stagesDisabled` client-side, but
+  // `stagesDisabled` only grows when the engine actually walks past a
+  // gated stage during `advance()` — for an in-progress session at stage
+  // 3, all FUTURE filtered stages still counted against the player and
+  // capped them at e.g. 3/39 ≈ 8% instead of 3/36 ≈ 8.3% (same here)
+  // … but more importantly capped a finished session at 36/39 ≈ 92%
+  // instead of the correct 36/36 = 100% when the engine had skipped
+  // mid-run rather than recording every disable. We never surface the
+  // total — the player sees their relative rank + progress, not the
+  // scenario length (keeps the "how much is left?" suspense).
+  const engaged = Math.max(1, entry.effectiveTotalStages);
   const percent = Math.min(100, Math.round((entry.stagesPassed / engaged) * 100));
   const tier = progressTier(percent);
   const agentName = entry.username ?? 'anonymous';
@@ -185,6 +231,11 @@ function AgentCard({ entry }: { entry: ScoreboardEntry }) {
           <span className="agent-username">{agentName}</span>
           <span className="agent-aka"> a.k.a. </span>
           <span className="agent-trigram">{trigramLabel}</span>
+          {clusterLabel && (
+            <span className="agent-cluster" title={`cluster: ${clusterLabel}`}>
+              · {clusterLabel}
+            </span>
+          )}
         </span>
         <span className="agent-percent">{percent}%</span>
       </div>
@@ -224,7 +275,7 @@ function LiveDot({ lastRefreshAt }: { lastRefreshAt: number }) {
   );
 }
 
-function makeDemoPayload(count: number): ScoreboardPayload {
+function makeDemoPayload(count: number, combined: boolean): DisplayPayload {
   // Deterministic-ish seed so re-renders stay stable within a session.
   const NAMES = [
     'Alice', 'Bob', 'Carol', 'David', 'Eve', 'Frank', 'Grace', 'Hank',
@@ -247,8 +298,13 @@ function makeDemoPayload(count: number): ScoreboardPayload {
     'sched-day2', 'update-blueprint', 'mission-report', 'outro',
   ];
   const TOTAL = STAGE_NAMES.length;
+  // In combined mode, sprinkle entries across a fixed set of fake clusters
+  // so the cluster-tag rendering can be validated at any density. First
+  // slot is `null` (= local) so the player's own cluster tag is also
+  // exercised by the demo via `selfLabel` below.
+  const FAKE_PEERS: Array<string | null> = [null, 'POC-37', 'DM3-POC042', 'EMEA-LAB-7'];
   const now = Date.now();
-  const entries: ScoreboardEntry[] = Array.from({ length: count }, (_, i) => {
+  const entries: Array<ScoreboardEntry & { peerLabel?: string | null }> = Array.from({ length: count }, (_, i) => {
     // Distribute progress across the roster: top few near-finished, a
     // cluster mid-game, some just started, 1-2 finished at the very top,
     // 1 idle. Anonymous (pre-trigram) entries are filtered out of the
@@ -267,6 +323,7 @@ function makeDemoPayload(count: number): ScoreboardPayload {
       : isIdle
         ? now - 4 * 60_000
         : now - Math.floor(Math.random() * 40_000);
+    const peerLabel = combined ? FAKE_PEERS[i % FAKE_PEERS.length]! : null;
     return {
       rank: i + 1,
       sessionId: `demo-${i + 1}`,
@@ -276,10 +333,12 @@ function makeDemoPayload(count: number): ScoreboardPayload {
       stagesPassed,
       stagesDisabled: 0,
       totalStages: TOTAL,
+      effectiveTotalStages: TOTAL,
       startedAt,
       finishedAt,
       lastActivityAt,
       status: finishedAt !== null ? 'finished' : 'playing',
+      peerLabel,
     };
   });
   return {
@@ -287,6 +346,9 @@ function makeDemoPayload(count: number): ScoreboardPayload {
     packName: 'Demo Roster',
     mode: 'mock',
     totalStages: TOTAL,
+    // Self-label shows up on local (peerLabel === null) entries in the
+    // demo so the player-perspective cluster tag is also covered.
+    selfLabel: combined ? 'THIS-DEMO' : null,
     entries,
   };
 }

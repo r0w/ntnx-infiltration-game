@@ -24,7 +24,7 @@ export function describeDisabled(d: DisabledStage): string {
       return `[stage ${d.name} skipped: requires ${caps} (not available on this cluster)]`;
     }
     case 'destructive-on-other':
-      return `[stage ${d.name} skipped: destructive stage disabled on shared cluster]`;
+      return `[stage ${d.name} skipped: hpoc-only stage disabled on shared cluster]`;
     case 'missing-upstream': {
       const vars = d.missingVars.join(', ') || 'upstream data';
       return `[stage ${d.name} skipped: missing upstream var ${vars}]`;

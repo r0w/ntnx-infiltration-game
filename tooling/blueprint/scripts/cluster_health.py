@@ -4,11 +4,23 @@
 Wait until the cluster is healthy after the node-removal.
 
 Replaces the legacy `Delay 900s` task: instead of sleeping a flat 15 min,
-poll `/clustermgmt/v4.0/config/clusters/{uuid}/hosts` every 30 s until the
-cluster has stabilized, then exit. Caps at 20 min so a stuck removal is
+poll `/clustermgmt/v4.0/config/clusters/{uuid}/hosts` until the cluster
+has stabilized, then exit. Caps at MAX_POLLS so a stuck removal is
 surfaced as a Calm task failure rather than a silent indefinite wait.
 
-Stability criterion (must hold across 3 consecutive polls — 90 s of calm):
+Pacing note: the loop is iteration-based, NOT wall-clock-based. Two
+sandbox quirks force this:
+  - `time.sleep(N)` is rewritten by the patcher to a TCP-timeout shim
+    (`requests.get('http://192.0.2.1/', timeout=N)`) that returns
+    instantly on networks where 192.0.2.1 isn't a black-hole — so we
+    can't trust it to actually pause N seconds.
+  - `time.time()` is rewritten to `_fake_time()`, an incrementing
+    counter (1, 2, 3, …) — useless as a wall-clock deadline.
+Each iteration here makes one `list_hosts()` API call which naturally
+takes ~1 s on the Calm VM, so MAX_POLLS ≈ wall-clock seconds of cap.
+
+Stability criterion (must hold across STABLE_POLLS_REQUIRED consecutive
+polls):
   - host count > 0
   - the set of (hostName, nodeStatus, maintenanceState) tuples did not
     change since the previous poll
@@ -23,7 +35,6 @@ Run as a `CalmTask.Exec.escript.py3` task right after `Remove 1 host`.
 """
 
 import sys
-import time
 import urllib3
 
 import requests
@@ -34,9 +45,8 @@ PC_IP = '@@{PC_IP}@@'
 PC_USERNAME = '@@{PC_USERNAME}@@'
 PC_PASSWORD = '@@{PC_PASSWORD}@@'
 
-POLL_INTERVAL_S = 30
-TIMEOUT_S = 20 * 60
-STABLE_POLLS_REQUIRED = 3
+MAX_POLLS = 3600
+STABLE_POLLS_REQUIRED = 30
 
 BASE = "https://%s:9440/api/clustermgmt/v4.0" % PC_IP
 AUTH = (PC_USERNAME, PC_PASSWORD)
@@ -49,7 +59,7 @@ def get_aos_cluster_uuid():
     for cluster in (r.json().get('data') or []):
         if "AOS" in cluster.get('config', {}).get('clusterFunction', []):
             return cluster['extId'], cluster.get('name', '?')
-    raise RuntimeError("No AOS cluster found in PC %s" % PC_IP)
+    raise Exception("No AOS cluster found in PC %s" % PC_IP)
 
 
 def list_hosts(cluster_uuid):
@@ -70,20 +80,17 @@ def snapshot(hosts):
 
 def main():
     cluster_uuid, cluster_name = get_aos_cluster_uuid()
-    print("Polling cluster %s (%s) for stabilization, cap %ds" % (cluster_name, cluster_uuid, TIMEOUT_S))
+    print("Polling cluster %s (%s) for stabilization, max %d polls (~%d min wall-clock)" %
+          (cluster_name, cluster_uuid, MAX_POLLS, MAX_POLLS // 60))
 
-    deadline = time.time() + TIMEOUT_S
     last_snapshot = None
     stable_count = 0
-    poll = 0
 
-    while time.time() < deadline:
-        poll += 1
+    for poll in range(1, MAX_POLLS + 1):
         try:
             hosts = list_hosts(cluster_uuid)
         except Exception as e:
             print("[poll %d] hosts fetch failed: %s — retrying" % (poll, e))
-            time.sleep(POLL_INTERVAL_S)
             continue
 
         snap = snapshot(hosts)
@@ -106,9 +113,8 @@ def main():
                   (poll, host_count, all_normal, no_maintenance, snap != last_snapshot))
 
         last_snapshot = snap
-        time.sleep(POLL_INTERVAL_S)
 
-    print("TIMEOUT after %ds. Last snapshot: %s" % (TIMEOUT_S, last_snapshot))
+    print("TIMEOUT after %d polls. Last snapshot: %s" % (MAX_POLLS, last_snapshot))
     return 1
 
 

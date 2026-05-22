@@ -125,7 +125,7 @@ function seedSession(db: Database, input: {
 
 function router(db: Database, pack: LoadedPack = fakePack()) {
   const service = makeService(db, pack);
-  return buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix, clusterProfile: 'hpoc' });
+  return buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix, clusterProfile: 'hpoc', pcEndpoint: '' });
 }
 
 describe('POST /api/admin/login', () => {
@@ -351,7 +351,7 @@ describe('GET /api/admin/gates', () => {
       // test. Spinning a fresh router would also re-read the DB so behaviour
       // is identical, but a single instance mirrors production wiring better.
       const service = makeService(db, pack);
-      return buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix, clusterProfile: 'hpoc' });
+      return buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix, clusterProfile: 'hpoc', pcEndpoint: '' });
     };
     const r1 = buildRouter();
     let res = await r1.request('/gates/first-task/unlock', {
@@ -415,7 +415,7 @@ describe('GET /api/admin/gates', () => {
     const pack = fakePack(fourGates);
     const service = makeService(db, pack);
     service.setGateUnlock('pre', true); // pre-unlock → tier 3
-    const r = buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix, clusterProfile: 'hpoc' });
+    const r = buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix, clusterProfile: 'hpoc', pcEndpoint: '' });
     const res = await r.request('/gates', { headers: { 'X-Admin-Password': ADMIN_PW } });
     const body = (await res.json()) as { entries: AdminGateEntry[] };
     // → gate 'all' = 2/2 (tier 0), gate 'some' = 1/2 (tier 1), gate 'none' = 0/2 (tier 2),
@@ -439,7 +439,7 @@ describe('GET /api/admin/gates', () => {
     ];
     const pack = fakePack(noGateStages);
     const service = makeService(db, pack);
-    const r = buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix, clusterProfile: 'hpoc' });
+    const r = buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix, clusterProfile: 'hpoc', pcEndpoint: '' });
 
     // Initially no stages are gated.
     let res = await r.request('/gates', { headers: { 'X-Admin-Password': ADMIN_PW } });
@@ -467,7 +467,7 @@ describe('GET /api/admin/gates', () => {
     ]);
     const db2 = freshDb();
     const service2 = makeService(db2, jsonGatedPack);
-    const r2 = buildAdminRoutes({ db: db2, pack: jsonGatedPack, adminPassword: ADMIN_PW, service: service2, nutanix: noopNutanix, clusterProfile: 'hpoc' });
+    const r2 = buildAdminRoutes({ db: db2, pack: jsonGatedPack, adminPassword: ADMIN_PW, service: service2, nutanix: noopNutanix, clusterProfile: 'hpoc', pcEndpoint: '' });
     res = await r2.request('/gates', { headers: { 'X-Admin-Password': ADMIN_PW } });
     expect(((await res.json()) as { entries: AdminGateEntry[] }).entries.map((e) => e.stageName)).toEqual(['one']);
 
@@ -506,7 +506,7 @@ describe('GET /api/admin/pack', () => {
     // therefore the same in-memory effective stages cache) across requests.
     const pack = fakePack(packStages);
     const service = makeService(db, pack);
-    const r = buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix, clusterProfile: 'hpoc' });
+    const r = buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix, clusterProfile: 'hpoc', pcEndpoint: '' });
 
     let res = await r.request('/pack/stages/mk-project/toggle?field=active', {
       method: 'POST',
@@ -569,7 +569,7 @@ describe('GET /api/admin/pack', () => {
     const db = freshDb();
     const pack = fakePack(packStages);
     const service = makeService(db, pack);
-    const r = buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix, clusterProfile: 'hpoc' });
+    const r = buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix, clusterProfile: 'hpoc', pcEndpoint: '' });
 
     // Override active=false, then clear it.
     await r.request('/pack/stages/mk-project/toggle?field=active', {
@@ -594,6 +594,125 @@ describe('GET /api/admin/pack', () => {
   });
 });
 
+describe('GET /api/admin/cluster-status', () => {
+  test('without admin header → 401', async () => {
+    const db = freshDb();
+    const res = await router(db).request('/cluster-status');
+    expect(res.status).toBe(401);
+  });
+
+  test('mock mode → intelligentOps state=null, enableUrl=null (no live calls)', async () => {
+    // noopNutanix.mode === 'mock' → probe short-circuits, never hits request().
+    const db = freshDb();
+    const res = await router(db).request('/cluster-status', {
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { intelligentOps: { state: unknown; enableUrl: unknown } };
+    expect(body.intelligentOps.state).toBeNull();
+    expect(body.intelligentOps.enableUrl).toBeNull();
+  });
+
+  test('live mode → reflects PC enablementState + builds Prism deep-link', async () => {
+    const calls: Array<{ method: string; path: string }> = [];
+    const liveNutanix: NutanixClient = {
+      mode: 'live',
+      async request<T>(method: string, path: string): Promise<T> {
+        calls.push({ method, path });
+        if (path.startsWith('/api/prism/v4.2/config/domain-managers')) {
+          return { data: [{ extId: 'pc-uuid-1' }] } as unknown as T;
+        }
+        if (path.includes('/products')) {
+          return {
+            data: [
+              { name: 'NUTANIX_DISASTER_RECOVERY', enablementState: 'ENABLED' },
+              { name: 'INTELLIGENT_OPERATIONS', enablementState: 'DISABLED' },
+            ],
+          } as unknown as T;
+        }
+        throw new Error(`unexpected path: ${path}`);
+      },
+    };
+    const db = freshDb();
+    const pack = fakePack();
+    const service = makeService(db, pack);
+    const r = buildAdminRoutes({
+      db, pack, adminPassword: ADMIN_PW, service, nutanix: liveNutanix,
+      clusterProfile: 'hpoc', pcEndpoint: 'https://10.8.16.7:9440',
+    });
+    const res = await r.request('/cluster-status', {
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      intelligentOps: { state: string; enableUrl: string };
+    };
+    expect(body.intelligentOps.state).toBe('DISABLED');
+    expect(body.intelligentOps.enableUrl).toBe(
+      'https://10.8.16.7:9440/dm/settings/prism_ops',
+    );
+    expect(calls.length).toBe(2);
+    expect(calls[0]!.path).toBe('/api/prism/v4.2/config/domain-managers');
+    expect(calls[1]!.path).toContain('/api/prism/v4.2/management/domain-managers/pc-uuid-1/products');
+  });
+
+  test('live mode + product missing → state=null with explanatory error, deep-link still built', async () => {
+    const liveNutanix: NutanixClient = {
+      mode: 'live',
+      async request<T>(_method: string, path: string): Promise<T> {
+        if (path.startsWith('/api/prism/v4.2/config/domain-managers')) {
+          return { data: [{ extId: 'pc-uuid-1' }] } as unknown as T;
+        }
+        return { data: [] } as unknown as T;
+      },
+    };
+    const db = freshDb();
+    const pack = fakePack();
+    const service = makeService(db, pack);
+    const r = buildAdminRoutes({
+      db, pack, adminPassword: ADMIN_PW, service, nutanix: liveNutanix,
+      clusterProfile: 'hpoc', pcEndpoint: 'https://10.8.16.7:9440',
+    });
+    const res = await r.request('/cluster-status', {
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      intelligentOps: { state: string | null; enableUrl: string; error?: string };
+    };
+    expect(body.intelligentOps.state).toBeNull();
+    expect(body.intelligentOps.enableUrl).toBe(
+      'https://10.8.16.7:9440/dm/settings/prism_ops',
+    );
+    expect(body.intelligentOps.error).toBeTruthy();
+  });
+
+  test('live mode + GET throws → state=null with error, deep-link present', async () => {
+    const liveNutanix: NutanixClient = {
+      mode: 'live',
+      async request<T>(): Promise<T> {
+        throw new Error('connection refused');
+      },
+    };
+    const db = freshDb();
+    const pack = fakePack();
+    const service = makeService(db, pack);
+    const r = buildAdminRoutes({
+      db, pack, adminPassword: ADMIN_PW, service, nutanix: liveNutanix,
+      clusterProfile: 'hpoc', pcEndpoint: 'https://10.8.16.7:9440',
+    });
+    const res = await r.request('/cluster-status', {
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      intelligentOps: { state: null; enableUrl: string; error: string };
+    };
+    expect(body.intelligentOps.state).toBeNull();
+    expect(body.intelligentOps.error).toContain('connection refused');
+  });
+});
+
 describe('lunch lock (pack-wide pause)', () => {
   test('GET /lunch returns paused=false initially with totalActive count', async () => {
     const db = freshDb();
@@ -614,7 +733,7 @@ describe('lunch lock (pack-wide pause)', () => {
     const db = freshDb();
     const pack = fakePack();
     const service = makeService(db, pack);
-    const r = buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix, clusterProfile: 'hpoc' });
+    const r = buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix, clusterProfile: 'hpoc', pcEndpoint: '' });
     const res = await r.request('/lunch/lock', {
       method: 'POST',
       headers: { 'X-Admin-Password': ADMIN_PW },
@@ -630,7 +749,7 @@ describe('lunch lock (pack-wide pause)', () => {
     const db = freshDb();
     const pack = fakePack();
     const service1 = makeService(db, pack);
-    const r1 = buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service: service1, nutanix: noopNutanix, clusterProfile: 'hpoc' });
+    const r1 = buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service: service1, nutanix: noopNutanix, clusterProfile: 'hpoc', pcEndpoint: '' });
     await r1.request('/lunch/lock', {
       method: 'POST',
       headers: { 'X-Admin-Password': ADMIN_PW },
@@ -644,7 +763,7 @@ describe('lunch lock (pack-wide pause)', () => {
 
     // Unlock via service1, service2 stays cached at "paused" until next
     // construction — that's intentional, in-memory cache is per-instance.
-    const r2 = buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service: service1, nutanix: noopNutanix, clusterProfile: 'hpoc' });
+    const r2 = buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service: service1, nutanix: noopNutanix, clusterProfile: 'hpoc', pcEndpoint: '' });
     await r2.request('/lunch/unlock', {
       method: 'POST',
       headers: { 'X-Admin-Password': ADMIN_PW },

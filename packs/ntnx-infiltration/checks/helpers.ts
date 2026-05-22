@@ -1,4 +1,4 @@
-import type { CheckContext } from '@ntnx-game/engine';
+import type { CheckContext, Logger, NutanixClient } from '@ntnx-game/engine';
 
 /**
  * v3 endpoint response shape — `entities` holds the array instead of `data`
@@ -160,4 +160,84 @@ export async function recoverVar(
     return recovered;
   }
   return undefined;
+}
+
+/**
+ * Pack-local copy of the engine's `discoverableNodeSerials` (same body, same
+ * semantics). Lives here because the pack module is dynamically loaded from
+ * outside the Bun workspace boundary, so it can only type-import from
+ * `@ntnx-game/engine` — value imports fail to resolve at runtime. Keep this
+ * in sync with `packages/engine/src/discover-nodes.ts` if behavior changes.
+ */
+export async function discoverableNodeSerials(
+  nutanix: NutanixClient,
+  logger?: Pick<Logger, 'debug' | 'warn'>,
+): Promise<string[]> {
+  if (nutanix.mode === 'mock') {
+    const res = await nutanix.request<DiscoverTaskResponse>(
+      'GET',
+      `/api/clustermgmt/v4.2/config/task-response/mock-discover-task?taskResponseType=UNCONFIGURED_NODES`,
+    );
+    return extractSerials(res);
+  }
+  const clusters = await nutanix.request<{ data?: Array<{ extId?: string }> }>(
+    'GET',
+    '/api/clustermgmt/v4.0/config/clusters',
+  );
+  const clusterUuid = clusters.data?.[0]?.extId;
+  if (!clusterUuid) throw new Error('discoverableNodeSerials: no cluster UUID');
+  const discoverResp = await nutanix.request<{ data?: { extId?: string } }>(
+    'POST',
+    `/api/clustermgmt/v4.0.b2/config/clusters/${clusterUuid}/$actions/discover-unconfigured-nodes`,
+    { timeout: 60, isManualDiscovery: false, addressType: 'IPV4' },
+  );
+  const taskExtId = discoverResp.data?.extId;
+  if (!taskExtId) throw new Error('discoverableNodeSerials: discover task returned no extId');
+  await pollDiscoverTask(nutanix, taskExtId, logger);
+  const shortId = taskExtId.split(':').pop() ?? taskExtId;
+  const respResp = await nutanix.request<DiscoverTaskResponse>(
+    'GET',
+    `/api/clustermgmt/v4.2/config/task-response/${shortId}?taskResponseType=UNCONFIGURED_NODES`,
+  );
+  return extractSerials(respResp);
+}
+
+interface DiscoverTaskResponse {
+  data?: { response?: { nodeList?: Array<{ rackableUnitSerial?: string }> } };
+}
+
+function extractSerials(res: DiscoverTaskResponse | undefined): string[] {
+  const list = res?.data?.response?.nodeList ?? [];
+  const out: string[] = [];
+  for (const n of list) {
+    const s = n.rackableUnitSerial;
+    if (typeof s === 'string' && s.trim().length > 0) out.push(s.trim());
+  }
+  return out;
+}
+
+async function pollDiscoverTask(
+  nutanix: NutanixClient,
+  taskExtId: string,
+  logger?: Pick<Logger, 'debug' | 'warn'>,
+): Promise<void> {
+  const taskPath = `/api/prism/v4.2/config/tasks/${taskExtId}`;
+  const deadline = Date.now() + 3 * 60 * 1_000;
+  let lastStatus: string | undefined;
+  while (Date.now() < deadline) {
+    try {
+      const res = await nutanix.request<{ data?: { status?: string } }>('GET', taskPath);
+      lastStatus = res?.data?.status;
+      if (lastStatus === 'SUCCEEDED') return;
+      if (lastStatus === 'FAILED' || lastStatus === 'CANCELED' || lastStatus === 'CANCELLED') {
+        throw new Error(`discover task ${lastStatus}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.startsWith('discover task ')) throw err;
+      logger?.debug?.('discover task poll error, retrying', { err: msg.slice(0, 150) });
+    }
+    await new Promise((r) => setTimeout(r, 5_000));
+  }
+  throw new Error(`discover task timed out (last status: ${lastStatus ?? 'none'})`);
 }

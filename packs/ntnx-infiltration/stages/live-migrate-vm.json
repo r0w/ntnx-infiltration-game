@@ -12,6 +12,7 @@
     "stage-014.line-06"
   ],
   "saveScore": false,
+  "requires": ["MultiNode"],
   "check": {
     "fn": "CheckLiveMigration"
   },

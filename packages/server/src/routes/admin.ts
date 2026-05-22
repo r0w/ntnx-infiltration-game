@@ -1,11 +1,13 @@
 import { Hono } from 'hono';
 import type { Database } from 'bun:sqlite';
-import type { NutanixClient } from '@ntnx-game/engine';
+import type { CapabilityFlag, NutanixClient } from '@ntnx-game/engine';
+import { probeCapabilities, type CapabilityProbeDetail } from '@ntnx-game/nutanix';
 import { HttpError, type SessionService } from '../session-service';
-import { SessionQueries, type AdminSessionRow } from '../db/queries';
+import { SessionQueries, ScoreboardPeerQueries, type AdminSessionRow, type ScoreboardPeerRow } from '../db/queries';
 import type { LoadedPack } from '../pack-loader';
 import { analyzeDeps, cascadeDisable, type BrokenStage } from '../dep-analysis';
 import { probeClusterConfig } from '../cluster-config-probe';
+import { probeIntelligentOps, type IntelligentOpsProbeResult } from '../cluster-status-probe';
 import { consoleLogger } from '../logger';
 
 export interface AdminRoutesDeps {
@@ -21,16 +23,33 @@ export interface AdminRoutesDeps {
   service: SessionService;
   /** Required for the /cluster-config refresh endpoint to re-probe live. */
   nutanix: NutanixClient;
+  /** Operator-facing server mode (`mock | test | live`). Surfaced on
+   *  /pack so the admin badge matches what the player sees and the
+   *  install BP's MODE variable. Distinct from `nutanix.mode` (transport
+   *  layer — `mock | live`) which collapses `test` and `live` together. */
+  serverMode: 'mock' | 'test' | 'live';
   /** Runtime clusterProfile (post mock-override). Surfaced on /pack. */
   clusterProfile: 'hpoc' | 'other';
+  /** Boot-time capability flags from the cluster probe. Used by the
+   *  `/pack` table to mark stages that would be skipped by the gate
+   *  for missing caps in the current profile. */
+  capabilities: CapabilityFlag[];
+  /** Configured PC endpoint (e.g. `https://10.8.16.7:9440`). Used by
+   *  `/cluster-status` to build the Prism UI deep-link to the IOps
+   *  activation page. May be empty in mock mode. */
+  pcEndpoint: string;
+}
+
+export interface AdminClusterStatusPayload {
+  intelligentOps: IntelligentOpsProbeResult;
 }
 
 export interface AdminClusterConfigPayload {
-  rackableUnitSerials: string[];
+  discoverableNodeSerials: string[];
   lcmAvailableUpdates: number | null;
   /** Per-row metadata so /admin can show "edited by operator" vs probe-set. */
   meta: {
-    rackableUnitSerials?: { source: 'probe' | 'admin'; updatedAt: number };
+    discoverableNodeSerials?: { source: 'probe' | 'admin'; updatedAt: number };
     lcmAvailableUpdates?: { source: 'probe' | 'admin'; updatedAt: number };
   };
 }
@@ -39,6 +58,13 @@ export interface AdminUserEntry extends AdminSessionRow {
   /** Name of the stage the player is ABOUT to play (i.e. after currentStage). */
   nextStageName: string | null;
   totalStages: number;
+  /** Stages this cluster will let a fresh session actually play (raw pack
+   *  total minus stages filtered for cluster reasons — capability missing,
+   *  destructive-on-other, pack-disabled by overlay). Same for every entry
+   *  on a given snapshot; per-entry to keep the row self-contained. Used
+   *  as the denominator in the "Progress" cell so a player who legitimately
+   *  passed everything reachable shows N/N instead of N/39. */
+  effectiveTotalStages: number;
 }
 
 export interface AdminGateEntry {
@@ -69,10 +95,10 @@ export interface AdminPackStageEntry {
   active: boolean;
   /** Effective adminGate value after overlay. */
   adminGate: boolean;
-  /** Pack-declared `impact` ('safe' default, 'destructive' filtered on
+  /** Pack-declared `impact` ('safe' default, 'hpoc-only' filtered on
    *  shared clusters). Surfaced so the operator can see at a glance which
    *  stages would skip when `clusterProfile === 'other'`. */
-  impact: 'safe' | 'destructive';
+  impact: 'safe' | 'hpoc-only';
   /** True iff the operator has overridden `active` (vs using the JSON value). */
   activeOverridden: boolean;
   /** True iff the operator has overridden `adminGate`. */
@@ -83,6 +109,16 @@ export interface AdminPackStageEntry {
   captures: string[];
   /** Vars in `needs` that have no surviving producer in the effective pack. */
   brokenMissingVars: string[];
+  /** Always-enforced capability requirements. */
+  requires: string[];
+  /** Capability requirements only enforced when `clusterProfile === 'other'`. */
+  requiresOnOther: string[];
+  /** Caps from `requires` (always) + `requiresOnOther` (only when
+   *  `clusterProfile === 'other'`) that are NOT currently activated on the
+   *  server. Non-empty → the gate will skip this stage at session-create
+   *  with `reason: 'missing-capability'`. The admin UI uses this to render
+   *  a `skipped (needs …)` status badge. */
+  missingCapabilities: string[];
 }
 
 export interface AdminPackPayload {
@@ -95,10 +131,11 @@ export interface AdminPackPayload {
    *  with each stage's `impact` it tells the operator which stages would
    *  be auto-skipped at session creation. */
   clusterProfile: 'hpoc' | 'other';
-  /** Server's transport mode. In `mock` the destructive gate is bypassed
-   *  (clusterProfile is forced to `hpoc` at boot) — surface this so the
-   *  /admin pack table can mute the "would be filtered" callout. */
-  mode: 'mock' | 'live';
+  /** Server mode (mock | test | live). In `mock` the hpoc-only gate is
+   *  bypassed (clusterProfile is forced to `hpoc` at boot) — surface this
+   *  so the /admin pack table can mute the "would be filtered" callout
+   *  and the operator badge matches the BP's MODE variable. */
+  mode: 'mock' | 'test' | 'live';
 }
 
 export interface AdminPackTogglePreview {
@@ -174,6 +211,11 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   router.get('/users', (c) => {
     const effective = deps.service.listEffectiveStages();
     const rows = sessions.listAdmin(deps.pack.manifest.id);
+    // Compute once per request — same value for every row on this snapshot.
+    const effectiveTotalStages = deps.service.effectivePlayableCount(
+      deps.capabilities ?? [],
+      deps.clusterProfile,
+    );
     const entries: AdminUserEntry[] = rows.map((row) => {
       let nextStageName: string | null = null;
       if (row.finishedAt === null) {
@@ -185,6 +227,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
         ...row,
         nextStageName,
         totalStages,
+        effectiveTotalStages,
       };
     });
     return c.json({
@@ -200,6 +243,45 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     const changed = sessions.deleteById(id);
     if (changed === 0) throw new HttpError(404, 'session not found');
     return c.json({ ok: true, sessionId: id });
+  });
+
+  // Admin escape hatch: bump a player past the stage they're currently
+  // playing without them having to satisfy the check. Use case: a stage
+  // is unwinnable on this cluster (capability missing, API regressed,
+  // narrative blocker, …) and the operator wants the player to keep
+  // progressing. Reuses the existing `service.gotoStage` semantics —
+  // the skipped stage gets NO `stage_history` row, so `stagesPassed`
+  // (the score) is not incremented for it. Cleanly distinguishes
+  // "skipped by admin" from "passed legitimately".
+  //
+  // Mechanics: gotoStage(target) sets currentStage = target - 1. To
+  // skip the stage the player is about to play (= currentStage + 1),
+  // we target currentStage + 2. End-of-pack edge cases (no next stage,
+  // or skip would land past the last stage) return 400 — admin should
+  // delete-and-restart or accept the player as finished instead.
+  router.post('/users/:id/skip-current-stage', (c) => {
+    const sid = c.req.param('id');
+    const session = deps.service.getSession(sid); // throws 404 if not found
+    if (session.finishedAt !== null) {
+      throw new HttpError(400, 'session already finished');
+    }
+    const effective = deps.service.listEffectiveStages();
+    const curIdx = positionOf(session.currentStage);
+    const skipIdx = curIdx + 1;
+    if (skipIdx >= effective.length) {
+      throw new HttpError(400, 'player has no next stage to skip');
+    }
+    const skippedName = effective[skipIdx]!.name;
+    const targetIdx = skipIdx + 1;
+    if (targetIdx >= effective.length) {
+      throw new HttpError(
+        400,
+        `cannot skip the final stage '${skippedName}'; delete the session or let the player finish`,
+      );
+    }
+    const targetName = effective[targetIdx]!.name;
+    const r = deps.service.gotoStage(sid, targetName);
+    return c.json({ ok: true, sessionId: sid, skipped: skippedName, ...r });
   });
 
   // ─── gates ──────────────────────────────────────────────────────────
@@ -287,9 +369,27 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     const brokenByName = new Map(analysis.broken.map((b) => [b.stageName, b]));
     const baseByName = new Map(baseStages.map((s) => [s.name, s]));
 
+    // Merge boot-probed caps with dynamic ones (currently only
+    // PlannerCluster — flips on when admin saves the Planner creds in
+    // cluster_config). Mirrors session-service.create() so the badges
+    // shown here match the gate the next session will actually hit.
+    // `new Set(undefined)` is the historical undefined-tolerant guard
+    // (some test harnesses build deps without `capabilities`).
+    const activeCaps = new Set<CapabilityFlag>(deps.capabilities ?? []);
+    for (const c of deps.service.computeDynamicCapabilities()) activeCaps.add(c);
     const stagesPayload: AdminPackStageEntry[] = effective.map((s) => {
       const o = overlay.get(s.name);
       const base = baseByName.get(s.name);
+      const requires = s.requires ?? [];
+      const requiresOnOther = s.requiresOnOther ?? [];
+      // Mirror the capability-gate logic: requires is always enforced;
+      // requiresOnOther only when the runtime cluster is shared. The admin
+      // table reports what WOULD happen for a new session on this server,
+      // so we evaluate against the boot-time profile + caps.
+      const effectiveRequires = deps.clusterProfile === 'other'
+        ? [...requires, ...requiresOnOther]
+        : requires;
+      const missingCapabilities = effectiveRequires.filter((c) => !activeCaps.has(c));
       return {
         stageName: s.name,
         active: s.active,
@@ -300,6 +400,9 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
         needs: s.needs ?? [],
         captures: s.captures ?? [],
         brokenMissingVars: brokenByName.get(s.name)?.missingVars ?? [],
+        requires,
+        requiresOnOther,
+        missingCapabilities,
       };
     });
 
@@ -309,7 +412,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       stages: stagesPayload,
       brokenCount: analysis.broken.length,
       clusterProfile: deps.clusterProfile,
-      mode: deps.nutanix.mode,
+      mode: deps.serverMode,
     };
     return c.json(payload);
   });
@@ -375,23 +478,24 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
 
   // ─── cluster config (cached snapshot of slow PC queries) ────────────
   // Boot-populated, manually overridable. CheckNewNode and CheckUpdates
-  // read from here to skip the rackable-units / LCM-inventory live calls.
+  // read from here to skip the discover-unconfigured-nodes / LCM-inventory
+  // live calls.
   function readClusterConfig(): AdminClusterConfigPayload {
     const rows = deps.service.clusterConfig.list();
     const byKey = new Map(rows.map((r) => [r.key, r]));
-    const serialsRow = byKey.get('rackable_unit_serials');
+    const serialsRow = byKey.get('discoverable_node_serials');
     const lcmRow = byKey.get('lcm_available_updates');
     const serials = Array.isArray(serialsRow?.value)
       ? (serialsRow!.value.filter((s) => typeof s === 'string') as string[])
       : [];
     const lcm = typeof lcmRow?.value === 'number' ? lcmRow.value : null;
     return {
-      rackableUnitSerials: serials,
+      discoverableNodeSerials: serials,
       lcmAvailableUpdates: lcm,
       meta: {
         ...(serialsRow
           ? {
-              rackableUnitSerials: { source: serialsRow.source, updatedAt: serialsRow.updatedAt },
+              discoverableNodeSerials: { source: serialsRow.source, updatedAt: serialsRow.updatedAt },
             }
           : {}),
         ...(lcmRow
@@ -405,18 +509,18 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
 
   router.put('/cluster-config', async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as {
-      rackableUnitSerials?: unknown;
+      discoverableNodeSerials?: unknown;
       lcmAvailableUpdates?: unknown;
     };
-    if ('rackableUnitSerials' in body) {
-      if (!Array.isArray(body.rackableUnitSerials)) {
-        throw new HttpError(400, 'rackableUnitSerials must be an array of strings');
+    if ('discoverableNodeSerials' in body) {
+      if (!Array.isArray(body.discoverableNodeSerials)) {
+        throw new HttpError(400, 'discoverableNodeSerials must be an array of strings');
       }
-      const serials = body.rackableUnitSerials
+      const serials = body.discoverableNodeSerials
         .filter((s): s is string => typeof s === 'string')
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
-      deps.service.clusterConfig.set('rackable_unit_serials', serials, 'admin');
+      deps.service.clusterConfig.set('discoverable_node_serials', serials, 'admin');
     }
     if ('lcmAvailableUpdates' in body) {
       const v = body.lcmAvailableUpdates;
@@ -439,7 +543,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     // Force-refresh: drop existing rows so the probe re-populates from
     // the cluster (the probe's setIfAbsent semantics protect operator
     // edits, but here the operator explicitly asked to re-fetch).
-    deps.service.clusterConfig.delete('rackable_unit_serials');
+    deps.service.clusterConfig.delete('discoverable_node_serials');
     deps.service.clusterConfig.delete('lcm_available_updates');
     await probeClusterConfig({
       nutanix: deps.nutanix,
@@ -447,6 +551,230 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       logger: consoleLogger,
     });
     return c.json(readClusterConfig());
+  });
+
+  // ─── scoreboard peers ───────────────────────────────────────────────
+  // Admin-curated list of peer instances whose `/api/scoreboard` is
+  // merged into this server's `/api/scoreboard/combined`. baseUrl is the
+  // peer game's HTTP base (e.g. `http://10.55.89.44:3000`); the combined
+  // endpoint appends `/api/scoreboard` itself. No URL-reachability check
+  // on insert — the combined endpoint's `peerStatus[]` surfaces broken
+  // peers in real time, which is more honest than a one-time probe.
+  const peers = new ScoreboardPeerQueries(deps.db);
+
+  // Self-label = the name surfaced on this instance's own entries in
+  // the combined view (so the player can spot their own cluster vs
+  // peer-fetched ones). Persisted in cluster_config so a restart keeps
+  // the operator's value; same key the /combined route reads.
+  router.get('/self-label', (c) => {
+    const label = deps.service.clusterConfig.get<string>('self_label') ?? null;
+    return c.json({ label });
+  });
+
+  router.put('/self-label', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { label?: unknown };
+    if (body.label === null || body.label === '') {
+      deps.service.clusterConfig.delete('self_label');
+      return c.json({ label: null });
+    }
+    if (typeof body.label !== 'string') {
+      throw new HttpError(400, 'label must be a string or null');
+    }
+    const trimmed = body.label.trim();
+    if (!trimmed) {
+      deps.service.clusterConfig.delete('self_label');
+      return c.json({ label: null });
+    }
+    deps.service.clusterConfig.set('self_label', trimmed, 'admin');
+    return c.json({ label: trimmed });
+  });
+
+  function rowToPeer(r: ScoreboardPeerRow) {
+    return {
+      id: r.id,
+      label: r.label,
+      baseUrl: r.baseUrl,
+      enabled: r.enabled,
+      addedAt: r.addedAt,
+    };
+  }
+
+  router.get('/peers', (c) => c.json({ entries: peers.list().map(rowToPeer) }));
+
+  router.post('/peers', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      label?: unknown;
+      baseUrl?: unknown;
+    };
+    const label = typeof body.label === 'string' ? body.label.trim() : '';
+    const baseUrl = typeof body.baseUrl === 'string' ? body.baseUrl.trim() : '';
+    if (!label) throw new HttpError(400, 'label is required');
+    if (!baseUrl) throw new HttpError(400, 'baseUrl is required');
+    // Accept http(s)://host[:port] with optional path; reject anything that
+    // doesn't parse. We strip any trailing slash in the route handler so
+    // the stored value is canonical.
+    let parsed: URL;
+    try {
+      parsed = new URL(baseUrl);
+    } catch {
+      throw new HttpError(400, 'baseUrl must be a valid http(s) URL');
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new HttpError(400, 'baseUrl protocol must be http or https');
+    }
+    const canonical = baseUrl.replace(/\/+$/, '');
+    try {
+      const row = peers.add(label, canonical);
+      return c.json(rowToPeer(row));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/UNIQUE/i.test(msg)) {
+        throw new HttpError(409, `peer with baseUrl ${canonical} already exists`);
+      }
+      throw err;
+    }
+  });
+
+  router.delete('/peers/:id', (c) => {
+    const id = Number.parseInt(c.req.param('id'), 10);
+    if (!Number.isFinite(id)) throw new HttpError(400, 'invalid peer id');
+    const ok = peers.remove(id);
+    if (!ok) throw new HttpError(404, `peer ${id} not found`);
+    return c.json({ ok: true, id });
+  });
+
+  router.patch('/peers/:id', async (c) => {
+    const id = Number.parseInt(c.req.param('id'), 10);
+    if (!Number.isFinite(id)) throw new HttpError(400, 'invalid peer id');
+    const body = (await c.req.json().catch(() => ({}))) as { enabled?: unknown };
+    if (typeof body.enabled !== 'boolean') {
+      throw new HttpError(400, 'enabled must be a boolean');
+    }
+    const ok = peers.setEnabled(id, body.enabled);
+    if (!ok) throw new HttpError(404, `peer ${id} not found`);
+    return c.json({ ok: true, id, enabled: body.enabled });
+  });
+
+  // ─── Planner (secondary PC) creds ────────────────────────────────────
+  // Persisted in cluster_config; consumed by session-service.create() to
+  // (1) compute the PlannerCluster capability flag (gates stages 31 +
+  // 32 in the pack) and (2) project the 3 vars (OldPC / OldPCUsername /
+  // OldPCPassword) into per-session variables so CheckRunway has a
+  // current creds set. Editing here re-enables those stages on fresh
+  // sessions without a server restart.
+  router.get('/planner-config', (c) => {
+    const cfg = deps.service.clusterConfig;
+    return c.json({
+      oldPc: cfg.get<string>('old_pc') ?? '',
+      oldPcUsername: cfg.get<string>('old_pc_username') ?? '',
+      oldPcPassword: cfg.get<string>('old_pc_password') ?? '',
+    });
+  });
+
+  router.put('/planner-config', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      oldPc?: unknown;
+      oldPcUsername?: unknown;
+      oldPcPassword?: unknown;
+    };
+    const cfg = deps.service.clusterConfig;
+    // Per-field semantics: explicit string sets, explicit `null` clears,
+    // missing key leaves the existing value untouched. Empty string = clear
+    // (so the operator's "I cleared the field" matches the wire shape).
+    const apply = (incoming: unknown, key: string) => {
+      if (incoming === undefined) return;
+      if (incoming === null || (typeof incoming === 'string' && incoming.trim() === '')) {
+        cfg.delete(key);
+      } else if (typeof incoming === 'string') {
+        cfg.set(key, incoming, 'admin');
+      } else {
+        throw new HttpError(400, `${key} must be a string or null`);
+      }
+    };
+    apply(body.oldPc, 'old_pc');
+    apply(body.oldPcUsername, 'old_pc_username');
+    apply(body.oldPcPassword, 'old_pc_password');
+    return c.json({
+      oldPc: cfg.get<string>('old_pc') ?? '',
+      oldPcUsername: cfg.get<string>('old_pc_username') ?? '',
+      oldPcPassword: cfg.get<string>('old_pc_password') ?? '',
+    });
+  });
+
+  // ─── capabilities ───────────────────────────────────────────────────
+  // GET returns the merged active set (HTTP-probed + dynamic config-
+  // driven) — what /admin/pack uses when computing missingCapabilities.
+  // Useful as the "is the engine really on, right now?" view alongside
+  // the per-stage badges.
+  router.get('/capabilities', (c) => {
+    const merged = new Set<CapabilityFlag>(deps.capabilities ?? []);
+    for (const cf of deps.service.computeDynamicCapabilities()) merged.add(cf);
+    return c.json({ flags: Array.from(merged) });
+  });
+
+  // ─── capabilities re-probe ──────────────────────────────────────────
+  // Re-runs the boot-time capability probe (capability-probe.ts) and
+  // overwrites `deps.capabilities` in place. Used when the operator
+  // flips a feature in Prism mid-event — e.g. activates the Calm
+  // Policy Engine manually after the BP `activate_policy_engine.py`
+  // gave up in best-effort mode (project_calm_policy_vm_unstable),
+  // or enables Intelligent Operations. Without this, the new state
+  // requires a server restart to take effect on /admin/pack +
+  // session-create gating.
+  //
+  // PlannerCluster is NOT touched here — it's already config-driven
+  // via cluster_config (see /planner-config above), recomputed on
+  // every session.create(). The re-probe only refreshes the
+  // HTTP-detected flags (NCM / IO / CalmDSL / NodeRemove /
+  // MultiNode / ApprovalPolicy).
+  router.post('/capabilities/refresh', async (c) => {
+    const before = new Set(deps.capabilities);
+    const probe = await probeCapabilities({
+      nutanix: deps.nutanix,
+      logger: consoleLogger,
+    });
+    // Mutate in place so the array reference shared by /pack + session
+    // route immediately sees the new contents — no need to thread a
+    // setter through every consumer.
+    deps.capabilities.splice(0, deps.capabilities.length, ...probe.flags);
+    const after = new Set(probe.flags);
+    const added = probe.flags.filter((f) => !before.has(f));
+    const removed = Array.from(before).filter((f) => !after.has(f));
+    consoleLogger.info('capabilities re-probed via admin', {
+      flags: probe.flags,
+      added,
+      removed,
+    });
+    return c.json({
+      flags: probe.flags,
+      added,
+      removed,
+      // Same shape as /api/health.capabilityProbe — gives the operator
+      // a per-flag verdict so they can see WHICH probe answered what.
+      probed: probe.details.map((d) => ({
+        flag: d.flag,
+        detected: d.detected,
+        detail: d.detail,
+        transportError: d.transportError,
+        transportCode: d.transportCode,
+      })),
+    });
+  });
+
+  // ─── live cluster status (no DB) ────────────────────────────────────
+  // Read-only probe of PC product enablement. Currently surfaces the
+  // Intelligent Operations state — no public API to flip it (PRI-55201
+  // on the v4 endpoint), so the response includes a deep-link to the
+  // Prism UI activation page. Hits the live PC on every call; intended
+  // frequency is "operator opens the Cluster tab", caching adds nothing.
+  router.get('/cluster-status', async (c) => {
+    const intelligentOps = await probeIntelligentOps({
+      nutanix: deps.nutanix,
+      pcEndpoint: deps.pcEndpoint,
+      logger: consoleLogger,
+    });
+    const payload: AdminClusterStatusPayload = { intelligentOps };
+    return c.json(payload);
   });
 
   return router;

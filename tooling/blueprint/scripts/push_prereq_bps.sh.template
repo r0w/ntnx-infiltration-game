@@ -52,13 +52,73 @@ sed -i 's/{PROJECT}/production/g'         NewblankVM/blueprint.py
 echo "[push_prereq_bps] pulling calm-dsl image $CALM_DSL_IMAGE ..."
 sudo docker pull "$CALM_DSL_IMAGE"
 
-# 4. Initialize calm-dsl with PC creds in our staging .calm dir
-mkdir -p "$DSLDIR"
-echo "[push_prereq_bps] initializing calm-dsl config..."
-sudo docker run --rm \
-    -v "$DSLDIR:/root/.calm" \
-    "$CALM_DSL_IMAGE" \
-    calm init dsl -i "$PC_IP" -P 9440 -u "$PC_USER" -p "$PC_PWD" -pj production
+# 4. Write calm-dsl config files directly — DO NOT call `calm init dsl`.
+#    `init dsl` probes /api/calm/v3.0/features/approval_policy at startup,
+#    which times out (30 s default) while the policy engine MSP is still
+#    bootstrapping during install (this branch fires shortly after
+#    `Activate policy engine` returns success best-effort, but the
+#    underlying MSP service typically takes 5-15 min to come up — see
+#    memory project_calm_policy_vm_unstable). We don't need the probe;
+#    `calm create bp` only reads the project name from config.ini and
+#    queries /api/nutanix/v3/projects/list directly. Writing the same
+#    shape `init dsl` would produce on success skips the failure mode
+#    entirely.
+echo "[push_prereq_bps] writing calm-dsl config (skip init dsl probe)..."
+mkdir -p "$DSLDIR/.local"
+cat > "$DSLDIR/config.ini" <<EOF
+[SERVER]
+pc_ip = $PC_IP
+pc_port = 9440
+pc_username = $PC_USER
+pc_password = $PC_PWD
+api_key_location = -
+
+[NCM_SERVER]
+ncm_enabled = False
+host = None
+port = None
+
+[NC_SERVER]
+enabled = False
+host = None
+username = admin
+password = stub
+
+[PROJECT]
+name = production
+
+[LOG]
+level = INFO
+
+[POLICY]
+policy_status = False
+
+[APPROVAL_POLICY]
+approval_policy_status = True
+
+[STRATOS]
+stratos_status = False
+
+[CLOUD_PROVIDERS]
+cp_status = True
+
+[CONNECTION]
+retries_enabled = True
+connection_timeout = 5
+read_timeout = 30
+
+[CATEGORIES]
+EOF
+cat > "$DSLDIR/init.ini" <<EOF
+[CONFIG]
+location = /root/.calm/config.ini
+
+[DB]
+location = /root/.calm/dsl.db
+
+[LOCAL_DIR]
+location = /root/.calm/.local
+EOF
 
 # 5. Refresh the cache so Ref.Project("production") resolves
 echo "[push_prereq_bps] updating calm-dsl cache..."

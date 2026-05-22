@@ -169,21 +169,56 @@ html, body, #root {
   color: var(--fail);
   font-size: 12px;
 }
-.login button[type="submit"] {
+/* Terminal-prompt styled submit: matches the dropdown's monospace + cyan
+   accent and reads like a shell command. Default = outlined; hover/focus
+   inverts to a filled cyan button with a subtle glow. */
+.login-submit {
   width: 100%;
-  padding: 10px;
+  margin-top: 16px;
+  padding: 11px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+.login-submit:hover:not(:disabled),
+.login-submit:focus-visible:not(:disabled) {
   background: var(--accent);
   color: #001018;
-  border: none;
-  border-radius: 4px;
-  font-weight: 700;
-  cursor: pointer;
-  margin-top: 8px;
+  box-shadow: 0 0 14px rgba(124, 220, 254, 0.35);
+  outline: none;
 }
-.login button[type="submit"]:disabled {
-  background: #334;
+.login-submit:disabled {
   color: var(--dim);
-  cursor: not-allowed;
+  border-color: #1b232b;
+  background: transparent;
+  cursor: progress;
+}
+.login-submit-prompt {
+  opacity: 0.7;
+}
+.login-submit-cursor {
+  display: inline-block;
+  width: 0.55em;
+  margin-left: auto;
+  animation: login-submit-blink 1.05s steps(1) infinite;
+}
+.login-submit:disabled .login-submit-cursor {
+  animation: none;
+  opacity: 0.4;
+}
+@keyframes login-submit-blink {
+  50% { opacity: 0; }
 }
 
 .app {
@@ -480,12 +515,22 @@ a.terminal-link:visited {
 .code-block {
   position: relative;
   margin: 8px 0;
-  padding: 10px 12px;
+  /* Right padding reserves space for the absolutely-positioned copy button
+     (26px wide + 6px right offset + 8px breathing). Without this, a width:
+     fit-content block would draw the button over the last character of a
+     short line. */
+  padding: 10px 44px 10px 12px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 4px;
   animation: code-block-in 560ms cubic-bezier(0.16, 0.84, 0.22, 1) both;
   transform-origin: top center;
+  /* Shrink to the widest line instead of spanning the terminal so the copy
+     icon is right next to the snippet — no need to cross the screen to
+     reach it on short blocks. Long lines still scroll inside via overflow-x
+     on .code-body; max-width caps the block at the terminal width. */
+  width: fit-content;
+  max-width: 100%;
 }
 @keyframes code-block-in {
   0% {
@@ -732,6 +777,11 @@ a.terminal-link:visited {
   color: var(--fail);
   margin-bottom: 16px;
   font-size: 14px;
+}
+.agent-cluster {
+  font-size: 0.7em;
+  color: var(--dim);
+  margin-left: 4px;
 }
 .scoreboard-empty {
   flex: 1 1 auto;
@@ -1144,6 +1194,14 @@ a.terminal-link:visited {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.55; }
 }
+.devpanel-autoplay-acting {
+  background: var(--accent);
+  animation: devpanel-autoplay-acting-pulse 0.6s ease-in-out infinite;
+}
+@keyframes devpanel-autoplay-acting-pulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.05); }
+}
 .devpanel-body {
   padding: 8px 16px 12px;
 }
@@ -1255,13 +1313,54 @@ a.terminal-link:visited {
   min-height: 100vh;
   padding: 24px clamp(16px, 4vw, 40px);
 }
+/* Baseline link style for any inline anchor inside the admin layout that
+   doesn't carry an explicit class. Uses :where() for zero specificity so
+   purpose-built classes (.app-reset, .admin-back, .admin-cluster-iops-link,
+   etc.) keep winning at their own single-class specificity. Without this,
+   ad-hoc <Link>/<a> tags fell back to browser-default blue which pops
+   against the dark terminal background. */
+.admin :where(a) {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(124, 220, 254, 0.4);
+  text-underline-offset: 2px;
+}
+.admin :where(a):hover {
+  color: var(--fg);
+  text-decoration-color: var(--accent);
+}
 .admin-header {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   margin-bottom: 20px;
+  flex-wrap: wrap;
+  row-gap: 10px;
 }
-.app-spacer { flex: 1; }
+.app-spacer { flex: 1; min-width: 12px; }
+.admin-header-id {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+/* Three header zones on the right of the spacer: actions (lunch lock),
+   external links (game / scoreboard / combined), utility (refresh /
+   logout). Each is its own visual cluster with a thin terminal-style
+   divider on the left so the operator can scan the header in chunks
+   instead of one long row. The first group skips the divider via
+   :first-of-type. */
+.admin-header-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 12px;
+  margin-left: 2px;
+  border-left: 1px solid #1b232b;
+}
+/* When lunch isn't loaded the actions group is suppressed; the links
+   group then becomes the first one after the spacer and shouldn't
+   wear a divider on its left. */
+.app-spacer + .admin-header-group { border-left: 0; padding-left: 0; margin-left: 0; }
 .admin-back {
   color: var(--dim);
   text-decoration: none;
@@ -1275,6 +1374,70 @@ a.terminal-link:visited {
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--accent);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
+}
+/* CRT-style cursor block before "admin" — small accent stripe that
+   anchors the title to the terminal aesthetic and gives the operator
+   an unmistakable "you are at the admin prompt" visual. */
+.admin-title-prompt {
+  color: var(--accent);
+  font-weight: 700;
+  margin-right: 4px;
+  text-shadow: 0 0 6px rgba(124, 220, 254, 0.4);
+}
+.admin-title-self {
+  color: var(--dim);
+  font-weight: 400;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+.admin-header-link {
+  color: var(--dim);
+  text-decoration: none;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 9px 3px 9px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  transition: color 120ms, border-color 120ms, background 120ms;
+  display: inline-flex;
+  align-items: center;
+}
+.admin-header-link:hover {
+  color: var(--accent);
+  border-color: rgba(124, 220, 254, 0.3);
+  background: rgba(124, 220, 254, 0.04);
+}
+.admin-header-link-arrow {
+  margin-left: 5px;
+  font-size: 9px;
+  opacity: 0.55;
+  transform: translateY(-1px);
+  transition: opacity 120ms, transform 120ms;
+}
+.admin-header-link:hover .admin-header-link-arrow {
+  opacity: 1;
+  transform: translate(2px, -2px);
+}
+.admin-header-util {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+.admin-header-util:hover {
+  color: var(--fg);
+  border-color: #1b232b;
 }
 .admin-empty {
   padding: 40px;
@@ -1310,6 +1473,30 @@ a.terminal-link:visited {
   gap: 16px;
   max-width: 720px;
 }
+/* Two-column layout for the cluster tab: left = read-only / config
+   sections (Intelligent Ops + Planner PC), right = cached snapshot
+   editor. The `.admin-cluster` flex base is overridden into a grid
+   when this modifier is present; max-width widens to fit both
+   columns. Stacks to a single column on narrow viewports. */
+.admin-cluster-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+  max-width: 1180px;
+}
+.admin-cluster-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+@media (max-width: 980px) {
+  .admin-cluster-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
 .admin-cluster-intro {
   color: #c4ced6;
   font-size: 13px;
@@ -1344,6 +1531,33 @@ a.terminal-link:visited {
   border-color: var(--accent);
 }
 .admin-cluster-input { max-width: 240px; }
+.admin-planner-input { max-width: 380px; }
+.admin-cluster-block {
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid #1b232b;
+}
+.admin-planner-reveal {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 1px 6px;
+  margin-left: 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.admin-planner-reveal:hover { color: var(--accent); border-color: var(--accent); }
+.admin-state-flash {
+  animation: admin-state-flash 1500ms ease-out 1;
+}
+@keyframes admin-state-flash {
+  0%   { text-shadow: 0 0 10px currentColor; }
+  100% { text-shadow: 0 0 0 currentColor; }
+}
 .admin-cluster-source-probe { color: var(--dim); }
 .admin-cluster-source-admin { color: var(--accent); font-weight: 600; }
 .admin-cluster-actions {
@@ -1353,6 +1567,31 @@ a.terminal-link:visited {
   margin-top: 6px;
 }
 .admin-cluster-saved { font-size: 12px; }
+.admin-peers-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.admin-peers-add-row .admin-cluster-input { max-width: none; flex: 1 1 auto; }
+.admin-cluster-iops {
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.admin-cluster-iops-link {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.admin-cluster-iops-link:hover { filter: brightness(1.2); }
+.admin-cluster-iops-refresh {
+  margin-left: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.admin-cluster-iops-err { font-size: 12px; margin-top: 2px; }
 .admin-table {
   width: 100%;
   border-collapse: collapse;
@@ -1408,6 +1647,25 @@ a.terminal-link:visited {
 .admin-delete:disabled {
   opacity: 0.4;
   cursor: wait;
+}
+.admin-skip {
+  background: transparent;
+  color: var(--dim);
+  border: 1px solid #1b232b;
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  margin-right: 6px;
+}
+.admin-skip:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--dim);
+}
+.admin-skip:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 .admin-back-link {
   margin: 16px 0 0;

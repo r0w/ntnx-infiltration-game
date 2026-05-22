@@ -122,8 +122,8 @@ export interface PackInfo {
    */
   mode: 'mock' | 'test' | 'live';
   /** Server's runtime clusterProfile — `'other'` means the engine
-   *  filters destructive stages, `'hpoc'` means they play normally.
-   *  DevPanel uses this to dim destructive stage chips only when
+   *  filters `hpoc-only` stages, `'hpoc'` means they play normally.
+   *  DevPanel uses this to dim `hpoc-only` stage chips only when
    *  they would actually be skipped. */
   clusterProfile: 'hpoc' | 'other';
   defaultLocale: string;
@@ -131,7 +131,7 @@ export interface PackInfo {
   stages: Array<{
     name: string;
     active: boolean;
-    impact: 'safe' | 'destructive';
+    impact: 'safe' | 'hpoc-only';
     requires: string[];
     hasCheck: boolean;
     captures: string[];
@@ -146,9 +146,14 @@ export interface ScoreboardEntry {
   stageName: string | null;
   stagesPassed: number;
   /** Stages the engine gated for this session (e.g. destructive on `other`).
-   *  Subtracted from `totalStages` when computing the percent display. */
+   *  Kept for telemetry — the percent display now divides by
+   *  `effectiveTotalStages` (more accurate for in-progress sessions). */
   stagesDisabled: number;
   totalStages: number;
+  /** Cluster-aware playable count — see backend doc. The percent display
+   *  divides by this so an in-progress player doesn't dip to 92% when
+   *  3 stages are filtered but not yet walked-past. */
+  effectiveTotalStages: number;
   startedAt: number;
   finishedAt: number | null;
   lastActivityAt: number | null;
@@ -163,6 +168,48 @@ export interface ScoreboardPayload {
   entries: ScoreboardEntry[];
 }
 
+/** Per-entry origin tag — `null` = this instance, string = peer label. */
+export interface CombinedScoreboardEntry extends ScoreboardEntry {
+  peerLabel: string | null;
+}
+
+export interface CombinedPeerStatus {
+  id: number;
+  label: string;
+  baseUrl: string;
+  enabled: boolean;
+  ok: boolean;
+  entryCount: number;
+  error?: string;
+  durationMs: number;
+}
+
+export interface CombinedScoreboardPayload {
+  packId: string;
+  packName: string;
+  mode: 'mock' | 'live';
+  totalStages: number;
+  /** Cluster label for this instance — surfaced on local entries (entries
+   *  with `peerLabel === null`) so the player can see which cluster
+   *  they're on. `null` when no `SELF_LABEL` env var is set. */
+  selfLabel: string | null;
+  entries: CombinedScoreboardEntry[];
+  /** One row per *enabled* peer — diagnostic for the admin view. */
+  peerStatus: CombinedPeerStatus[];
+}
+
+export interface AdminPeerEntry {
+  id: number;
+  label: string;
+  baseUrl: string;
+  enabled: boolean;
+  addedAt: number;
+}
+
+export interface AdminPeersPayload {
+  entries: AdminPeerEntry[];
+}
+
 export interface AdminUserEntry {
   sessionId: string;
   trigram: string | null;
@@ -173,7 +220,17 @@ export interface AdminUserEntry {
   /** Name of the stage the player is ABOUT to play. null when finished. */
   nextStageName: string | null;
   stagesPassed: number;
+  /** Stages the engine gated for this session (capability missing,
+   *  destructive-on-other, missing-upstream). Kept for telemetry —
+   *  `effectiveTotalStages` is the denominator the UI uses for the
+   *  Progress cell. */
+  stagesDisabled: number;
   totalStages: number;
+  /** Cluster-aware playable count — see backend doc. The Progress cell
+   *  in /admin uses this as the denominator so an in-progress session
+   *  doesn't display N/39 when 3 stages are filtered for cluster
+   *  reasons but not yet walked-past. */
+  effectiveTotalStages: number;
   startedAt: number;
   finishedAt: number | null;
   lastActivityAt: number | null;
@@ -204,14 +261,21 @@ export interface AdminPackStageEntry {
   stageName: string;
   active: boolean;
   adminGate: boolean;
-  /** Pack-declared `impact` ('safe' default, 'destructive' filtered on
+  /** Pack-declared `impact` ('safe' default, 'hpoc-only' filtered on
    *  shared clusters when `clusterProfile === 'other'`). */
-  impact: 'safe' | 'destructive';
+  impact: 'safe' | 'hpoc-only';
   activeOverridden: boolean;
   adminGateOverridden: boolean;
   needs: string[];
   captures: string[];
   brokenMissingVars: string[];
+  /** Always-enforced capability requirements. */
+  requires: string[];
+  /** Capability requirements only enforced when `clusterProfile === 'other'`. */
+  requiresOnOther: string[];
+  /** Caps the stage needs (after `requiresOnOther` overlay) that aren't
+   *  active on the server — non-empty → gate will skip the stage. */
+  missingCapabilities: string[];
 }
 
 export interface AdminPackPayload {
@@ -221,8 +285,9 @@ export interface AdminPackPayload {
   brokenCount: number;
   /** Server's runtime clusterProfile. */
   clusterProfile: 'hpoc' | 'other';
-  /** Server's transport mode. `mock` means destructive gate is bypassed. */
-  mode: 'mock' | 'live';
+  /** Operator-facing server mode. `mock` bypasses the hpoc-only gate;
+   *  `test` and `live` both hit a real PC. */
+  mode: 'mock' | 'test' | 'live';
 }
 
 export interface AdminPackTogglePreview {
@@ -281,6 +346,7 @@ export const api = {
     ),
   pack: () => get<PackInfo>('/pack'),
   scoreboard: () => get<ScoreboardPayload>('/scoreboard'),
+  combinedScoreboard: () => get<CombinedScoreboardPayload>('/scoreboard/combined'),
   sshPing: (target: string, signal?: AbortSignal) =>
     post<{
       ok: boolean;
@@ -305,6 +371,13 @@ export const api = {
     adminGet<AdminUsersPayload>('/admin/users', password),
   adminDelete: (password: string, sessionId: string) =>
     adminDel<{ ok: true; sessionId: string }>(`/admin/users/${sessionId}`, password),
+  adminSkipCurrentStage: (password: string, sessionId: string) =>
+    adminPost<{
+      ok: true;
+      sessionId: string;
+      skipped: string;
+      currentStage: string | null;
+    }>(`/admin/users/${sessionId}/skip-current-stage`, password),
   adminGates: (password: string) =>
     adminGet<AdminGatesPayload>('/admin/gates', password),
   adminUnlockGate: (password: string, stageName: string) =>
@@ -347,12 +420,12 @@ export const api = {
       cleanedStages: number;
       failures: number;
       results: Array<{ stage: string; ok: boolean; error?: string; durationMs: number }>;
-    }>(`/seed/cleanup-all/${encodeURIComponent(trigram)}`, password),
+    }>(`/act/cleanup-all/${encodeURIComponent(trigram)}`, password),
   adminClusterConfig: (password: string) =>
     adminGet<AdminClusterConfigPayload>('/admin/cluster-config', password),
   adminClusterConfigSave: (
     password: string,
-    body: { rackableUnitSerials?: string[]; lcmAvailableUpdates?: number | null },
+    body: { discoverableNodeSerials?: string[]; lcmAvailableUpdates?: number | null },
   ) =>
     fetch('/api/admin/cluster-config', {
       method: 'PUT',
@@ -361,13 +434,81 @@ export const api = {
     }).then((res) => handle<AdminClusterConfigPayload>(res)),
   adminClusterConfigRefresh: (password: string) =>
     adminPost<AdminClusterConfigPayload>('/admin/cluster-config/refresh', password),
+  adminClusterStatus: (password: string) =>
+    adminGet<AdminClusterStatusPayload>('/admin/cluster-status', password),
+  adminPeers: (password: string) =>
+    adminGet<AdminPeersPayload>('/admin/peers', password),
+  adminPeerAdd: (password: string, body: { label: string; baseUrl: string }) =>
+    adminPost<AdminPeerEntry>('/admin/peers', password, body),
+  adminPeerDelete: (password: string, id: number) =>
+    adminDel<{ ok: true; id: number }>(`/admin/peers/${id}`, password),
+  adminPeerToggle: (password: string, id: number, enabled: boolean) =>
+    fetch(`/api/admin/peers/${id}`, {
+      method: 'PATCH',
+      headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    }).then((res) => handle<{ ok: true; id: number; enabled: boolean }>(res)),
+  adminSelfLabel: (password: string) =>
+    adminGet<{ label: string | null }>('/admin/self-label', password),
+  adminSelfLabelSave: (password: string, label: string | null) =>
+    fetch('/api/admin/self-label', {
+      method: 'PUT',
+      headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label }),
+    }).then((res) => handle<{ label: string | null }>(res)),
+  adminPlannerConfig: (password: string) =>
+    adminGet<AdminPlannerConfigPayload>('/admin/planner-config', password),
+  adminPlannerConfigSave: (
+    password: string,
+    body: { oldPc?: string | null; oldPcUsername?: string | null; oldPcPassword?: string | null },
+  ) =>
+    fetch('/api/admin/planner-config', {
+      method: 'PUT',
+      headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((res) => handle<AdminPlannerConfigPayload>(res)),
+  adminCapabilities: (password: string) =>
+    adminGet<{ flags: string[] }>('/admin/capabilities', password),
+  adminCapabilitiesRefresh: (password: string) =>
+    adminPost<AdminCapabilitiesRefreshPayload>('/admin/capabilities/refresh', password),
 };
 
+export interface AdminCapabilitiesRefreshPayload {
+  flags: string[];
+  added: string[];
+  removed: string[];
+  probed: Array<{
+    flag: string;
+    detected: boolean;
+    detail: string;
+    transportError?: boolean;
+    transportCode?: string;
+  }>;
+}
+
+export interface AdminPlannerConfigPayload {
+  oldPc: string;
+  oldPcUsername: string;
+  oldPcPassword: string;
+}
+
 export interface AdminClusterConfigPayload {
-  rackableUnitSerials: string[];
+  discoverableNodeSerials: string[];
   lcmAvailableUpdates: number | null;
   meta: {
-    rackableUnitSerials?: { source: 'probe' | 'admin'; updatedAt: number };
+    discoverableNodeSerials?: { source: 'probe' | 'admin'; updatedAt: number };
     lcmAvailableUpdates?: { source: 'probe' | 'admin'; updatedAt: number };
+  };
+}
+
+export interface AdminClusterStatusPayload {
+  intelligentOps: {
+    /** `null` in mock mode or when the probe couldn't reach PC. */
+    state: 'ENABLED' | 'DISABLED' | 'UNKNOWN' | null;
+    /** Prism UI deep-link to the IOps activation screen. `null` when the
+     *  PC endpoint isn't configured (mock fixtures or local-dev). */
+    enableUrl: string | null;
+    /** Human-readable error if `state` is null and the probe failed. */
+    error?: string;
   };
 }
