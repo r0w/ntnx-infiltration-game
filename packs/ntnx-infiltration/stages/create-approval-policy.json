@@ -18,7 +18,7 @@
   ],
   "saveScore": false,
   "waitForInputValue": "Ok",
-  "impact": "destructive",
+  "requiresOnOther": ["ApprovalPolicy"],
   "check": {
     "fn": "CheckApprovalPolicy"
   },

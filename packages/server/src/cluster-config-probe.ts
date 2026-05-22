@@ -1,4 +1,5 @@
 import type { Logger, NutanixClient } from '@ntnx-game/engine';
+import { discoverableNodeSerials } from '@ntnx-game/engine';
 import { ClusterConfigQueries } from './db/queries';
 
 export interface ClusterConfigProbeDeps {
@@ -8,8 +9,8 @@ export interface ClusterConfigProbeDeps {
 }
 
 /**
- * Boot-time snapshot of slow-to-query cluster facts: rackable-unit serials
- * (for `expand-cluster`) and LCM available-updates count (for
+ * Boot-time snapshot of slow-to-query cluster facts: discoverable node
+ * serials (for `expand-cluster`) and LCM available-updates count (for
  * `lcm-check-updates`). Each value is upserted **only if absent** — the
  * operator's manual edits via `/admin` (tagged `source='admin'`) are
  * sticky and never overwritten by a probe re-run.
@@ -29,46 +30,22 @@ export async function probeClusterConfig(deps: ClusterConfigProbeDeps): Promise<
     return;
   }
 
-  // ─── rackable-unit serials ──────────────────────────────────────────
+  // ─── discoverable node serials ──────────────────────────────────────
+  // Discover-unconfigured-nodes returns the rackmounted nodes NOT currently
+  // in the cluster — exactly the set CheckNewNode (stage 28) wants. On a
+  // single-node HPoC with no spare chassis, this returns []; we store the
+  // empty list so admin UI can show "no spare nodes" instead of stale data.
   try {
-    const clusters = await nutanix.request<{ data?: Array<{ extId?: string }> }>(
-      'GET',
-      '/api/clustermgmt/v4.0/config/clusters',
+    const serials = await discoverableNodeSerials(nutanix, logger);
+    const inserted = cfg.setIfAbsent('discoverable_node_serials', serials);
+    logger.info(
+      inserted
+        ? 'cluster-config probe: cached discoverable_node_serials'
+        : 'cluster-config probe: discoverable_node_serials already set, kept existing',
+      { count: serials.length },
     );
-    const clusterUuid = clusters.data?.[0]?.extId;
-    if (!clusterUuid) {
-      logger.warn('cluster-config probe: no cluster UUID, skipping rackable-units');
-    } else {
-      let units: Array<{ serial?: string }> = [];
-      for (const v of ['v4.0.b2', 'v4.0', 'v4.2']) {
-        try {
-          const res = await nutanix.request<{ data?: Array<{ serial?: string }> }>(
-            'GET',
-            `/api/clustermgmt/${v}/config/clusters/${clusterUuid}/rackable-units`,
-          );
-          if (res?.data) {
-            units = res.data;
-            break;
-          }
-        } catch {
-          // try next version
-        }
-      }
-      const serials = units
-        .map((u) => (u.serial ?? '').trim())
-        .filter((s) => s.length > 0);
-      if (serials.length > 0) {
-        const inserted = cfg.setIfAbsent('rackable_unit_serials', serials);
-        logger.info(
-          inserted
-            ? 'cluster-config probe: cached rackable_unit_serials'
-            : 'cluster-config probe: rackable_unit_serials already set, kept existing',
-          { count: serials.length },
-        );
-      }
-    }
   } catch (err) {
-    logger.warn('cluster-config probe: rackable-units fetch failed', {
+    logger.warn('cluster-config probe: discover-unconfigured-nodes failed', {
       err: err instanceof Error ? err.message : String(err),
     });
   }

@@ -50,7 +50,6 @@ tooling/archive/blueprint-v3-tmp/blueprint.json
 # Generated at compile time by tooling/blueprint/compile.sh —
 # base64 .tgz blobs inlined into the sh task script.
 tooling/blueprint/scripts/push_prereq_bps.sh
-tooling/blueprint/scripts/upload_prereq_bps.py
 
 # Nutanix v4 Swagger specs — local reference only, too large for git (~17 MB)
 /specs/

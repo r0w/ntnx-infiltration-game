@@ -27,14 +27,36 @@ describe('gateStage', () => {
     expect(v).toEqual({ allowed: false, reason: 'missing-capability', missing: ['IO'] });
   });
 
-  test('blocks destructive on shared', () => {
-    const s = baseStage({ impact: 'destructive' });
+  test('blocks hpoc-only on shared', () => {
+    const s = baseStage({ impact: 'hpoc-only' });
     expect(gateStage(s, { capabilities: new Set(), clusterProfile: 'other', currentStage: 0 })).toEqual({ allowed: false, reason: 'destructive-on-other' });
   });
 
-  test('allows destructive on dedicated', () => {
-    const s = baseStage({ impact: 'destructive' });
+  test('allows hpoc-only on dedicated', () => {
+    const s = baseStage({ impact: 'hpoc-only' });
     expect(gateStage(s, { capabilities: new Set(), clusterProfile: 'hpoc', currentStage: 0 })).toEqual({ allowed: true });
+  });
+
+  test('requiresOnOther: ignored on hpoc (stage plays without the cap)', () => {
+    const s = baseStage({ requiresOnOther: ['ApprovalPolicy'] });
+    expect(gateStage(s, { capabilities: new Set(), clusterProfile: 'hpoc', currentStage: 0 })).toEqual({ allowed: true });
+  });
+
+  test('requiresOnOther: enforced on other (missing cap → missing-capability verdict)', () => {
+    const s = baseStage({ requiresOnOther: ['ApprovalPolicy'] });
+    const v = gateStage(s, { capabilities: new Set(), clusterProfile: 'other', currentStage: 0 });
+    expect(v).toEqual({ allowed: false, reason: 'missing-capability', missing: ['ApprovalPolicy'] });
+  });
+
+  test('requiresOnOther: satisfied on other (cap present → plays)', () => {
+    const s = baseStage({ requiresOnOther: ['ApprovalPolicy'] });
+    expect(gateStage(s, { capabilities: new Set(['ApprovalPolicy']), clusterProfile: 'other', currentStage: 0 })).toEqual({ allowed: true });
+  });
+
+  test('requires + requiresOnOther union on other (both reported missing)', () => {
+    const s = baseStage({ requires: ['CalmDSL'], requiresOnOther: ['ApprovalPolicy'] });
+    const v = gateStage(s, { capabilities: new Set(), clusterProfile: 'other', currentStage: 0 });
+    expect(v).toEqual({ allowed: false, reason: 'missing-capability', missing: ['CalmDSL', 'ApprovalPolicy'] });
   });
 
   test('allows safe stage with satisfied capabilities', () => {
@@ -139,9 +161,9 @@ describe('nextPlayableStage', () => {
     expect(r.skippedDisabled).toEqual([]);
   });
 
-  test('skips destructive on shared and records them', () => {
+  test('skips hpoc-only on shared and records them', () => {
     const stages = [
-      baseStage({ id: 2, impact: 'destructive' }),
+      baseStage({ id: 2, impact: 'hpoc-only' }),
       baseStage({ id: 3 }),
     ];
     const r = nextPlayableStage(stages, { capabilities: new Set(), clusterProfile: 'other', currentStage: 1 });

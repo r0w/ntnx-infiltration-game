@@ -2020,21 +2020,35 @@ export const acts = {
   'modify-blueprint': actModifyBlueprint,
 };
 
+// Cleanup order is dependency-driven, NOT reverse-stage order. The runner
+// iterates this dict in insertion order — phases below reflect what holds
+// references to what. Live regression 2026-05-18 on 10.38.66.7: pure
+// reverse-stage tried `create-category` (stage 15) before `create-vm`
+// (stage 12), the VM still held the category tag, DELETE 400'd and the
+// category leaked. Same shape would leak `create-subnet`/`create-project`
+// if a VM survived earlier handlers (now safe because VM goes first).
 export const cleanups = {
-  'create-admin-user': cleanupCreateAdminUser,
-  'create-auth-policy': cleanupCreateAuthPolicy,
-  'create-project': cleanupCreateProject,
-  'create-subnet': cleanupCreateSubnet,
-  'add-ubuntu-image': cleanupAddUbuntuImage,
+  // Phase 1 — top-of-pyramid: Calm/BP layer, no FK into lower layers
+  'modify-blueprint': cleanupModifyBlueprint,
+  'schedule-day2-action': cleanupScheduleDay2Action,
+  'clone-app-blueprint': cleanupCloneAppBlueprint,
+  'create-ncm-playbook': cleanupCreateNcmPlaybook,
+  // Phase 2 — policies that target categories/VMs; clear them before the VM
+  // goes so policy DELETE sees clean state
+  'create-report': cleanupCreateReport,
+  'create-approval-policy': cleanupCreateApprovalPolicy,
+  'create-protection-policy': cleanupCreateProtectionPolicy,
+  'create-microseg-policy': cleanupCreateMicrosegPolicy,
+  'create-storage-policy': cleanupCreateStoragePolicy,
+  // Phase 3 — VM FIRST (releases category tags + subnet port refs),
+  //          THEN category (now unreferenced)
   'create-vm': cleanupCreateVm,
   'create-category': cleanupCreateCategory,
-  'create-storage-policy': cleanupCreateStoragePolicy,
-  'create-microseg-policy': cleanupCreateMicrosegPolicy,
-  'create-protection-policy': cleanupCreateProtectionPolicy,
-  'create-approval-policy': cleanupCreateApprovalPolicy,
-  'create-report': cleanupCreateReport,
-  'create-ncm-playbook': cleanupCreateNcmPlaybook,
-  'clone-app-blueprint': cleanupCloneAppBlueprint,
-  'schedule-day2-action': cleanupScheduleDay2Action,
-  'modify-blueprint': cleanupModifyBlueprint,
+  // Phase 4 — image + network + project, leaf to root
+  'add-ubuntu-image': cleanupAddUbuntuImage,
+  'create-subnet': cleanupCreateSubnet,
+  'create-project': cleanupCreateProject,
+  // Phase 5 — IAM (user is referenced by the auth-policy)
+  'create-auth-policy': cleanupCreateAuthPolicy,
+  'create-admin-user': cleanupCreateAdminUser,
 };

@@ -30,7 +30,7 @@
   "stage-007.line-02": "Send me a <white>Ok</white> message here, when it's done: <input/>\n",
   "stage-007.line-03": "Great, let me check that... \n",
   "stage-008.line-01": "<pagebreak/>",
-  "stage-008.line-02": "Now, disconnect from Nutanix Prism Central and connect back with your new user <white>{Trigram}-adm</white>.. Hit <white>Enter</white> when you are in.<input/>",
+  "stage-008.line-02": "Now, disconnect from Nutanix Prism Central and connect back with your new user <white>{Trigram}-adm</white>. Hit <white>Enter</white> when you are in.<input/>",
   "stage-009.line-01": "I don't have time to check if you are really connected with the account <white>{Trigram}-adm</white>! I trust you this time <white>{Username}</white>, even if the error is (only) human...<pause sec='2'/>\n\n",
   "stage-009.line-02": "I need you to create a new project. Projects are used to group resources, manage access rights and define quotas. It is the Nutanix way to handle tenants. Users from other projects won't see what we do in our own project.\n\n",
   "stage-009.line-03": "<red>Oh... Just one important thing!</red> If I forgot to guide you into the right part of the interface, use the <white>search bar</white> at the top of Prism Central UI! It is soooo useful to move quickly from one page to another.<pause sec='3'/>\n\n",

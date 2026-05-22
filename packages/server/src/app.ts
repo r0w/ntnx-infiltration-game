@@ -137,7 +137,14 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
   );
   app.route(
     '/api/scoreboard',
-    buildScoreboardRoutes({ db: deps.db, pack: deps.pack, mode: deps.nutanix.mode }),
+    buildScoreboardRoutes({
+      db: deps.db,
+      pack: deps.pack,
+      mode: deps.nutanix.mode,
+      service,
+      capabilities: deps.capabilities,
+      clusterProfile: deps.clusterProfile,
+    }),
   );
   app.route('/api/ssh', buildSshRoutes());
   app.route(
@@ -148,7 +155,10 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
       adminPassword: deps.adminPassword,
       service,
       nutanix: deps.nutanix,
+      serverMode,
       clusterProfile: deps.clusterProfile,
+      capabilities: deps.capabilities,
+      pcEndpoint: deps.clusterEndpoint,
     }),
   );
   app.route(

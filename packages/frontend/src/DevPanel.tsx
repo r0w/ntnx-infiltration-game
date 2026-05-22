@@ -12,6 +12,10 @@ export interface DevPanelProps {
    *  toggle so operators see at a glance whether the next prompt will
    *  auto-submit or wait for them. */
   autoPlay?: boolean;
+  /** True while the auto-play harness is making a request (autofill or
+   *  act). Surface it visibly so silent stages don't look like the UI
+   *  is wedged. */
+  autoPlayActing?: boolean;
   /**
    * Server mode (`mock` | `test`). Surfaced in the toggle label so the
    * operator knows at a glance which adapter the session is hitting —
@@ -30,6 +34,7 @@ export function DevPanel({
   awaitingVariable,
   busy,
   autoPlay,
+  autoPlayActing,
   mode,
   onGoto,
 }: DevPanelProps) {
@@ -118,8 +123,15 @@ export function DevPanel({
           {mode ?? 'dev'}
         </span>
         {autoPlay && (
-          <span className="devpanel-autoplay" title="Auto-play armed — next CONTINUE prompts will auto-submit">
-            AUTOPLAY
+          <span
+            className={`devpanel-autoplay ${autoPlayActing ? 'devpanel-autoplay-acting' : ''}`}
+            title={
+              autoPlayActing
+                ? 'Auto-play is making a request (autofill / act)'
+                : 'Auto-play armed — next CONTINUE prompts will auto-submit'
+            }
+          >
+            {autoPlayActing ? 'AUTOPLAY ⏳' : 'AUTOPLAY'}
           </span>
         )}
         {' · '}
@@ -179,18 +191,18 @@ export function DevPanel({
                     // every downstream check fails).
                     const isCurrent = s.name === activeStageName;
                     const isForward = idx > activeIdx;
-                    // Only mark destructive stages red when the engine
+                    // Only mark hpoc-only stages red when the engine
                     // would actually skip them (clusterProfile=other).
                     // On hpoc those stages play normally and red is just
                     // visual noise.
-                    const destructiveFiltered = s.impact === 'destructive'
+                    const hpocOnlyFiltered = s.impact === 'hpoc-only'
                       && pack.clusterProfile === 'other';
                     const cls = [
                       'devpanel-stage',
                       isCurrent && 'devpanel-stage-current',
                       isForward && 'devpanel-stage-forward',
                       !s.active && 'devpanel-stage-inactive',
-                      destructiveFiltered && 'devpanel-stage-destructive',
+                      hpocOnlyFiltered && 'devpanel-stage-destructive',
                     ]
                       .filter(Boolean)
                       .join(' ');
@@ -204,8 +216,8 @@ export function DevPanel({
                         title={[
                           s.name,
                           isForward ? 'forward jump disabled' : null,
-                          destructiveFiltered
-                            ? `destructive (filtered on clusterProfile='${pack.clusterProfile}')`
+                          hpocOnlyFiltered
+                            ? `hpoc-only (filtered on clusterProfile='${pack.clusterProfile}')`
                             : null,
                           s.requires.length ? `requires: ${s.requires.join(', ')}` : null,
                           !s.active ? 'inactive' : null,

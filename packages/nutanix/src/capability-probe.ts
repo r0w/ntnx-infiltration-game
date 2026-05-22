@@ -1,4 +1,5 @@
 import type { CapabilityFlag, Logger, NutanixClient } from '@ntnx-game/engine';
+import { discoverableNodeSerials } from '@ntnx-game/engine';
 import { NutanixTransportError } from './errors';
 
 export interface CapabilityProbeDetail {
@@ -42,6 +43,15 @@ type SingleProbe = {
   method: string;
   path: string;
   interpret: (body: unknown) => { detected: boolean; detail: string };
+  /**
+   * Optional override that runs a multi-call sequence instead of the
+   * default single {method, path} request. When set, the probe runner
+   * calls this instead of `nutanix.request(method, path)` + `interpret`.
+   * `method`/`path` are still reported for telemetry. Used by NodeRemove
+   * which needs the async discover-unconfigured-nodes flow (POST + task
+   * poll + GET response).
+   */
+  customRun?: (nutanix: NutanixClient, logger: Logger) => Promise<{ detected: boolean; detail: string }>;
 };
 
 const PROBES: SingleProbe[] = [
@@ -76,7 +86,63 @@ const PROBES: SingleProbe[] = [
     },
   },
   {
+    // NodeRemove gates stage 28 (`expand-cluster`). Two criteria must
+    // hold to allow it:
+    //   1. cluster has ≥2 nodes (otherwise no peer to expand FROM)
+    //   2. ≥1 rackmounted-but-unconfigured node is discoverable
+    //      (otherwise there's nothing to add — the player would submit
+    //      a serial that CheckNewNode would reject).
+    // Criterion 2 catches the full-chassis case (current 4-node cluster
+    // with no spare slot, e.g. 10.38.66.7 in `other` mode where the BP
+    // never freed a slot via Remove 4th host) — the previous probe wrongly
+    // said detected=true on those because it only counted nodes.
+    //
+    // `customRun` (instead of the default single-call shape) is needed
+    // because criterion 2 requires the async discover-unconfigured-nodes
+    // task (POST + poll + GET response). `discoverableNodeSerials` from
+    // engine already implements the dance with a mock short-circuit, so
+    // we just intersect its result with the node-count check.
     flag: 'NodeRemove',
+    method: 'CUSTOM',
+    path: 'clusters + discover-unconfigured-nodes',
+    interpret: () => ({ detected: false, detail: 'unreached — customRun should fire' }),
+    customRun: async (nutanix, logger) => {
+      const clusters = await nutanix.request<unknown>('GET', '/api/clustermgmt/v4.0/config/clusters');
+      const list = readArray(clusters, ['data']) ?? readArray(clusters, ['entities']);
+      if (!list || list.length === 0) {
+        return { detected: false, detail: 'cluster list empty or missing' };
+      }
+      const maxNodes = list.reduce<number>((acc, c) => Math.max(acc, readNodeCount(c)), 0);
+      if (maxNodes < 2) {
+        return { detected: false, detail: `largest cluster has ${maxNodes} node — below the ≥2 floor for expand-cluster` };
+      }
+      let spares: string[];
+      try {
+        spares = await discoverableNodeSerials(nutanix, logger);
+      } catch (err) {
+        // Discover endpoint or task poll failed (timeout, PC version
+        // skew, etc.). Fall back to the coarse ≥2-nodes signal — the
+        // in-game CheckNewNode will catch a player-submitted serial
+        // that doesn't match anyway. Better to allow the stage to run
+        // than to filter it on a transient API error.
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          detected: maxNodes >= 2,
+          detail: `nodes=${maxNodes}; discover failed (${truncate(msg, 100)}) — falling back to nodeCount-only`,
+        };
+      }
+      return {
+        detected: maxNodes >= 2 && spares.length >= 1,
+        detail: `nodes=${maxNodes}, discoverable spares=${spares.length}`,
+      };
+    },
+  },
+  {
+    // MultiNode = cluster has ≥2 nodes. Used by live-migrate-vm and other
+    // stages that need a peer host but DON'T need a spare chassis slot.
+    // Distinct from NodeRemove (which adds the spare requirement) so
+    // multi-node-but-full-chassis clusters can still play live-migration.
+    flag: 'MultiNode',
     method: 'GET',
     path: '/api/clustermgmt/v4.0/config/clusters',
     interpret: (body) => {
@@ -87,6 +153,26 @@ const PROBES: SingleProbe[] = [
         detected: maxNodes >= 2,
         detail: `largest cluster has ${maxNodes} node${maxNodes === 1 ? '' : 's'}`,
       };
+    },
+  },
+  {
+    // Calm policy engine activation state. Same endpoint the BP's
+    // activate_policy_engine.py PUTs against; we just read it. `is_enabled`
+    // in `spec.feature_status` is the operator-set value (sticky); the
+    // `status.feature_status` mirror lags during a deploy. We trust `spec`
+    // here — if the operator (or the BP) flipped it on, the stage should be
+    // allowed even if the Policy VM is still bootstrapping (the in-game
+    // check has its own retry logic).
+    flag: 'ApprovalPolicy',
+    method: 'GET',
+    path: '/api/calm/v3.0/features/policy',
+    interpret: (body) => {
+      const enabled =
+        readBool(body, ['spec', 'feature_status', 'is_enabled']) ??
+        readBool(body, ['status', 'feature_status', 'is_enabled']);
+      if (enabled === true) return { detected: true, detail: 'policy engine is_enabled=true' };
+      if (enabled === false) return { detected: false, detail: 'policy engine is_enabled=false' };
+      return { detected: false, detail: 'policy feature endpoint did not surface is_enabled' };
     },
   },
 ];
@@ -119,8 +205,9 @@ async function runProbe(
   const start = Date.now();
   const body = probe.method === 'POST' ? {} : undefined;
   try {
-    const res = await nutanix.request(probe.method, probe.path, body);
-    const { detected, detail } = probe.interpret(res);
+    const { detected, detail } = probe.customRun
+      ? await probe.customRun(nutanix, logger)
+      : probe.interpret(await nutanix.request(probe.method, probe.path, body));
     return {
       flag: probe.flag,
       detected,

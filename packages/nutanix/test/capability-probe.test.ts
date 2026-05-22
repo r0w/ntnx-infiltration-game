@@ -18,6 +18,16 @@ const ALL_OK = {
   'GET /api/clustermgmt/v4.0/config/clusters': {
     data: [{ extId: 'c1', config: { numberOfNodes: 4 } }],
   },
+  // NodeRemove probe (tightened) calls discoverableNodeSerials, which in
+  // mock mode short-circuits to this task-response endpoint. ALL_OK
+  // returns 1 spare so the probe reports NodeRemove detected on the
+  // happy path; tests that need "no spare" override this entry.
+  'GET /api/clustermgmt/v4.2/config/task-response/mock-discover-task?taskResponseType=UNCONFIGURED_NODES': {
+    data: { response: { nodeList: [{ rackableUnitSerial: 'TEST-SPARE-1' }] } },
+  },
+  'GET /api/calm/v3.0/features/policy': {
+    spec: { feature_status: { is_enabled: true } },
+  },
 };
 
 function brokenClient(): NutanixClient {
@@ -36,15 +46,22 @@ function mkSyscallErr(code: string): Error & { code: string } {
 }
 
 describe('probeCapabilities', () => {
-  test('detects all four capabilities when every endpoint responds healthily', async () => {
+  test('detects all six capabilities when every endpoint responds healthily', async () => {
     const client = createMockAdapter(ALL_OK);
     const r = await probeCapabilities({ nutanix: client, logger: silentLogger });
-    expect(r.flags.sort()).toEqual(['CalmDSL', 'IO', 'NCM', 'NodeRemove']);
-    expect(r.details).toHaveLength(4);
+    expect(r.flags.sort()).toEqual([
+      'ApprovalPolicy',
+      'CalmDSL',
+      'IO',
+      'MultiNode',
+      'NCM',
+      'NodeRemove',
+    ]);
+    expect(r.details).toHaveLength(6);
     for (const d of r.details) expect(d.detected).toBe(true);
   });
 
-  test('single-node cluster does not enable NodeRemove', async () => {
+  test('single-node cluster does not enable NodeRemove or MultiNode', async () => {
     const client = createMockAdapter({
       ...ALL_OK,
       'GET /api/clustermgmt/v4.0/config/clusters': {
@@ -53,8 +70,24 @@ describe('probeCapabilities', () => {
     });
     const r = await probeCapabilities({ nutanix: client, logger: silentLogger });
     expect(r.flags).not.toContain('NodeRemove');
+    expect(r.flags).not.toContain('MultiNode');
     const nr = r.details.find((d) => d.flag === 'NodeRemove')!;
     expect(nr.detail).toContain('1 node');
+    const mn = r.details.find((d) => d.flag === 'MultiNode')!;
+    expect(mn.detail).toContain('1 node');
+  });
+
+  test('explicitly is_enabled=false on policy feature is reported as not detected', async () => {
+    const client = createMockAdapter({
+      ...ALL_OK,
+      'GET /api/calm/v3.0/features/policy': {
+        spec: { feature_status: { is_enabled: false } },
+      },
+    });
+    const r = await probeCapabilities({ nutanix: client, logger: silentLogger });
+    expect(r.flags).not.toContain('ApprovalPolicy');
+    const ap = r.details.find((d) => d.flag === 'ApprovalPolicy')!;
+    expect(ap.detail).toContain('is_enabled=false');
   });
 
   test('explicitly unlicensed IO is reported as not detected', async () => {
@@ -80,7 +113,7 @@ describe('probeCapabilities', () => {
   test('fully unreachable cluster yields zero capabilities, never throws', async () => {
     const r = await probeCapabilities({ nutanix: brokenClient(), logger: silentLogger });
     expect(r.flags).toEqual([]);
-    expect(r.details).toHaveLength(4);
+    expect(r.details).toHaveLength(6);
     for (const d of r.details) {
       expect(d.detected).toBe(false);
       expect(d.detail).toMatch(/probe error/);
@@ -143,7 +176,25 @@ describe('probeCapabilities', () => {
     });
     const r = await probeCapabilities({ nutanix: client, logger: silentLogger });
     expect(r.flags).toContain('NodeRemove');
+    expect(r.flags).toContain('MultiNode');
     const nr = r.details.find((d) => d.flag === 'NodeRemove')!;
-    expect(nr.detail).toContain('3 nodes');
+    expect(nr.detail).toContain('nodes=3');
+  });
+
+  test('multi-node cluster with no discoverable spare does NOT enable NodeRemove (but keeps MultiNode)', async () => {
+    // Full-chassis case (e.g. 10.38.66.7 in `other` mode without BP node
+    // shrink): 4 nodes is enough for live-migrate (MultiNode), but
+    // expand-cluster (NodeRemove) requires a spare to attach.
+    const client = createMockAdapter({
+      ...ALL_OK,
+      'GET /api/clustermgmt/v4.2/config/task-response/mock-discover-task?taskResponseType=UNCONFIGURED_NODES': {
+        data: { response: { nodeList: [] } },
+      },
+    });
+    const r = await probeCapabilities({ nutanix: client, logger: silentLogger });
+    expect(r.flags).not.toContain('NodeRemove');
+    expect(r.flags).toContain('MultiNode');
+    const nr = r.details.find((d) => d.flag === 'NodeRemove')!;
+    expect(nr.detail).toContain('discoverable spares=0');
   });
 });

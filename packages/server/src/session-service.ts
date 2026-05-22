@@ -35,6 +35,19 @@ import {
   variablesForSession,
 } from './runtime';
 
+/**
+ * Secondary-PC ("Planner") config is persisted in cluster_config (admin-
+ * editable) and projected at session-create into per-session variables
+ * + the PlannerCluster capability flag. Mapping kept local — only this
+ * file consumes both ends. Order matters: PlannerCluster is added iff
+ * EVERY one of these keys is non-empty.
+ */
+export const PLANNER_VAR_KEYS = [
+  { key: 'old_pc', name: 'OldPC' },
+  { key: 'old_pc_username', name: 'OldPCUsername' },
+  { key: 'old_pc_password', name: 'OldPCPassword' },
+] as const;
+
 export interface SessionServiceDeps {
   db: Database;
   runner: StageRunner;
@@ -282,6 +295,17 @@ export class SessionService {
    */
   create(input: CreateSessionInput): SessionRecord {
     const id = crypto.randomUUID();
+    // Merge boot-probed caps (input.capabilities) with config-driven
+    // ones that can flip at runtime via /admin (currently only
+    // PlannerCluster — gated on the secondary-PC creds being saved
+    // in cluster_config). Computed at create-time so an operator
+    // saving the Planner password mid-event applies to fresh
+    // sessions immediately (already-started sessions keep their
+    // baked-in disabledStages — re-runs would need a re-create).
+    const dynamicCaps = this.computeDynamicCapabilities();
+    const mergedCaps = Array.from(
+      new Set<CapabilityFlag>([...input.capabilities, ...dynamicCaps]),
+    );
     const record = this.sessions.create({
       id,
       trigram: id,
@@ -291,8 +315,18 @@ export class SessionService {
       locale: input.locale ?? 'en',
       clusterEndpoint: input.clusterEndpoint,
       clusterProfile: input.clusterProfile,
-      capabilities: input.capabilities,
+      capabilities: mergedCaps,
     });
+    // Override OldPC* session vars from cluster_config so subsequent
+    // edits via /admin → cluster propagate. Falls back silently to
+    // initialVariables when cluster_config holds no row (= no admin
+    // edit AND no env seed at boot).
+    for (const { key, name } of PLANNER_VAR_KEYS) {
+      const v = this.clusterConfig.get<string>(key);
+      if (typeof v === 'string' && v.length > 0) {
+        this.variables.upsert(id, name, v, 'session-init');
+      }
+    }
     // Per-session randomized Vlanid — mirrors the original Python game's
     // `main.py` (`Vlanid: str(random.randrange(250))`). Without this two
     // concurrent players collide on the same VLAN ID and AHV refuses the
@@ -305,6 +339,70 @@ export class SessionService {
       this.variables.upsert(id, 'Vlanid', randVlan, 'session-init');
     }
     return record;
+  }
+
+  /**
+   * Config-driven capabilities computed at create()-time. Currently only
+   * PlannerCluster: present when all three OldPC vars are saved in
+   * cluster_config. Live read so admin edits via /admin → cluster
+   * propagate to subsequent sessions without a server restart.
+   * Public so the admin /pack route can mirror the gate decision when
+   * rendering the "skipped (needs …)" badges — without this, the table
+   * would only reflect boot-time caps and stay stale after an admin
+   * edits the Planner config.
+   */
+  computeDynamicCapabilities(): CapabilityFlag[] {
+    const allSet = PLANNER_VAR_KEYS.every(({ key }) => {
+      const v = this.clusterConfig.get<string>(key);
+      return typeof v === 'string' && v.length > 0;
+    });
+    return allSet ? ['PlannerCluster'] : [];
+  }
+
+  /**
+   * How many stages will a fresh session on this cluster *actually* play?
+   *
+   * Used as the score denominator in `/admin → users` (cell "Progress")
+   * and `/scoreboard` (percentage). Without this, both views divided by
+   * the raw pack length (39), so a player on a cluster where 3 stages
+   * are filtered for cluster reasons (e.g. no Policy Engine + no spare
+   * chassis slot) would top out at 36/39 ≈ 92% even after legitimately
+   * passing everything they could.
+   *
+   * The pre-existing per-session `stagesDisabled` counter only grows
+   * when the engine actually walks past a gated stage during `advance()`
+   * — for in-progress sessions, all FUTURE disabled stages still count
+   * against the player. This method shortcuts that by simulating the
+   * gate against current cluster state for every pack stage:
+   *
+   *   - excludes `active: false` (operator overlay or pack-default off)
+   *   - excludes `requires` not in caps (always)
+   *   - excludes `requiresOnOther` not in caps when profile=other
+   *   - excludes `impact: hpoc-only` when profile=other
+   *   - INCLUDES `adminGate: true` (operator can unlock; counts as
+   *     reachable)
+   *   - INCLUDES `needs`-broken (dynamic per-session; not a cluster fact)
+   *
+   * Merging boot-probed caps with `computeDynamicCapabilities()` here
+   * mirrors `create()` exactly, so admin edits via /admin → cluster
+   * propagate to the denominator on the next render.
+   */
+  effectivePlayableCount(
+    bootCaps: readonly CapabilityFlag[],
+    profile: ClusterProfile,
+  ): number {
+    const caps = new Set<CapabilityFlag>([...bootCaps, ...this.computeDynamicCapabilities()]);
+    let count = 0;
+    for (const s of this.runner.listStages()) {
+      if (!s.active) continue;
+      const required = profile === 'other'
+        ? [...(s.requires ?? []), ...(s.requiresOnOther ?? [])]
+        : (s.requires ?? []);
+      if (required.some((c) => !caps.has(c))) continue;
+      if (s.impact === 'hpoc-only' && profile === 'other') continue;
+      count++;
+    }
+    return count;
   }
 
   getSession(id: string): SessionRecord {
@@ -452,10 +550,10 @@ export class SessionService {
     const interpolated = withVariableInterpolation(this.nutanix, () => vars.snapshot());
     const nutanix = withMockOverlay(interpolated, () => overlay.list());
     // Snapshot the cluster_config table once per check call. Two rows
-    // max (rackable_unit_serials, lcm_available_updates), so two cheap
+    // max (discoverable_node_serials, lcm_available_updates), so two cheap
     // SQLite reads — fine to do per check, no need for an in-memory
     // cache that would have to invalidate on /admin edits.
-    const rackable = this.clusterConfig.get<unknown>('rackable_unit_serials');
+    const discoverable = this.clusterConfig.get<unknown>('discoverable_node_serials');
     const lcm = this.clusterConfig.get<unknown>('lcm_available_updates');
     return {
       nutanix,
@@ -471,8 +569,8 @@ export class SessionService {
       logger: this.logger,
       sessionDirectory: this.sessionDirectory,
       clusterConfig: {
-        rackableUnitSerials: Array.isArray(rackable)
-          ? (rackable.filter((s) => typeof s === 'string') as string[])
+        discoverableNodeSerials: Array.isArray(discoverable)
+          ? (discoverable.filter((s) => typeof s === 'string') as string[])
           : undefined,
         lcmAvailableUpdates: typeof lcm === 'number' ? lcm : undefined,
       },
@@ -1024,7 +1122,7 @@ function formatDisableReason(
     case 'missing-capability':
       return `missing capability: ${verdict.missing.join(', ') || '(unspecified)'}`;
     case 'destructive-on-other':
-      return 'destructive on shared cluster';
+      return 'hpoc-only stage on shared cluster';
     case 'missing-upstream':
       return `missing upstream vars: ${verdict.missingVars.join(', ') || '(unspecified)'}`;
   }

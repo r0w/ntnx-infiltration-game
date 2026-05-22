@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   api,
   type AdminClusterConfigPayload,
+  type AdminClusterStatusPayload,
   type AdminGateEntry,
   type AdminLunchStatus,
   type AdminPackStageEntry,
   type AdminPackTogglePreview,
+  type AdminPeerEntry,
   type AdminUserEntry,
 } from './api';
 import { ConfirmModal } from './Modal';
 
-type AdminTab = 'users' | 'pack' | 'cluster';
+type AdminTab = 'users' | 'pack' | 'cluster' | 'scoreboard';
 
 const STORAGE_KEY = 'ntnx-infiltration-admin-pw';
 
@@ -90,8 +92,10 @@ function AdminLogin({ onLoggedIn }: { onLoggedIn: (pw: string) => void }) {
             />
           </label>
           {error && <div className="login-error">{error}</div>}
-          <button type="submit" disabled={busy || !input}>
-            {busy ? 'Checking…' : 'Unlock'}
+          <button type="submit" className="login-submit" disabled={busy || !input}>
+            <span className="login-submit-prompt" aria-hidden>&gt;</span>
+            <span className="login-submit-cmd">{busy ? 'checking' : 'unlock'}</span>
+            <span className="login-submit-cursor" aria-hidden>▌</span>
           </button>
         </form>
         <p className="admin-back-link">
@@ -109,7 +113,15 @@ function AdminDashboard({
   password: string;
   onLogout: () => void;
 }) {
-  const [tab, setTab] = useState<AdminTab>('users');
+  // Tab persisted in the URL so a hard refresh / shared link lands on
+  // the right section. Unknown / missing → users (safe default).
+  const navigate = useNavigate();
+  const { tab: tabParam } = useParams<{ tab?: string }>();
+  const VALID_TABS = ['users', 'pack', 'cluster', 'scoreboard'] as const;
+  const tab: AdminTab = (VALID_TABS as readonly string[]).includes(tabParam ?? '')
+    ? (tabParam as AdminTab)
+    : 'users';
+  const setTab = (next: AdminTab) => navigate(`/admin/${next}`);
   const [entries, setEntries] = useState<AdminUserEntry[] | null>(null);
   const [gates, setGates] = useState<AdminGateEntry[] | null>(null);
   const [lunch, setLunch] = useState<AdminLunchStatus | null>(null);
@@ -118,7 +130,7 @@ function AdminDashboard({
   const [packBrokenCount, setPackBrokenCount] = useState(0);
   const [packMeta, setPackMeta] = useState<{
     clusterProfile: 'hpoc' | 'other';
-    mode: 'mock' | 'live';
+    mode: 'mock' | 'test' | 'live';
   } | null>(null);
   const [gateBusyId, setGateBusyId] = useState<string | null>(null);
   const [packBusyId, setPackBusyId] = useState<string | null>(null);
@@ -129,6 +141,10 @@ function AdminDashboard({
   const [error, setError] = useState<string | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<AdminUserEntry | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Admin escape hatch — bump a stuck player past their current stage.
+  // Separate confirm dialog so a misclick can't bypass a player by accident.
+  const [skipTarget, setSkipTarget] = useState<AdminUserEntry | null>(null);
+  const [skippingId, setSkippingId] = useState<string | null>(null);
   // Toggle in the delete dialog — when on AND the session has a trigram, fire
   // /seed/cleanup-all/:trigram before the row delete so PC-side resources are
   // torn down too. Always resets to false when the dialog opens (cleanup-all
@@ -139,6 +155,9 @@ function AdminDashboard({
   // delete (the operator usually has a working tab open and a misclick
   // on `logout` would force a re-auth + lose any unsaved page state).
   const [logoutPrompt, setLogoutPrompt] = useState(false);
+  const [lunchPrompt, setLunchPrompt] = useState(false);
+  const [selfLabel, setSelfLabel] = useState<string | null>(null);
+  const [hasPeers, setHasPeers] = useState(false);
   // Users tab default-hides sessions that haven't captured a trigram yet
   // (= still on the lore prelude / login). Operator can flip the toggle
   // to debug stuck pre-identity sessions. Persisted in sessionStorage so
@@ -161,11 +180,13 @@ function AdminDashboard({
 
   const refresh = useCallback(async () => {
     try {
-      const [usersPayload, gatesPayload, packPayload, lunchPayload] = await Promise.all([
+      const [usersPayload, gatesPayload, packPayload, lunchPayload, selfPayload, peersPayload] = await Promise.all([
         api.adminUsers(password),
         api.adminGates(password),
         api.adminPack(password),
         api.adminLunchStatus(password),
+        api.adminSelfLabel(password),
+        api.adminPeers(password),
       ]);
       setEntries(usersPayload.entries);
       setGates(gatesPayload.entries);
@@ -173,6 +194,8 @@ function AdminDashboard({
       setPackBrokenCount(packPayload.brokenCount);
       setPackMeta({ clusterProfile: packPayload.clusterProfile, mode: packPayload.mode });
       setLunch(lunchPayload);
+      setSelfLabel(selfPayload.label);
+      setHasPeers(peersPayload.entries.length > 0);
       setError(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -343,12 +366,37 @@ function AdminDashboard({
     }
   };
 
+  const performSkip = async (entry: AdminUserEntry) => {
+    setSkippingId(entry.sessionId);
+    try {
+      await api.adminSkipCurrentStage(password, entry.sessionId);
+      setSkipTarget(null);
+      void refresh();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`skip failed: ${msg}`);
+      setSkipTarget(null);
+    } finally {
+      setSkippingId(null);
+    }
+  };
+
 
   return (
     <div className="admin">
       <header className="admin-header">
-        <Link to="/" className="admin-back" aria-label="back to game">←</Link>
-        <h1 className="admin-title">admin</h1>
+        <div className="admin-header-id">
+          <Link to="/" className="admin-back" aria-label="back to game">←</Link>
+          <h1 className="admin-title">
+            <span className="admin-title-prompt">▎</span>admin
+            {selfLabel && (
+              <span className="admin-title-self" title="this cluster's label">
+                {' '}@ {selfLabel}
+              </span>
+            )}
+          </h1>
+        </div>
+
         <nav className="admin-tabs" role="tablist">
           <button
             type="button"
@@ -382,37 +430,76 @@ function AdminDashboard({
           >
             cluster
           </button>
-        </nav>
-        {lunch && (
           <button
             type="button"
-            className={`admin-lunch-btn ${lunch.paused ? 'admin-lunch-btn-active' : ''}`}
-            disabled={lunchBusy}
-            onClick={() => void toggleLunch()}
-            title={
-              lunch.paused
-                ? 'lift the pause — players resume on their next poll'
-                : 'pause every active session at the next stage transition'
-            }
+            role="tab"
+            aria-selected={tab === 'scoreboard'}
+            className={`admin-tab ${tab === 'scoreboard' ? 'admin-tab-active' : ''}`}
+            onClick={() => setTab('scoreboard')}
           >
-            <span className="admin-lunch-icon" aria-hidden="true">🍽</span>
-            {lunchBusy
-              ? '…'
-              : lunch.paused
-                ? `resume (${lunch.affectedCount} paused)`
-                : 'lunch lock'}
+            scoreboard
           </button>
-        )}
-        <Link to="/scoreboard" className="app-reset" target="_blank" rel="noreferrer">
-          scoreboard
-        </Link>
+        </nav>
+
         <span className="app-spacer" />
-        <button type="button" className="app-reset" onClick={() => void refresh()}>
-          refresh
-        </button>
-        <button type="button" className="app-reset" onClick={() => setLogoutPrompt(true)}>
-          logout
-        </button>
+
+        {lunch && (
+          <div className="admin-header-group admin-header-group-actions">
+            <button
+              type="button"
+              className={`admin-lunch-btn ${lunch.paused ? 'admin-lunch-btn-active' : ''}`}
+              disabled={lunchBusy}
+              onClick={() => {
+                // Lock is destructive (parks every session) → confirm.
+                // Unlock is benign (everyone resumes) → fire immediately.
+                if (lunch.paused) void toggleLunch();
+                else setLunchPrompt(true);
+              }}
+              title={
+                lunch.paused
+                  ? 'lift the pause — players resume on their next poll'
+                  : 'pause every active session at the next stage transition'
+              }
+            >
+              <span className="admin-lunch-icon" aria-hidden="true">🍽</span>
+              {lunchBusy
+                ? '…'
+                : lunch.paused
+                  ? `resume (${lunch.affectedCount} paused)`
+                  : 'lunch lock'}
+            </button>
+          </div>
+        )}
+
+        <div className="admin-header-group admin-header-group-links">
+          <Link to="/" className="admin-header-link" target="_blank" rel="noreferrer">
+            game<span className="admin-header-link-arrow" aria-hidden="true">↗</span>
+          </Link>
+          <Link to="/scoreboard" className="admin-header-link" target="_blank" rel="noreferrer">
+            scoreboard<span className="admin-header-link-arrow" aria-hidden="true">↗</span>
+          </Link>
+          {hasPeers && (
+            <Link
+              to="/scoreboard?combined=1"
+              className="admin-header-link"
+              target="_blank"
+              rel="noreferrer"
+            >
+              combined<span className="admin-header-link-arrow" aria-hidden="true">↗</span>
+            </Link>
+          )}
+        </div>
+
+        <div className="admin-header-group admin-header-group-utility">
+          <button
+            type="button"
+            className="admin-header-util"
+            onClick={() => setLogoutPrompt(true)}
+            title="clear stashed admin password"
+          >
+            logout
+          </button>
+        </div>
       </header>
       {lunch?.paused && (
         <div className="admin-lunch-strip" role="status">
@@ -567,14 +654,44 @@ function AdminDashboard({
                       e.nextStageName ?? <span className="c-dim">pre-game</span>
                     )}
                   </td>
-                  <td>
-                    {e.stagesPassed} / {e.totalStages}
+                  <td title={
+                    e.effectiveTotalStages < e.totalStages
+                      ? `${e.stagesPassed} passed / ${e.effectiveTotalStages} reachable on this cluster (${e.totalStages - e.effectiveTotalStages} filtered) — raw pack total: ${e.totalStages}`
+                      : `${e.stagesPassed} passed / ${e.totalStages} total`
+                  }>
+                    {e.stagesPassed} / {e.effectiveTotalStages}
                   </td>
                   <td className="c-dim">{fmtAge(e.startedAt)}</td>
                   <td className="admin-td-sid c-dim" title={e.sessionId}>
                     {e.sessionId.slice(0, 8)}
                   </td>
                   <td>
+                    <button
+                      type="button"
+                      className="admin-skip"
+                      disabled={
+                        skippingId === e.sessionId ||
+                        e.finishedAt !== null ||
+                        e.nextStageName === null
+                      }
+                      onClick={() => setSkipTarget(e)}
+                      title={
+                        e.finishedAt !== null
+                          ? 'session already finished'
+                          : e.nextStageName === null
+                            ? 'no next stage to skip'
+                            : `skip stage '${e.nextStageName}' — player moves to the one after`
+                      }
+                    >
+                      {skippingId === e.sessionId ? (
+                        <>
+                          <span className="modal-spinner" aria-hidden="true" />
+                          skipping…
+                        </>
+                      ) : (
+                        'skip stage'
+                      )}
+                    </button>
                     <button
                       type="button"
                       className="admin-delete"
@@ -618,14 +735,16 @@ function AdminDashboard({
         />
       )}
       {tab === 'cluster' && <ClusterConfigEditor password={password} />}
+      {tab === 'scoreboard' && <PeersEditor password={password} />}
       {packDisableTarget && (
         <ConfirmModal
           title={<><span className="c-yellow">!</span> disable stage?</>}
           danger
           busy={packBusyId === packDisableTarget.stage.stageName}
           confirmLabel={`disable + cascade (${packDisableTarget.preview.cascade.length})`}
-          cancelLabel="just this one"
-          onCancel={() => void confirmDisable(false)}
+          secondaryLabel="just this one"
+          onCancel={() => setPackDisableTarget(null)}
+          onSecondary={() => void confirmDisable(false)}
           onConfirm={() => void confirmDisable(true)}
         >
           <p>
@@ -644,10 +763,11 @@ function AdminDashboard({
             ))}
           </ul>
           <p className="c-dim modal-cascade-hint">
-            <strong>cancel</strong> = disable only this stage (downstream stages
-            stay on but will surface "missing-upstream" at runtime).{' '}
-            <strong>confirm</strong> = also disable the {packDisableTarget.preview.cascade.length}{' '}
-            cascade stage(s).
+            <strong>just this one</strong> = disable only this stage (downstream
+            stages stay on but will surface "missing-upstream" at runtime).{' '}
+            <strong>disable + cascade</strong> = also disable the{' '}
+            {packDisableTarget.preview.cascade.length} cascade stage(s).{' '}
+            <strong>cancel</strong> = close without changing anything.
           </p>
         </ConfirmModal>
       )}
@@ -706,6 +826,44 @@ function AdminDashboard({
           </label>
         </ConfirmModal>
       )}
+      {skipTarget && (
+        <ConfirmModal
+          title={<><span className="c-yellow">!</span> skip current stage?</>}
+          busy={skippingId === skipTarget.sessionId}
+          confirmLabel={
+            skippingId === skipTarget.sessionId ? (
+              <>
+                <span className="modal-spinner" aria-hidden="true" />
+                skipping…
+              </>
+            ) : (
+              `skip '${skipTarget.nextStageName}'`
+            )
+          }
+          onCancel={() => setSkipTarget(null)}
+          onConfirm={() => void performSkip(skipTarget)}
+        >
+          <dl className="modal-meta">
+            <dt>agent</dt>
+            <dd>{skipTarget.username ?? <span className="c-dim">—</span>}</dd>
+            <dt>trigram</dt>
+            <dd className="modal-trigram">{skipTarget.trigram ?? <span className="c-dim">—</span>}</dd>
+            <dt>stage to skip</dt>
+            <dd className="modal-trigram">{skipTarget.nextStageName}</dd>
+          </dl>
+          <p className="modal-warn">
+            moves the player past this stage without playing it. The stage is{' '}
+            <span className="c-yellow">not counted in the score</span> (no{' '}
+            <code>passed</code> history row written). Use when the stage is
+            unwinnable on this cluster (broken API, missing capability,
+            narrative blocker, …).
+          </p>
+          <p className="c-dim">
+            Player must reload their browser tab (or take their next action) to
+            pick up the new position.
+          </p>
+        </ConfirmModal>
+      )}
       {logoutPrompt && (
         <ConfirmModal
           title={<><span className="c-yellow">!</span> log out?</>}
@@ -718,10 +876,27 @@ function AdminDashboard({
             onLogout();
           }}
         >
+          <p>You'll need to re-enter the admin password to come back.</p>
+        </ConfirmModal>
+      )}
+      {lunchPrompt && lunch && (
+        <ConfirmModal
+          title={<><span className="c-yellow">🍽</span> lock the room?</>}
+          danger
+          busy={lunchBusy}
+          confirmLabel={lunchBusy ? '…' : 'lock'}
+          cancelLabel="cancel"
+          onCancel={() => setLunchPrompt(false)}
+          onConfirm={async () => {
+            await toggleLunch();
+            setLunchPrompt(false);
+          }}
+        >
           <p>
-            You'll need to re-enter the admin password to come back. The
-            operator state (lunch lock, gate unlocks, pack overrides) stays
-            on the server — this only locks the local UI.
+            Every active session will be parked at the next stage transition.
+            Players can still finish their current stage; only the move to
+            the next stage is blocked. Use this for a lunch break or a
+            room-wide theory recap.
           </p>
         </ConfirmModal>
       )}
@@ -737,7 +912,7 @@ function PackEditor({
   onRequestDisable,
 }: {
   stages: AdminPackStageEntry[] | null;
-  meta: { clusterProfile: 'hpoc' | 'other'; mode: 'mock' | 'live' } | null;
+  meta: { clusterProfile: 'hpoc' | 'other'; mode: 'mock' | 'test' | 'live' } | null;
   busyId: string | null;
   onTogglePackField: (
     s: AdminPackStageEntry,
@@ -748,23 +923,23 @@ function PackEditor({
 }) {
   if (stages === null) return <div className="admin-empty">loading pack…</div>;
   if (stages.length === 0) return <div className="admin-empty">empty pack.</div>;
-  // A stage is filtered at session-creation time when it's destructive AND
-  // the runtime cluster profile is `other`. In mock mode the destructive
+  // A stage is filtered at session-creation time when it's hpoc-only AND
+  // the runtime cluster profile is `other`. In mock mode the hpoc-only
   // gate is bypassed (cluster profile forced to `hpoc` at boot), so don't
   // mark anything filtered there — operator would otherwise wonder why the
   // tag is on stages that all play through.
-  const filtersDestructive = meta !== null && meta.clusterProfile === 'other';
+  const filtersHpocOnly = meta !== null && meta.clusterProfile === 'other';
   return (
     <div className="admin-table-wrap">
       {meta && (
         <div className="admin-pack-meta c-dim">
-          mode: <span className={meta.mode === 'mock' ? 'c-yellow' : 'c-green'}>{meta.mode}</span>
+          mode: <span className={meta.mode === 'mock' ? 'c-yellow' : meta.mode === 'test' ? 'c-cyan' : 'c-green'}>{meta.mode}</span>
           {' · '}
           clusterProfile: <span className={meta.clusterProfile === 'hpoc' ? 'c-green' : 'c-yellow'}>{meta.clusterProfile}</span>
-          {filtersDestructive && (
+          {filtersHpocOnly && (
             <>
               {' · '}
-              <span className="c-yellow">destructive stages skipped at session start</span>
+              <span className="c-yellow">hpoc-only stages skipped at session start</span>
             </>
           )}
         </div>
@@ -786,19 +961,21 @@ function PackEditor({
           {stages.map((s, idx) => {
             const broken = s.brokenMissingVars.length > 0;
             const inactive = !s.active;
-            const destructiveSkipped = filtersDestructive && s.impact === 'destructive';
+            const hpocOnlySkipped = filtersHpocOnly && s.impact === 'hpoc-only';
+            const capsMissing = s.missingCapabilities.length > 0;
             const busy = busyId === s.stageName;
+            const rowSkipped = hpocOnlySkipped || capsMissing;
             return (
               <tr
                 key={s.stageName}
-                className={`pack-row ${inactive ? 'pack-row-off' : ''} ${broken ? 'pack-row-broken' : ''} ${destructiveSkipped ? 'pack-row-skipped' : ''}`}
+                className={`pack-row ${inactive ? 'pack-row-off' : ''} ${broken ? 'pack-row-broken' : ''} ${rowSkipped ? 'pack-row-skipped' : ''}`}
               >
                 <td className="pack-td-id c-dim">{idx + 1}</td>
                 <td className="pack-td-name">{s.stageName}</td>
                 <td>
-                  {s.impact === 'destructive' ? (
-                    <span className="c-yellow" title="impact='destructive' in pack JSON; filtered when clusterProfile === 'other'">
-                      destructive
+                  {s.impact === 'hpoc-only' ? (
+                    <span className="c-yellow" title="impact='hpoc-only' in pack JSON; filtered when clusterProfile === 'other'">
+                      hpoc-only
                     </span>
                   ) : (
                     <span className="c-dim">safe</span>
@@ -807,11 +984,13 @@ function PackEditor({
                 <td>
                   <button
                     type="button"
-                    className={`pack-toggle ${s.active ? 'pack-toggle-on' : 'pack-toggle-off'} ${destructiveSkipped ? 'pack-toggle-filtered' : ''}`}
+                    className={`pack-toggle ${s.active ? 'pack-toggle-on' : 'pack-toggle-off'} ${(hpocOnlySkipped || capsMissing) ? 'pack-toggle-filtered' : ''}`}
                     disabled={busy}
                     title={
-                      destructiveSkipped
-                        ? `active in pack (JSON default), but engine filters this stage for sessions with clusterProfile='${meta?.clusterProfile}' because impact='destructive'`
+                      capsMissing
+                        ? `active in pack but engine will skip — caps not detected on this cluster: ${s.missingCapabilities.join(', ')}`
+                        : hpocOnlySkipped
+                        ? `active in pack (JSON default), but engine filters this stage for sessions with clusterProfile='${meta?.clusterProfile}' because impact='hpoc-only'`
                         : (s.activeOverridden ? 'overridden by operator (click to flip)' : 'using JSON default')
                     }
                     onClick={() =>
@@ -846,10 +1025,26 @@ function PackEditor({
                       broken: {s.brokenMissingVars.join(', ')}
                     </span>
                   ) : inactive ? (
-                    <span className="c-dim">disabled</span>
-                  ) : destructiveSkipped ? (
-                    <span className="c-yellow" title="destructive impact + clusterProfile='other' → engine skips this stage at session-create">
-                      skipped (destructive)
+                    <span
+                      className="c-dim"
+                      title={
+                        s.activeOverridden
+                          ? 'turned off via the admin pack toggle (click the on/off button to flip back)'
+                          : 'inactive in pack JSON (active: false in the stage file)'
+                      }
+                    >
+                      disabled ({s.activeOverridden ? 'operator override' : 'off in pack'})
+                    </span>
+                  ) : capsMissing ? (
+                    <span
+                      className="c-yellow"
+                      title={`engine will skip — caps not detected on this cluster: ${s.missingCapabilities.join(', ')}`}
+                    >
+                      skipped (needs {s.missingCapabilities.join(', ')})
+                    </span>
+                  ) : hpocOnlySkipped ? (
+                    <span className="c-yellow" title="impact='hpoc-only' + clusterProfile='other' → engine skips this stage at session-create">
+                      skipped (hpoc-only)
                     </span>
                   ) : (
                     <span className="c-green">ok</span>
@@ -886,7 +1081,7 @@ function ClusterConfigEditor({ password }: { password: string }) {
 
   const hydrate = useCallback((p: AdminClusterConfigPayload) => {
     setData(p);
-    setSerialsText(p.rackableUnitSerials.join('\n'));
+    setSerialsText(p.discoverableNodeSerials.join('\n'));
     setLcmText(p.lcmAvailableUpdates === null ? '' : String(p.lcmAvailableUpdates));
   }, []);
 
@@ -920,7 +1115,7 @@ function ClusterConfigEditor({ password }: { password: string }) {
         throw new Error('LCM updates must be a non-negative integer (or empty to clear)');
       }
       const p = await api.adminClusterConfigSave(password, {
-        rackableUnitSerials: serials,
+        discoverableNodeSerials: serials,
         lcmAvailableUpdates: lcm,
       });
       hydrate(p);
@@ -950,75 +1145,301 @@ function ClusterConfigEditor({ password }: { password: string }) {
     return <div className="admin-empty">loading cluster config…</div>;
   }
   return (
-    <div className="admin-cluster">
+    <div className="admin-cluster admin-cluster-grid">
+      <div className="admin-cluster-col">
+        <IntelligentOpsStatus password={password} />
+        <PolicyEngineStatus password={password} />
+        <PlannerConfigEditor password={password} />
+      </div>
+      <div className="admin-cluster-col">
+        <p className="admin-cluster-intro">
+          <strong>Cached cluster snapshot</strong> · pre-loaded at boot to skip
+          the slow discover-unconfigured-nodes / LCM-inventory queries inside
+          checks. Operator edits are sticky (the boot probe never overwrites them).
+        </p>
+        {error && <div className="app-error">{error}</div>}
+        <div className="admin-cluster-section">
+          <label className="admin-cluster-label">
+            discoverable node serials (expand candidates)
+            {data?.meta.discoverableNodeSerials && (
+              <span className="c-dim">
+                {' · '}
+                <span className={`admin-cluster-source-${data.meta.discoverableNodeSerials.source}`}>
+                  {data.meta.discoverableNodeSerials.source}
+                </span>
+                {' · '}
+                {fmtAge(data.meta.discoverableNodeSerials.updatedAt)}
+              </span>
+            )}
+          </label>
+          <textarea
+            className="admin-cluster-textarea"
+            value={serialsText}
+            onChange={(e) => setSerialsText(e.target.value)}
+            rows={Math.max(3, serialsText.split('\n').length)}
+            placeholder="one serial per line — only nodes NOT in the cluster (i.e. expand-cluster candidates)"
+            spellCheck={false}
+          />
+        </div>
+        <div className="admin-cluster-section">
+          <label className="admin-cluster-label">
+            LCM available updates count
+            {data?.meta.lcmAvailableUpdates && (
+              <span className="c-dim">
+                {' · '}
+                <span className={`admin-cluster-source-${data.meta.lcmAvailableUpdates.source}`}>
+                  {data.meta.lcmAvailableUpdates.source}
+                </span>
+                {' · '}
+                {fmtAge(data.meta.lcmAvailableUpdates.updatedAt)}
+              </span>
+            )}
+          </label>
+          <input
+            type="number"
+            min={0}
+            step={1}
+            className="admin-cluster-input"
+            value={lcmText}
+            onChange={(e) => setLcmText(e.target.value)}
+            placeholder="leave empty to clear (falls back to live query)"
+          />
+        </div>
+        <div className="admin-cluster-actions">
+          <button
+            type="button"
+            className="app-reset"
+            disabled={busy !== null}
+            onClick={() => void refresh()}
+            title="re-fetch from cluster, overwriting current values"
+          >
+            {busy === 'refresh' ? 'refreshing…' : 'refresh from cluster'}
+          </button>
+          <button
+            type="button"
+            className="modal-btn modal-btn-danger"
+            disabled={busy !== null}
+            onClick={() => void save()}
+          >
+            {busy === 'save' ? 'saving…' : 'save'}
+          </button>
+          {savedAt && busy === null && (
+            <span className="c-green admin-cluster-saved">saved {fmtAge(savedAt)}</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Read-only display of Prism Central product enablement, currently scoped
+ * to Intelligent Operations. Live-fetched on every Cluster tab open — no
+ * caching because the operator clicks Enable in Prism UI and wants to see
+ * the flip without restarting the backend. There is no public API to
+ * activate IOps from the game side; we surface the state and a deep-link
+ * to the Prism activation screen so the operator's "click here" path is
+ * one hop instead of three.
+ */
+function IntelligentOpsStatus({ password }: { password: string }) {
+  const [data, setData] = useState<AdminClusterStatusPayload | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      setData(await api.adminClusterStatus(password));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [password]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (busy && !data) {
+    return <div className="admin-empty">loading cluster status…</div>;
+  }
+  if (err) {
+    return <div className="app-error">cluster status: {err}</div>;
+  }
+  if (!data) return null;
+
+  const { state, enableUrl, error } = data.intelligentOps;
+  const stateClass =
+    state === 'ENABLED' ? 'c-green' : state === 'DISABLED' ? 'c-red' : 'c-dim';
+  const stateLabel = state ?? 'unknown';
+
+  return (
+    <div className="admin-cluster-section">
+      <div className="admin-cluster-label">
+        Intelligent Operations
+        <span className="c-dim"> · live</span>
+        <button
+          type="button"
+          className="app-reset admin-cluster-iops-refresh"
+          onClick={() => void load()}
+          disabled={busy}
+          title="re-probe Prism for the current state"
+        >
+          {busy ? '…' : '↻'}
+        </button>
+      </div>
+      <div className="admin-cluster-iops">
+        state: <span className={stateClass}>{stateLabel}</span>
+        {state === 'DISABLED' && enableUrl && (
+          <>
+            {' · '}
+            <a
+              href={enableUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="admin-cluster-iops-link"
+            >
+              activate in Prism →
+            </a>
+          </>
+        )}
+        {error && <div className="c-dim admin-cluster-iops-err">{error}</div>}
+      </div>
+    </div>
+  );
+}
+
+function PlannerConfigEditor({ password }: { password: string }) {
+  const [oldPc, setOldPc] = useState('');
+  const [oldUser, setOldUser] = useState('');
+  const [oldPass, setOldPass] = useState('');
+  const [saved, setSaved] = useState<{ oldPc: string; oldPcUsername: string; oldPcPassword: string } | null>(null);
+  const [busy, setBusy] = useState<'load' | 'save' | null>('load');
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [showPass, setShowPass] = useState(false);
+
+  const load = useCallback(async () => {
+    setBusy('load');
+    setError(null);
+    try {
+      const p = await api.adminPlannerConfig(password);
+      setOldPc(p.oldPc);
+      setOldUser(p.oldPcUsername);
+      setOldPass(p.oldPcPassword);
+      setSaved(p);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }, [password]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const save = async () => {
+    setBusy('save');
+    setError(null);
+    try {
+      const p = await api.adminPlannerConfigSave(password, {
+        oldPc: oldPc.trim() || null,
+        oldPcUsername: oldUser.trim() || null,
+        oldPcPassword: oldPass.trim() || null,
+      });
+      setOldPc(p.oldPc);
+      setOldUser(p.oldPcUsername);
+      setOldPass(p.oldPcPassword);
+      setSaved(p);
+      setSavedAt(Date.now());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const allSet = oldPc.trim() && oldUser.trim() && oldPass.trim();
+  const allSaved = saved && saved.oldPc && saved.oldPcUsername && saved.oldPcPassword;
+  const dirty =
+    saved !== null &&
+    (oldPc.trim() !== saved.oldPc ||
+      oldUser.trim() !== saved.oldPcUsername ||
+      oldPass.trim() !== saved.oldPcPassword);
+
+  return (
+    <div className="admin-cluster admin-cluster-block">
       <p className="admin-cluster-intro">
-        <strong>Cached cluster snapshot</strong> · pre-loaded at boot to skip
-        the slow rackable-units / LCM-inventory queries inside checks. Operator
-        edits are sticky (the boot probe never overwrites them).
+        <strong>Planner (secondary PC)</strong> · powers stages 31
+        <span className="c-dim"> (capacity-runway)</span> + 32
+        <span className="c-dim"> (resource-optimization)</span>. When all 3
+        fields are saved, the <code>PlannerCluster</code> capability flips
+        on for <em>new</em> sessions and the stages become playable. Leave
+        empty (or clear) to auto-skip them.{' '}
+        {allSaved ? (
+          <span className="c-green">● wired</span>
+        ) : (
+          <span className="c-yellow">● not wired — stages 31/32 auto-skip</span>
+        )}
       </p>
       {error && <div className="app-error">{error}</div>}
       <div className="admin-cluster-section">
-        <label className="admin-cluster-label">
-          rackable unit serials
-          {data?.meta.rackableUnitSerials && (
-            <span className="c-dim">
-              {' · '}
-              <span className={`admin-cluster-source-${data.meta.rackableUnitSerials.source}`}>
-                {data.meta.rackableUnitSerials.source}
-              </span>
-              {' · '}
-              {fmtAge(data.meta.rackableUnitSerials.updatedAt)}
-            </span>
-          )}
-        </label>
-        <textarea
-          className="admin-cluster-textarea"
-          value={serialsText}
-          onChange={(e) => setSerialsText(e.target.value)}
-          rows={Math.max(3, serialsText.split('\n').length)}
-          placeholder="one serial per line, e.g. 18SM6H110065"
+        <label className="admin-cluster-label">Planner PC endpoint</label>
+        <input
+          type="text"
+          className="admin-cluster-input admin-planner-input"
+          placeholder="https://10.55.82.39:9440 (or bare host)"
+          value={oldPc}
+          onChange={(e) => setOldPc(e.target.value)}
+          disabled={busy !== null}
           spellCheck={false}
         />
       </div>
       <div className="admin-cluster-section">
+        <label className="admin-cluster-label">Planner username</label>
+        <input
+          type="text"
+          className="admin-cluster-input admin-planner-input"
+          placeholder="local user with read access"
+          value={oldUser}
+          onChange={(e) => setOldUser(e.target.value)}
+          disabled={busy !== null}
+          spellCheck={false}
+          autoComplete="off"
+        />
+      </div>
+      <div className="admin-cluster-section">
         <label className="admin-cluster-label">
-          LCM available updates count
-          {data?.meta.lcmAvailableUpdates && (
-            <span className="c-dim">
-              {' · '}
-              <span className={`admin-cluster-source-${data.meta.lcmAvailableUpdates.source}`}>
-                {data.meta.lcmAvailableUpdates.source}
-              </span>
-              {' · '}
-              {fmtAge(data.meta.lcmAvailableUpdates.updatedAt)}
-            </span>
-          )}
+          Planner password
+          <button
+            type="button"
+            className="admin-planner-reveal"
+            onClick={() => setShowPass((s) => !s)}
+            title={showPass ? 'hide' : 'show'}
+          >
+            {showPass ? 'hide' : 'show'}
+          </button>
         </label>
         <input
-          type="number"
-          min={0}
-          step={1}
-          className="admin-cluster-input"
-          value={lcmText}
-          onChange={(e) => setLcmText(e.target.value)}
-          placeholder="leave empty to clear (falls back to live query)"
+          type={showPass ? 'text' : 'password'}
+          className="admin-cluster-input admin-planner-input"
+          value={oldPass}
+          onChange={(e) => setOldPass(e.target.value)}
+          disabled={busy !== null}
+          spellCheck={false}
+          autoComplete="new-password"
         />
       </div>
       <div className="admin-cluster-actions">
         <button
           type="button"
-          className="app-reset"
-          disabled={busy !== null}
-          onClick={() => void refresh()}
-          title="re-fetch from cluster, overwriting current values"
-        >
-          {busy === 'refresh' ? 'refreshing…' : 'refresh from cluster'}
-        </button>
-        <button
-          type="button"
           className="modal-btn modal-btn-danger"
-          disabled={busy !== null}
+          disabled={busy !== null || !dirty}
           onClick={() => void save()}
+          title={!allSet ? 'empty fields will clear the stored value' : undefined}
         >
           {busy === 'save' ? 'saving…' : 'save'}
         </button>
@@ -1026,6 +1447,337 @@ function ClusterConfigEditor({ password }: { password: string }) {
           <span className="c-green admin-cluster-saved">saved {fmtAge(savedAt)}</span>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Operator-facing view of the Policy Engine state. Drives stage 21
+ * (`create-approval-policy`) availability on shared clusters. When the
+ * BP's `activate_policy_engine.py` couldn't bring the engine up in time
+ * (Policy VM image flaky on some AHV builds), the operator activates it
+ * manually in Prism — re-check here to flip the cap on without a server
+ * restart. Hides the underlying "capabilities probe" jargon: the
+ * operator sees one fact (enabled/disabled), one button (re-check).
+ */
+function PolicyEngineStatus({ password }: { password: string }) {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState<'load' | 'check' | null>('load');
+  const [error, setError] = useState<string | null>(null);
+  const [justFlipped, setJustFlipped] = useState<'on' | 'off' | null>(null);
+  const [checkedAt, setCheckedAt] = useState<number | null>(null);
+
+  const load = useCallback(async () => {
+    setBusy('load');
+    setError(null);
+    try {
+      const p = await api.adminCapabilities(password);
+      setEnabled(p.flags.includes('ApprovalPolicy'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }, [password]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const recheck = async () => {
+    setBusy('check');
+    setError(null);
+    try {
+      const p = await api.adminCapabilitiesRefresh(password);
+      const next = p.flags.includes('ApprovalPolicy');
+      if (enabled !== null && next !== enabled) {
+        setJustFlipped(next ? 'on' : 'off');
+        setTimeout(() => setJustFlipped(null), 1500);
+      }
+      setEnabled(next);
+      setCheckedAt(Date.now());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="admin-cluster admin-cluster-block">
+      <p className="admin-cluster-intro">
+        <strong>Policy Engine</strong> · powers stage 21
+        <span className="c-dim"> (create-approval-policy)</span> on shared
+        clusters. Activate in Prism if needed, then re-check here.
+      </p>
+      <div className="admin-cluster-iops">
+        state:{' '}
+        {enabled === null ? (
+          <span className="c-dim">checking…</span>
+        ) : enabled ? (
+          <span className={`c-green${justFlipped === 'on' ? ' admin-state-flash' : ''}`}>● enabled</span>
+        ) : (
+          <span className={`c-yellow${justFlipped === 'off' ? ' admin-state-flash' : ''}`}>● disabled</span>
+        )}
+        <button
+          type="button"
+          className="app-reset admin-cluster-iops-refresh"
+          disabled={busy !== null}
+          onClick={() => void recheck()}
+          title="re-query Prism for the current state"
+        >
+          {busy === 'check' ? '…' : '↻'}
+        </button>
+        {checkedAt && busy === null && (
+          <span className="c-dim"> · checked {fmtAge(checkedAt)}</span>
+        )}
+        {error && <div className="c-dim admin-cluster-iops-err">{error}</div>}
+      </div>
+    </div>
+  );
+}
+
+function PeersEditor({ password }: { password: string }) {
+  const [entries, setEntries] = useState<AdminPeerEntry[] | null>(null);
+  const [busy, setBusy] = useState<'load' | 'add' | 'mutate' | null>('load');
+  const [error, setError] = useState<string | null>(null);
+  const [label, setLabel] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
+  const [selfLabel, setSelfLabel] = useState<string>('');
+  const [selfLabelSaved, setSelfLabelSaved] = useState<string | null>(null);
+  const [selfBusy, setSelfBusy] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<AdminPeerEntry | null>(null);
+
+  const load = useCallback(async () => {
+    setBusy('load');
+    setError(null);
+    try {
+      const [peersPayload, selfPayload] = await Promise.all([
+        api.adminPeers(password),
+        api.adminSelfLabel(password),
+      ]);
+      setEntries(peersPayload.entries);
+      setSelfLabel(selfPayload.label ?? '');
+      setSelfLabelSaved(selfPayload.label);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }, [password]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const saveSelfLabel = async () => {
+    setSelfBusy(true);
+    setError(null);
+    try {
+      const trimmed = selfLabel.trim();
+      const p = await api.adminSelfLabelSave(password, trimmed || null);
+      setSelfLabelSaved(p.label);
+      setSelfLabel(p.label ?? '');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSelfBusy(false);
+    }
+  };
+
+  const add = async () => {
+    setBusy('add');
+    setError(null);
+    try {
+      const trimmedLabel = label.trim();
+      const trimmedUrl = baseUrl.trim();
+      if (!trimmedLabel) throw new Error('label is required');
+      if (!trimmedUrl) throw new Error('baseUrl is required');
+      await api.adminPeerAdd(password, { label: trimmedLabel, baseUrl: trimmedUrl });
+      setLabel('');
+      setBaseUrl('');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setBusy(null);
+    }
+  };
+
+  const toggle = async (peer: AdminPeerEntry) => {
+    setBusy('mutate');
+    setError(null);
+    try {
+      await api.adminPeerToggle(password, peer.id, !peer.enabled);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setBusy(null);
+    }
+  };
+
+  const confirmRemove = async () => {
+    if (!removeTarget) return;
+    setBusy('mutate');
+    setError(null);
+    try {
+      await api.adminPeerDelete(password, removeTarget.id);
+      setRemoveTarget(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setBusy(null);
+    }
+  };
+
+  if (!entries && busy === 'load') {
+    return <div className="admin-empty">loading clusters…</div>;
+  }
+
+  const selfLabelDirty = (selfLabel.trim() || null) !== selfLabelSaved;
+
+  return (
+    <div className="admin-cluster">
+      <p className="admin-cluster-intro">
+        Clusters merged into the{' '}
+        <Link to="/scoreboard?combined=1" target="_blank" rel="noreferrer">
+          combined scoreboard
+        </Link>
+        . baseUrl example: <code>http://10.55.89.44:3000</code>.
+      </p>
+      {error && <div className="app-error">{error}</div>}
+
+      <div className="admin-cluster-section">
+        <label className="admin-cluster-label">
+          this cluster's name
+          <span className="c-dim"> · shown as the cluster tag on local entries in the combined view</span>
+        </label>
+        <div className="admin-peers-add-row">
+          <input
+            type="text"
+            className="admin-cluster-input"
+            placeholder="e.g. DM3-POC037 (leave empty for no tag)"
+            value={selfLabel}
+            onChange={(e) => setSelfLabel(e.target.value)}
+            disabled={selfBusy}
+            spellCheck={false}
+          />
+          <button
+            type="button"
+            className="modal-btn modal-btn-danger"
+            disabled={selfBusy || !selfLabelDirty}
+            onClick={() => void saveSelfLabel()}
+          >
+            {selfBusy ? 'saving…' : 'save'}
+          </button>
+        </div>
+      </div>
+
+      <div className="admin-cluster-section">
+        <label className="admin-cluster-label">add cluster</label>
+        <div className="admin-peers-add-row">
+          <input
+            type="text"
+            className="admin-cluster-input"
+            placeholder="label (e.g. DM3-POC037)"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            disabled={busy !== null}
+          />
+          <input
+            type="text"
+            className="admin-cluster-input"
+            placeholder="http://10.55.89.44:3000"
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            disabled={busy !== null}
+            spellCheck={false}
+          />
+          <button
+            type="button"
+            className="modal-btn modal-btn-danger"
+            disabled={busy !== null}
+            onClick={() => void add()}
+          >
+            {busy === 'add' ? 'adding…' : 'add'}
+          </button>
+        </div>
+      </div>
+
+      <div className="admin-cluster-section">
+        <label className="admin-cluster-label">configured clusters ({entries?.length ?? 0})</label>
+        {entries && entries.length === 0 ? (
+          <div className="c-dim">no clusters configured — combined view shows only this cluster.</div>
+        ) : (
+          <div className="admin-table-wrap">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Label</th>
+                  <th>baseUrl</th>
+                  <th>Added</th>
+                  <th>Enabled</th>
+                  <th aria-label="actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {entries?.map((p) => (
+                  <tr key={p.id}>
+                    <td className="admin-td-trigram">{p.label}</td>
+                    <td className="c-dim">{p.baseUrl}</td>
+                    <td className="c-dim">{fmtAge(p.addedAt)}</td>
+                    <td>
+                      <label className="modal-toggle" title="disabled clusters are skipped on combined fan-out">
+                        <input
+                          type="checkbox"
+                          checked={p.enabled}
+                          disabled={busy !== null}
+                          onChange={() => void toggle(p)}
+                        />
+                        <span>{p.enabled ? <span className="c-green">on</span> : <span className="c-dim">off</span>}</span>
+                      </label>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="admin-delete"
+                        disabled={busy !== null}
+                        onClick={() => setRemoveTarget(p)}
+                        title="remove this cluster"
+                      >
+                        remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {removeTarget && (
+        <ConfirmModal
+          title={<><span className="c-red">!</span> remove cluster?</>}
+          danger
+          busy={busy === 'mutate'}
+          confirmLabel={busy === 'mutate' ? 'removing…' : `remove ${removeTarget.label}`}
+          cancelLabel="cancel"
+          onCancel={() => setRemoveTarget(null)}
+          onConfirm={() => void confirmRemove()}
+        >
+          <dl className="modal-meta">
+            <dt>label</dt>
+            <dd className="modal-trigram">{removeTarget.label}</dd>
+            <dt>baseUrl</dt>
+            <dd className="c-dim">{removeTarget.baseUrl}</dd>
+          </dl>
+          <p className="modal-warn">
+            this cluster's entries will stop appearing on the combined
+            scoreboard. <span className="c-red">cannot be undone</span> — re-adding
+            requires re-entering the baseUrl.
+          </p>
+        </ConfirmModal>
+      )}
     </div>
   );
 }

@@ -9,22 +9,20 @@ log), so we only check the cluster side here.
 Pass criteria — all of:
   - PC reachable + AOS cluster API responsive
   - host count > 0 and all hosts nodeStatus=NORMAL maintenanceState=normal
-  - the player's expand-cluster check (mirrors the live CheckNewNode
-    rackable-units lookup, multiple API versions) returns a non-empty
-    list of node serials — confirms the same endpoint the in-game check
-    relies on actually answers on this cluster
-
-We deliberately don't try to count "spare nodes" via /rackable-units:
-post-removal, AHV moves the freed node to an unconfigured/discovered
-state that this endpoint doesn't surface, so a 'no spare' signal here is
-ambiguous. The player hits a real blocker at stage 28 if the cluster
-genuinely has no spare; we'd rather not block the install on that.
+  - the player's expand-cluster discovery endpoint
+    (`/api/clustermgmt/v4.0.b2/.../$actions/discover-unconfigured-nodes`)
+    responds with a parseable task — confirms the API the in-game
+    CheckNewNode relies on is wired on this cluster. Empty discoverable
+    nodeList is OK (single-node HPoC with no spare chassis — stage 28
+    is auto-skipped via MultiNode/NodeRemove gates anyway). We only fail
+    if the API itself is broken / returns no task.
 
 Failure exits 1 so Calm marks the install as failed and the operator can
 investigate from the task log.
 """
 
 import sys
+import time
 import urllib3
 
 import requests
@@ -36,7 +34,8 @@ PC_USERNAME = '@@{PC_USERNAME}@@'
 PC_PASSWORD = '@@{PC_PASSWORD}@@'
 CLUSTER_UUID = '@@{Game.CLUSTERUUID}@@'
 
-BASE = "https://%s:9440/api/clustermgmt" % PC_IP
+PC_BASE = "https://%s:9440" % PC_IP
+BASE = "%s/api/clustermgmt" % PC_BASE
 AUTH = (PC_USERNAME, PC_PASSWORD)
 HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
@@ -48,6 +47,62 @@ def fetch(version, path):
     )
     r.raise_for_status()
     return r.json().get('data') or []
+
+
+def discover_unconfigured_nodes(cluster_uuid, max_polls=60):
+    """Fires the discover-unconfigured-nodes task + polls until SUCCEEDED.
+    Returns (nodeList, err_msg). nodeList may be empty (= no spare nodes
+    on this cluster, legitimate on single-chassis HPoCs).
+
+    Iteration-based (Calm escript sandbox: time.time() is a counter,
+    time.sleep() may no-op). Each /tasks GET takes ~0.5-1s naturally →
+    max_polls=60 is ~30-60 s real wall-clock without trusting sleep."""
+    discover_url = (
+        "%s/api/clustermgmt/v4.0.b2/config/clusters/%s/$actions/discover-unconfigured-nodes"
+        % (PC_BASE, cluster_uuid)
+    )
+    body = {"timeout": 60, "isManualDiscovery": False, "addressType": "IPV4"}
+    try:
+        r = requests.post(
+            discover_url, auth=AUTH, headers=HEADERS, verify=False, timeout=30, json=body,
+        )
+    except Exception as e:
+        return None, "POST discover failed: %s" % str(e)[:200]
+    if r.status_code >= 400:
+        return None, "POST discover: %d %s" % (r.status_code, r.text[:200])
+    task_ext_id = (r.json().get('data') or {}).get('extId')
+    if not task_ext_id:
+        return None, "discover task missing extId"
+
+    task_url = "%s/api/prism/v4.2/config/tasks/%s" % (PC_BASE, task_ext_id)
+    last_status = None
+    succeeded = False
+    for _ in range(max_polls):
+        try:
+            tr = requests.get(task_url, auth=AUTH, headers=HEADERS, verify=False, timeout=20)
+            last_status = (tr.json().get('data') or {}).get('status')
+            if last_status == 'SUCCEEDED':
+                succeeded = True
+                break
+            if last_status in ('FAILED', 'CANCELED', 'CANCELLED'):
+                return None, "discover task %s" % last_status
+        except Exception:
+            pass
+    if not succeeded:
+        return None, "discover task timed out after %d polls (last status: %s)" % (max_polls, last_status)
+
+    short_id = task_ext_id.split(':')[-1]
+    resp_url = (
+        "%s/api/clustermgmt/v4.2/config/task-response/%s?taskResponseType=UNCONFIGURED_NODES"
+        % (PC_BASE, short_id)
+    )
+    try:
+        rr = requests.get(resp_url, auth=AUTH, headers=HEADERS, verify=False, timeout=20)
+        rr.raise_for_status()
+        node_list = ((rr.json().get('data') or {}).get('response') or {}).get('nodeList') or []
+        return node_list, None
+    except Exception as e:
+        return None, "GET task-response failed: %s" % str(e)[:200]
 
 
 def main():
@@ -83,33 +138,21 @@ def main():
         names = [h.get('hostName') for h in hosts]
         print("[ok] %d host(s) all NORMAL: %s" % (len(hosts), names))
 
-    # 3. Mirrors the in-game expand-cluster check (CheckNewNode): the
-    # player submits a node serial and we look it up in the cluster's
-    # rackable-units. Try multiple API versions because PC 7.5 ships
-    # b2/4.0/4.2 inconsistently across builds — same pattern as the live
-    # check. We only assert the endpoint responds (some version) and
-    # returns at least one rackable-unit; we don't compare against an
-    # expected count because chassis topology varies cluster to cluster.
-    units = []
-    last_err = None
-    for v in ("v4.0.b2", "v4.0", "v4.2"):
-        try:
-            units = fetch(v, "/config/clusters/%s/rackable-units" % CLUSTER_UUID)
-            print("[ok] expand-cluster API responsive (%s/rackable-units): %d unit(s) — %s" % (
-                v,
-                len(units),
-                [(u.get('modelName', '?'), u.get('serial', '?')) for u in units],
-            ))
-            break
-        except Exception as e:
-            last_err = "%s: %s" % (v, str(e)[:120])
-            continue
-    else:
+    # 3. Mirrors the in-game expand-cluster check (CheckNewNode): the player
+    # submits a node serial that must be currently DISCOVERABLE (rackmounted,
+    # not yet in the cluster). We only assert the discover task endpoint is
+    # wired — empty nodeList is OK (single-chassis HPoC has no spare; the
+    # in-game stage 28 is auto-skipped by MultiNode/NodeRemove gates anyway).
+    node_list, err = discover_unconfigured_nodes(CLUSTER_UUID)
+    if err is not None:
         issues.append(
-            "rackable-units endpoint did not respond on any of v4.0.b2 / v4.0 / "
-            "v4.2 — the in-game expand-cluster check will fail. Last error: %s" %
-            last_err
+            "discover-unconfigured-nodes endpoint did not work — the in-game "
+            "expand-cluster check will fail. Reason: %s" % err
         )
+    else:
+        serials = [n.get('rackableUnitSerial', '?') for n in node_list]
+        print("[ok] expand-cluster API responsive (discover-unconfigured-nodes): "
+              "%d discoverable node(s) — %s" % (len(node_list), serials))
 
     if issues:
         print()

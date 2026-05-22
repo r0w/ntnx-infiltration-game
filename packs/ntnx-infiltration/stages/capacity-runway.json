@@ -22,5 +22,6 @@
   },
   "captures": [
     "Runway"
-  ]
+  ],
+  "requires": ["PlannerCluster"]
 }
