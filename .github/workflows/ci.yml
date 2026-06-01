@@ -191,6 +191,9 @@ jobs:
           report_paths: 'junit-*.xml'
           check_name: Test results
           comment: true
+          # detailed_summary on, include_passed off: PR comment stays a
+          # clean pass/fail tally when green, and expands to list the
+          # failing tests (with messages) when something breaks. Full
+          # per-test detail is always in the run logs + the check page.
           detailed_summary: true
-          include_passed: true
           require_tests: false
