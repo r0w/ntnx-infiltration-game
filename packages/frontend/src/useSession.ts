@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MessageUnit } from '@ntnx-game/shared';
 import { api, type AdvanceResponse, type DisabledStage } from './api';
+import { VERIFYING_LABELS } from './renderer';
 
 /** Sentinel variable name emitted by `<input/>` — press-Enter-to-continue. */
 export const CONTINUE_VAR = '$continue';
+
+/** How long the `verifying…` spinner holds between the operator's "let me
+ *  check…" line and the verdict. Long enough to read as a real check, short
+ *  enough not to drag across the pack's ~10 check stages. */
+const CHECK_DWELL_MS = 1200;
 
 /** Human-readable label for a pending await-input prompt. */
 export function awaitingLabel(variable: string | null | undefined): string {
@@ -39,6 +45,7 @@ export type RenderItem =
   | { kind: 'code'; id: string; text: string; lang?: string }
   | { kind: 'image'; id: string; src: string; alt?: string }
   | { kind: 'page-break'; id: string }
+  | { kind: 'check-dwell'; id: string; ms: number; label: string }
   | { kind: 'check-result'; id: string; pass: boolean; detail?: string; hint?: string; cheer?: string }
   | { kind: 'finished'; id: string }
   | { kind: 'info'; id: string; text: string; color?: string };
@@ -167,9 +174,13 @@ export function useSession(): SessionHandle {
   // stages, `<clear/>` wipes text the player may still be reading; requiring
   // a fresh user action preserves context until they signal "move on".
   const userActedSinceClearRef = useRef(false);
+  // handleResponse closes over `[]` deps, so read the live locale through a
+  // ref to label the check-dwell spinner in the player's language.
+  const localeRef = useRef(locale);
   awaitingRef.current = awaitingVariable;
   finishedRef.current = finished;
   gatedRef.current = gatedAt;
+  localeRef.current = locale;
 
   const handleResponse = useCallback((r: AdvanceResponse) => {
     if (r.kind === 'switch-session' && r.switchSessionId) {
@@ -264,6 +275,14 @@ export function useSession(): SessionHandle {
         });
       }
       if (r.check) {
+        // A "checking…" beat between the narration and the verdict so the
+        // line announcing the check and its result don't land on one frame.
+        next.push({
+          kind: 'check-dwell',
+          id: `${prefix}-checkdwell`,
+          ms: CHECK_DWELL_MS,
+          label: VERIFYING_LABELS[localeRef.current] ?? VERIFYING_LABELS.en,
+        });
         next.push({
           kind: 'check-result',
           id: `${prefix}-check`,
