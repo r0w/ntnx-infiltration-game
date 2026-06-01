@@ -192,4 +192,5 @@ jobs:
           check_name: Test results
           comment: true
           detailed_summary: true
+          include_passed: true
           require_tests: false
