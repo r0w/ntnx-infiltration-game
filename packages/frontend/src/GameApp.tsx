@@ -203,14 +203,6 @@ export function GameApp() {
         <div className="app-header-side app-header-left">
           <span className="app-title">ntnx infiltration game</span>
         </div>
-        <div className="app-header-center">
-          {autoPlayVisible && (
-            <AutoPlayToggle
-              active={autoPlay}
-              onToggle={() => setAutoPlay((v) => !v)}
-            />
-          )}
-        </div>
         <div className="app-header-side app-header-right">
           <WidthToggle value={maxWidth} onChange={setMaxWidth} />
           <button
@@ -247,6 +239,8 @@ export function GameApp() {
           busy={session.busy}
           autoPlay={autoPlay}
           autoPlayActing={autoPlayActing}
+          autoPlayEligible={autoPlayVisible}
+          onToggleAutoPlay={() => setAutoPlay((v) => !v)}
           mode={pack?.mode === 'live' ? undefined : pack?.mode}
           onGoto={handleGoto}
         />
@@ -298,47 +292,6 @@ function WidthToggle({
         </button>
       ))}
     </div>
-  );
-}
-
-// Auto-play toggle: when armed, FauxTerminal auto-submits "Ok" on every
-// `<input/>` (CONTINUE_VAR) prompt so the demo can roll through every stage
-// without the operator typing. Named-var prompts (NodeSerial, NumberUpdates,
-// Runway, …) still wait for a real value — the toggle only short-circuits
-// the press-enter-to-continue gates.
-function AutoPlayToggle({
-  active,
-  onToggle,
-}: {
-  active: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={`app-autoplay${active ? ' is-active' : ''}`}
-      onClick={onToggle}
-      aria-pressed={active}
-      title={
-        active
-          ? 'Auto-play armed — disarm to type "Ok" yourself'
-          : 'Auto-play: submit "Ok" on every press-enter prompt'
-      }
-    >
-      <span className="app-autoplay-icon" aria-hidden="true">
-        {active ? (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-            <rect x="6" y="5" width="4" height="14" rx="1" />
-            <rect x="14" y="5" width="4" height="14" rx="1" />
-          </svg>
-        ) : (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M7 5 L19 12 L7 19 Z" />
-          </svg>
-        )}
-      </span>
-      <span>{active ? 'auto-play on' : 'auto-play'}</span>
-    </button>
   );
 }
 

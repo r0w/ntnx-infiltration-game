@@ -8,14 +8,14 @@ export interface DevPanelProps {
   currentStage: string | null;
   awaitingVariable: string | null;
   busy: boolean;
-  /** Auto-play toggle state — surfaced as a small badge in the panel
-   *  toggle so operators see at a glance whether the next prompt will
-   *  auto-submit or wait for them. */
+  /** Auto-play armed? The toggle button lives in this panel. */
   autoPlay?: boolean;
-  /** True while the auto-play harness is making a request (autofill or
-   *  act). Surface it visibly so silent stages don't look like the UI
-   *  is wedged. */
+  /** Auto-play busy with a request — shows ⏳ on the toggle. */
   autoPlayActing?: boolean;
+  /** Can auto-play be armed? (post-login, non-live). Hides the toggle if not. */
+  autoPlayEligible?: boolean;
+  /** Arms / disarms auto-play. */
+  onToggleAutoPlay?: () => void;
   /**
    * Server mode (`mock` | `test`). Surfaced in the toggle label so the
    * operator knows at a glance which adapter the session is hitting —
@@ -35,6 +35,8 @@ export function DevPanel({
   busy,
   autoPlay,
   autoPlayActing,
+  autoPlayEligible,
+  onToggleAutoPlay,
   mode,
   onGoto,
 }: DevPanelProps) {
@@ -112,32 +114,59 @@ export function DevPanel({
 
   return (
     <div className={`devpanel ${open ? 'devpanel-open' : ''}`}>
-      <button
-        type="button"
-        className="devpanel-toggle"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-      >
-        {open ? '▾' : '▸'}{' '}
-        <span className={`devpanel-mode devpanel-mode-${mode ?? 'unknown'}`}>
-          {mode ?? 'dev'}
-        </span>
-        {autoPlay && (
-          <span
-            className={`devpanel-autoplay ${autoPlayActing ? 'devpanel-autoplay-acting' : ''}`}
+      {/* Flex row: a button can't nest in a button, so the auto-play
+          toggle sits beside the expand button. */}
+      <div className="devpanel-bar">
+        <button
+          type="button"
+          className="devpanel-toggle"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+        >
+          {open ? '▾' : '▸'}{' '}
+          <span className={`devpanel-mode devpanel-mode-${mode ?? 'unknown'}`}>
+            {mode ?? 'dev'}
+          </span>
+          {' · '}
+          {activeStageName ?? currentStage ?? 'pre-game'}
+          {awaitingVariable ? ` · awaiting ${awaitingLabel(awaitingVariable)}` : ''}
+        </button>
+        {autoPlayEligible && onToggleAutoPlay && (
+          <button
+            type="button"
+            className={`devpanel-autoplay-toggle${autoPlay ? ' is-active' : ''}${
+              autoPlayActing ? ' is-acting' : ''
+            }`}
+            onClick={onToggleAutoPlay}
+            aria-pressed={autoPlay}
             title={
-              autoPlayActing
-                ? 'Auto-play is making a request (autofill / act)'
-                : 'Auto-play armed — next CONTINUE prompts will auto-submit'
+              autoPlay
+                ? 'Auto-play armed — disarm to type "Ok" yourself'
+                : 'Auto-play: submit "Ok" on every press-enter prompt'
             }
           >
-            {autoPlayActing ? 'AUTOPLAY ⏳' : 'AUTOPLAY'}
-          </span>
+            <span className="devpanel-autoplay-icon" aria-hidden="true">
+              {autoPlay ? (
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="5" width="4" height="14" rx="1" />
+                  <rect x="14" y="5" width="4" height="14" rx="1" />
+                </svg>
+              ) : (
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M7 5 L19 12 L7 19 Z" />
+                </svg>
+              )}
+            </span>
+            <span>
+              {autoPlayActing
+                ? 'auto-play ⏳'
+                : autoPlay
+                  ? 'auto-play on'
+                  : 'auto-play'}
+            </span>
+          </button>
         )}
-        {' · '}
-        {activeStageName ?? currentStage ?? 'pre-game'}
-        {awaitingVariable ? ` · awaiting ${awaitingLabel(awaitingVariable)}` : ''}
-      </button>
+      </div>
       {open && (
         <div className="devpanel-body">
           {error && <div className="devpanel-error">{error}</div>}
