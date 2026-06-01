@@ -1,17 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BrailleSpinner, TerminalItem } from './renderer';
+import { BrailleSpinner, TerminalItem, VERIFYING_LABELS } from './renderer';
 import { usePageBreakScrollPin } from './usePageBreakScrollPin';
 import { awaitingLabel, CONTINUE_VAR, type GatedAt, type RenderItem } from './useSession';
-
-/** Localized label for the inline check-pending spinner. Falls back to `en`
- *  when the active locale isn't translated. Kept inline (not in the pack
- *  bundle catalog) — single string, single use, doesn't need pack-author
- *  ergonomics. */
-const VERIFYING_LABELS: Record<string, string> = {
-  en: 'verifying…',
-  fr: 'vérification…',
-  de: 'Überprüfung…',
-};
 
 export interface FauxTerminalProps {
   items: RenderItem[];
