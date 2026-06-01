@@ -14,7 +14,7 @@ The 39 stages of the `ntnx-infiltration` pack, in play order.
 | 1 | `lore` | - |
 | 2 | `login` | CheckTrigram |
 | 3 | `recovery-gate` | NeedRecovery |
-| 4 | `intro-ego-greet` | - |
+| 4 | `intro-tank-greet` | - |
 | 5 | `intro-mission` | - |
 | 6 | `create-admin-user` | CheckUser |
 | 7 | `create-auth-policy` | CheckAuthPolicy |
@@ -55,7 +55,7 @@ The 39 stages of the `ntnx-infiltration` pack, in play order.
 
 ## Design notes
 
-- **Stages 15 + 16 are split.** 15 verifies the prod user's project-scoped isolation; 16 live-migrates the VM after E.G.O. spots a host scan. Two distinct narrative beats.
+- **Stages 15 + 16 are split.** 15 verifies the prod user's project-scoped isolation; 16 live-migrates the VM after Tank spots a host scan. Two distinct narrative beats.
 - **Stages 22 → 25 are kept separate.** `verify-protection-secure`, `incident-freeze`, `incident-reconnect`, `welcome-back` preserve the dramatic rhythm of the incident interlude.
 - **Stages 38 + 39 are split.** 38 is mission accomplished; 39 is trace cleanup and disconnect.
-- **Stages 3 / 4 / 5 are not collapsed.** Three beats of the E.G.O. intro; merging them would flatten the opening.
+- **Stages 3 / 4 / 5 are not collapsed.** Three beats of the Tank intro; merging them would flatten the opening.

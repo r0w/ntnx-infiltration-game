@@ -1,7 +1,7 @@
 {
   "name": "create-admin-user",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-006.line-01",
@@ -16,7 +16,6 @@
     "stage-006.line-10"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "check": {
     "fn": "CheckUser"
   },

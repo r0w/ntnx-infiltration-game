@@ -1,7 +1,7 @@
 {
-  "name": "intro-ego-greet",
+  "name": "intro-tank-greet",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-003.line-01",

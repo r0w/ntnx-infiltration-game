@@ -1,7 +1,7 @@
 {
   "name": "test-ncm-playbook",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-034.line-01",
@@ -10,7 +10,6 @@
     "stage-034.line-04"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "needs": [
     "Trigram"
   ]

@@ -24,7 +24,7 @@ const PACK_ID = 'test-pack';
 const stages: StageDefinition[] = [
   { id: 1, name: 'login', active: true, messages: ['s1'], saveScore: false },
   { id: 2, name: 'recovery-gate', active: true, messages: ['s2'], saveScore: false },
-  { id: 3, name: 'intro-ego-greet', active: true, messages: ['s3'], saveScore: false },
+  { id: 3, name: 'intro-tank-greet', active: true, messages: ['s3'], saveScore: false },
   { id: 4, name: 'outro', active: true, messages: ['s4'], saveScore: false },
 ];
 
@@ -132,12 +132,12 @@ describe('GET /api/scoreboard', () => {
     seed(db, {
       id: 'sess-abc', startedAt: 1000, currentStage: 'outro', finishedAt: 5000,
       capturedTrigram: 'ABC', capturedUsername: 'Alice',
-      passedStages: ['login', 'recovery-gate', 'intro-ego-greet', 'outro'],
+      passedStages: ['login', 'recovery-gate', 'intro-tank-greet', 'outro'],
     });
     seed(db, {
       id: 'sess-xyz', startedAt: 2000, currentStage: 'outro', finishedAt: 4000,
       capturedTrigram: 'XYZ', capturedUsername: 'Bob',
-      passedStages: ['login', 'recovery-gate', 'intro-ego-greet', 'outro'],
+      passedStages: ['login', 'recovery-gate', 'intro-tank-greet', 'outro'],
     });
     seed(db, {
       id: 'sess-def', startedAt: 3000, currentStage: 'recovery-gate',
@@ -160,14 +160,14 @@ describe('GET /api/scoreboard', () => {
     seed(db, {
       id: 'sess-done', startedAt: 500, currentStage: 'outro', finishedAt: 9000,
       capturedTrigram: 'DON',
-      passedStages: ['login', 'recovery-gate', 'intro-ego-greet', 'outro'],
+      passedStages: ['login', 'recovery-gate', 'intro-tank-greet', 'outro'],
     });
 
     const entries = await fetchEntries(db);
     const done = entries.find((e) => e.trigram === 'DON')!;
     const playing = entries.find((e) => e.trigram === 'PLY')!;
     expect(done.stageName).toBeNull();
-    expect(playing.stageName).toBe('intro-ego-greet');
+    expect(playing.stageName).toBe('intro-tank-greet');
     expect(playing.stagesPassed).toBe(2);
     expect(playing.totalStages).toBe(4);
   });

@@ -1,7 +1,7 @@
 {
   "name": "create-storage-policy",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-017.line-01",
@@ -13,7 +13,6 @@
     "stage-017.line-07"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "check": {
     "fn": "CheckStoragePolicy"
   },

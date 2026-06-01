@@ -5,6 +5,8 @@ import type { RenderItem } from './useSession';
 export interface TerminalItemProps {
   item: RenderItem;
   typingSpeedMs: number;
+  /** When true, <pause/> beats and check-result dwells fire instantly. */
+  skipPauses?: boolean;
   isActive: boolean;
   onDone: () => void;
 }
@@ -18,6 +20,7 @@ export interface TerminalItemProps {
 export const TerminalItem = memo(function TerminalItem({
   item,
   typingSpeedMs,
+  skipPauses,
   isActive,
   onDone,
 }: TerminalItemProps) {
@@ -35,7 +38,9 @@ export const TerminalItem = memo(function TerminalItem({
     );
   }
   if (item.kind === 'pause') {
-    return <PauseUnit ms={item.ms} isActive={isActive} onDone={onDone} />;
+    // skip-pauses (dev toggle) drops the <pause/> beats so an operator
+    // replaying for the Nth time doesn't wait them out.
+    return <PauseUnit ms={skipPauses ? 0 : item.ms} isActive={isActive} onDone={onDone} />;
   }
   if (item.kind === 'info') {
     return (
@@ -74,8 +79,9 @@ export const TerminalItem = memo(function TerminalItem({
     const text = item.cheer ?? fallback;
     const hint = !item.pass && item.hint ? item.hint : null;
     // Dwell longer when a hint accompanies the fail so the player has time
-    // to read both lines before the next stage scrolls in.
-    const dwellMs = hint ? 2400 : 1800;
+    // to read both lines before the next stage scrolls in. skip-pauses
+    // drops the dwell too.
+    const dwellMs = skipPauses ? 0 : hint ? 2400 : 1800;
     return (
       <DwellBlock className={cls} dwellMs={dwellMs} isActive={isActive} onDone={onDone}>
         {prefix} {text}

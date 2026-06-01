@@ -285,7 +285,7 @@ function makeDemoPayload(count: number, combined: boolean): DisplayPayload {
     'Gina', 'Hugo', 'Ida', 'Jude', 'Kai', 'Luca', 'Mira', 'Noor',
   ];
   const STAGE_NAMES = [
-    'login', 'recovery-gate', 'intro-ego-greet', 'intro-mission',
+    'login', 'recovery-gate', 'intro-tank-greet', 'intro-mission',
     'intro-credentials', 'create-admin-user', 'create-auth-policy',
     'network-recon', 'create-project', 'create-subnet', 'add-ubuntu-image',
     'create-vm', 'live-migrate', 'scan-host', 'create-category',

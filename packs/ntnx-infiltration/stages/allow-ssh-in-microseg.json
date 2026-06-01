@@ -1,7 +1,7 @@
 {
   "name": "allow-ssh-in-microseg",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-019.line-01",
@@ -17,7 +17,6 @@
     "stage-019.line-11"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "check": {
     "fn": "CheckSecurityPolicy2"
   },

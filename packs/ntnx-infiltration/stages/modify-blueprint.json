@@ -1,7 +1,7 @@
 {
   "name": "modify-blueprint",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-037.line-01",
@@ -14,7 +14,6 @@
     "stage-037.line-09"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "check": {
     "fn": "CheckUpdateBP"
   }

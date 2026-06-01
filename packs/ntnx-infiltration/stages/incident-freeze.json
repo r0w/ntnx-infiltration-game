@@ -1,7 +1,7 @@
 {
   "name": "incident-freeze",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-023.line-01",

@@ -20,7 +20,7 @@ const NTNX_INFILTRATION_OLD_IDS: Record<number, string> = {
   0: 'lore',
   1: 'login',
   2: 'recovery-gate',
-  3: 'intro-ego-greet',
+  3: 'intro-tank-greet',
   4: 'intro-mission',
   // 5 was the merged-away intro-credentials — no mapping
   6: 'create-admin-user',

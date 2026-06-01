@@ -24,6 +24,8 @@ export interface FauxTerminalProps {
   locale: string;
   finished: boolean;
   typingSpeedMs: number;
+  /** Dev toggle: fire <pause/> beats + check dwells instantly. */
+  skipPauses: boolean;
   /**
    * When set, the player is parked at an admin-gated stage. The banner
    * surfaces only after the typewriter has caught up to items.length so
@@ -32,18 +34,18 @@ export interface FauxTerminalProps {
   gatedAt: GatedAt | null;
   /**
    * When true, every press-enter-to-continue prompt (variable === CONTINUE_VAR)
-   * is auto-submitted with "Ok" once the typewriter catches up. Named-var
-   * prompts are left to the player. Each await-input is auto-submitted at
-   * most once — a failed check leaves the same await-input id in items, so
-   * the per-id guard breaks any retry loop on cluster-side check failures.
+   * is auto-advanced (submitted empty, like pressing Enter) once the typewriter
+   * catches up. Named-var prompts are left to the player. Each await-input is
+   * auto-submitted at most once — a failed check leaves the same await-input id
+   * in items, so the per-id guard breaks any retry loop on check failures.
    */
   autoPlay: boolean;
   onSubmit: (value: string) => void;
   /**
-   * Called instead of `onSubmit('Ok')` when auto-play fires. The parent can
-   * augment the bare submit with mode-specific work — e.g. firing the
-   * stage's seed handler in `test` mode before sending "Ok" — without
-   * leaking that policy into FauxTerminal.
+   * Called instead of a bare submit when auto-play fires. The parent can
+   * augment it with mode-specific work — e.g. firing the stage's seed handler
+   * in `test` mode before pressing Enter — without leaking that policy into
+   * FauxTerminal.
    */
   onAutoPlayOk: () => void | Promise<void>;
   onAdvance: () => void;
@@ -64,6 +66,7 @@ export function FauxTerminal({
   locale,
   finished,
   typingSpeedMs,
+  skipPauses,
   gatedAt,
   autoPlay,
   onSubmit,
@@ -101,8 +104,8 @@ export function FauxTerminal({
     }
   }, [inputVisible]);
 
-  // Auto-play: when armed, fire `Ok` at every CONTINUE_VAR prompt so the
-  // narrative + check chain rolls without operator input. We key the guard
+  // Auto-play: when armed, press Enter (submit empty) at every CONTINUE_VAR
+  // prompt so the narrative + check chain rolls without operator input. We key the guard
   // on the latest matching await-input's id — a failed check returns
   // `units: []` and re-arms the same await-input, so its id is unchanged
   // and the guard prevents an infinite resubmit loop. A fresh prompt in a
@@ -218,6 +221,7 @@ export function FauxTerminal({
             key={item.id}
             item={item}
             typingSpeedMs={typingSpeedMs}
+            skipPauses={skipPauses}
             isActive={idx === activeIdx}
             onDone={advanceSequencer}
           />
@@ -317,11 +321,13 @@ export function FauxTerminal({
 function Line({
   item,
   typingSpeedMs,
+  skipPauses,
   isActive,
   onDone,
 }: {
   item: RenderItem;
   typingSpeedMs: number;
+  skipPauses: boolean;
   isActive: boolean;
   onDone: () => void;
 }) {
@@ -351,6 +357,7 @@ function Line({
     <TerminalItem
       item={item}
       typingSpeedMs={typingSpeedMs}
+      skipPauses={skipPauses}
       isActive={isActive}
       onDone={handleDone}
     />
