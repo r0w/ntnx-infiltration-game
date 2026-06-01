@@ -62,7 +62,7 @@ export type StageStatus = 'passed' | 'skipped' | 'failed' | 'disabled';
  * Stages carry ordered lists of catalog keys, not inline strings. The
  * translation for `messages[i]` is looked up at render time via
  * {@link LocaleBundle}. The `prompt` field is a speaker label (e.g. `system`,
- * `ego`) and is NOT translated.
+ * `tank`) and is NOT translated.
  */
 export interface StageDefinition {
   /**

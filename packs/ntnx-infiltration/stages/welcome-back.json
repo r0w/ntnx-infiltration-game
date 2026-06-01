@@ -1,7 +1,7 @@
 {
   "name": "welcome-back",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-025.line-01",
@@ -9,7 +9,6 @@
     "stage-025.line-03"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "needs": [
     "Username"
   ]

@@ -118,7 +118,7 @@ export interface PackInfo {
   /**
    * Operator-facing server mode. `mock` = fixtures, `test` = real PC + dev
    * tools, `live` = real PC + production demo (dev tools + auto-play
-   * hidden). Drives DevPanel + AutoPlayToggle visibility in GameApp.
+   * hidden). Drives DevPanel visibility (it hosts the auto-play toggle).
    */
   mode: 'mock' | 'test' | 'live';
   /** Server's runtime clusterProfile — `'other'` means the engine

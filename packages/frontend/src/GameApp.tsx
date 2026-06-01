@@ -4,7 +4,7 @@ import { DevPanel } from './DevPanel';
 import { FauxTerminal } from './FauxTerminal';
 import { LoginForm } from './LoginForm';
 import { ConfirmModal } from './Modal';
-import { useSession } from './useSession';
+import { useSession, CONTINUE_VAR } from './useSession';
 
 type MaxWidth = '80ch' | '100ch' | '120ch' | 'none';
 const MAX_WIDTH_KEY = 'terminal-max-width';
@@ -18,10 +18,37 @@ function readStoredMaxWidth(): MaxWidth {
   return 'none';
 }
 
+// Dev override for the typewriter speed (ms/char). null = use the server's
+// pack value. Lets the operator speed up / skip the effect on the 20th replay.
+const TYPING_SPEED_KEY = 'terminal-typing-speed';
+
+function readStoredTypingSpeed(): number | null {
+  try {
+    const v = localStorage.getItem(TYPING_SPEED_KEY);
+    if (v !== null && v !== '') {
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 0) return n;
+    }
+  } catch { /* localStorage blocked */ }
+  return null;
+}
+
+// Dev toggle: skip <pause/> beats + check-result dwells (independent of
+// text speed) for fast replays.
+const SKIP_PAUSES_KEY = 'terminal-skip-pauses';
+
+function readStoredSkipPauses(): boolean {
+  try { return localStorage.getItem(SKIP_PAUSES_KEY) === '1'; } catch { return false; }
+}
+
 export function GameApp() {
   const session = useSession();
   const [pack, setPack] = useState<PackInfo | null>(null);
   const [maxWidth, setMaxWidth] = useState<MaxWidth>(readStoredMaxWidth);
+  const [typingSpeedOverride, setTypingSpeedOverride] = useState<number | null>(
+    readStoredTypingSpeed,
+  );
+  const [skipPauses, setSkipPauses] = useState<boolean>(readStoredSkipPauses);
   const [autoPlay, setAutoPlay] = useState(false);
   const [autoPlayActing, setAutoPlayActing] = useState(false);
   const [autoPlayError, setAutoPlayError] = useState<string | null>(null);
@@ -34,6 +61,20 @@ export function GameApp() {
   useEffect(() => {
     try { localStorage.setItem(MAX_WIDTH_KEY, maxWidth); } catch { /* ignore */ }
   }, [maxWidth]);
+
+  useEffect(() => {
+    try {
+      if (typingSpeedOverride === null) localStorage.removeItem(TYPING_SPEED_KEY);
+      else localStorage.setItem(TYPING_SPEED_KEY, String(typingSpeedOverride));
+    } catch { /* ignore */ }
+  }, [typingSpeedOverride]);
+
+  useEffect(() => {
+    try { localStorage.setItem(SKIP_PAUSES_KEY, skipPauses ? '1' : '0'); } catch { /* ignore */ }
+  }, [skipPauses]);
+
+  // null override → follow the server's pack speed.
+  const typingSpeedMs = typingSpeedOverride ?? session.typingSpeedMs;
 
   useEffect(() => {
     document.title = 'ntnx infiltration game';
@@ -56,14 +97,14 @@ export function GameApp() {
   );
   const handleAdvance = useCallback(() => void advance(), [advance]);
 
-  // Auto-play "Ok" handler. In `test` mode, fire the awaiting stage's act
+  // Auto-play continue handler. In `test` mode, fire the awaiting stage's act
   // first (= the cluster-side step the player would normally do via Prism)
-  // and only submit "Ok" once it succeeds — otherwise the check would run
+  // and only press Enter once it succeeds — otherwise the check would run
   // against a missing resource and fail. In `mock` we skip the act (no
-  // POST fixtures) and just submit; the GET fixtures already simulate the
+  // POST fixtures) and just advance; the GET fixtures already simulate the
   // post-act state. Act errors disarm autoplay so we don't loop on a
   // broken stage. 404 (no act registered) is expected for narrative-only
-  // stages — submit "Ok" anyway, there's no cluster work to do.
+  // stages — press Enter anyway, there's no cluster work to do.
   const handleAutoPlayOk = useCallback(async () => {
     if (!session.sessionId || !awaitingRef) return;
     // Named-var prompts that auto-fill from the cluster (NodeSerial,
@@ -142,7 +183,9 @@ export function GameApp() {
         setAutoPlayActing(false);
       }
     }
-    void submitInput(awaitingRef, 'Ok');
+    // Continue prompts now advance on a bare Enter (no waitForInputValue),
+    // so auto-play submits empty — same as the player pressing Enter.
+    void submitInput(awaitingRef, awaitingRef === CONTINUE_VAR ? '' : 'Ok');
   }, [session.sessionId, session.awaitingStageName, awaitingRef, pack?.mode, submitInput]);
   const handleGoto = useCallback((stageName: string) => void gotoStage(stageName), [gotoStage]);
   const handleSwitchIdentity = useCallback(
@@ -159,8 +202,8 @@ export function GameApp() {
     (session.currentStage === null || session.currentStage === 'lore');
 
   // Auto-play eligibility: the toggle only appears once the player has typed
-  // their Trigram + PIN (login) and Username (intro-ego-greet). currentStage
-  // tracks the last completed stage, so it lands on `intro-ego-greet` exactly
+  // their Trigram + PIN (login) and Username (intro-tank-greet). currentStage
+  // tracks the last completed stage, so it lands on `intro-tank-greet` exactly
   // when Username has just been captured. Also gated on `mode !== 'live'` —
   // production demos should never let the operator skip a stage with one
   // click. Defaults to **hidden** until the pack loads so live mode never
@@ -203,14 +246,6 @@ export function GameApp() {
         <div className="app-header-side app-header-left">
           <span className="app-title">ntnx infiltration game</span>
         </div>
-        <div className="app-header-center">
-          {autoPlayVisible && (
-            <AutoPlayToggle
-              active={autoPlay}
-              onToggle={() => setAutoPlay((v) => !v)}
-            />
-          )}
-        </div>
         <div className="app-header-side app-header-right">
           <WidthToggle value={maxWidth} onChange={setMaxWidth} />
           <button
@@ -228,7 +263,8 @@ export function GameApp() {
         busy={session.busy || autoPlayActing}
         checkPending={session.checkPending}
         finished={session.finished}
-        typingSpeedMs={session.typingSpeedMs}
+        typingSpeedMs={typingSpeedMs}
+        skipPauses={skipPauses}
         gatedAt={session.gatedAt}
         locale={session.locale}
         autoPlay={autoPlay}
@@ -247,6 +283,14 @@ export function GameApp() {
           busy={session.busy}
           autoPlay={autoPlay}
           autoPlayActing={autoPlayActing}
+          autoPlayEligible={autoPlayVisible}
+          onToggleAutoPlay={() => setAutoPlay((v) => !v)}
+          typingSpeedMs={typingSpeedMs}
+          typingSpeedDefaultMs={session.typingSpeedMs}
+          onTypingSpeedChange={setTypingSpeedOverride}
+          onTypingSpeedReset={() => setTypingSpeedOverride(null)}
+          skipPauses={skipPauses}
+          onSkipPausesChange={setSkipPauses}
           mode={pack?.mode === 'live' ? undefined : pack?.mode}
           onGoto={handleGoto}
         />
@@ -298,47 +342,6 @@ function WidthToggle({
         </button>
       ))}
     </div>
-  );
-}
-
-// Auto-play toggle: when armed, FauxTerminal auto-submits "Ok" on every
-// `<input/>` (CONTINUE_VAR) prompt so the demo can roll through every stage
-// without the operator typing. Named-var prompts (NodeSerial, NumberUpdates,
-// Runway, …) still wait for a real value — the toggle only short-circuits
-// the press-enter-to-continue gates.
-function AutoPlayToggle({
-  active,
-  onToggle,
-}: {
-  active: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={`app-autoplay${active ? ' is-active' : ''}`}
-      onClick={onToggle}
-      aria-pressed={active}
-      title={
-        active
-          ? 'Auto-play armed — disarm to type "Ok" yourself'
-          : 'Auto-play: submit "Ok" on every press-enter prompt'
-      }
-    >
-      <span className="app-autoplay-icon" aria-hidden="true">
-        {active ? (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-            <rect x="6" y="5" width="4" height="14" rx="1" />
-            <rect x="14" y="5" width="4" height="14" rx="1" />
-          </svg>
-        ) : (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M7 5 L19 12 L7 19 Z" />
-          </svg>
-        )}
-      </span>
-      <span>{active ? 'auto-play on' : 'auto-play'}</span>
-    </button>
   );
 }
 

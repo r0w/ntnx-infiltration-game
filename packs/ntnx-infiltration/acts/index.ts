@@ -1094,7 +1094,7 @@ async function actCreateApprovalPolicy(ctx: ActContext): Promise<void> {
       {
         name,
         description: 'Master approval policy for Protection operations',
-        approverGroups: [{ name: 'ego-appr-set', approvers: approverFull, expiryHours: 24 }],
+        approverGroups: [{ name: 'tank-appr-set', approvers: approverFull, expiryHours: 24 }],
       },
     );
     // Create returns a task ref — re-list to pick up the freshly-minted

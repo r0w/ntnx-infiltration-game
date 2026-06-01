@@ -1,7 +1,7 @@
 {
   "name": "create-subnet",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-010.line-01",
@@ -19,7 +19,6 @@
     "stage-010.line-13"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "check": {
     "fn": "CheckNetwork"
   },

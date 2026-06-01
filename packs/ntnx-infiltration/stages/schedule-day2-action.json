@@ -1,7 +1,7 @@
 {
   "name": "schedule-day2-action",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-036.line-01",
@@ -12,7 +12,6 @@
     "stage-036.line-06"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "requiresOnOther": ["ApprovalPolicy"],
   "check": {
     "fn": "CheckSchedDay2"
