@@ -46,15 +46,22 @@ INVENTORY = "/api/lifecycle/v4.2/operations/$actions/inventory"
 
 def cluster_ids():
     # Every LCM-capable cluster (PCVM cluster + each registered PE).
-    r = requests.get(BASE + SUMMARIES, auth=AUTH, headers=HEADERS,
-                     verify=False, timeout=20)
-    ids = []
-    if r.status_code == 200:
-        for s in (r.json().get("data") or []):
-            cid = s.get("clusterExtId")
-            if cid and cid not in ids:
-                ids.append(cid)
-    return ids
+    # Best-effort: a network/JSON error here just yields [] → main() falls
+    # back to a single default-cluster inventory rather than crashing the
+    # install runbook (this task is non-fatal by design).
+    try:
+        r = requests.get(BASE + SUMMARIES, auth=AUTH, headers=HEADERS,
+                         verify=False, timeout=20)
+        ids = []
+        if r.status_code == 200:
+            for s in (r.json().get("data") or []):
+                cid = s.get("clusterExtId")
+                if cid and cid not in ids:
+                    ids.append(cid)
+        return ids
+    except Exception as e:
+        print("[warn] could not list LCM clusters: %s" % str(e)[:160])
+        return []
 
 
 def fire(cid):
@@ -64,9 +71,12 @@ def fire(cid):
     HEADERS.pop("X-Cluster-Id", None)
     if cid:
         HEADERS["X-Cluster-Id"] = cid
-    r = requests.post(BASE + INVENTORY, auth=AUTH, headers=HEADERS,
-                      verify=False, timeout=20, data="{}")
-    return r.status_code in (200, 201, 202), r.status_code, r.text[:160]
+    try:
+        r = requests.post(BASE + INVENTORY, auth=AUTH, headers=HEADERS,
+                          verify=False, timeout=20, data="{}")
+        return r.status_code in (200, 201, 202), r.status_code, r.text[:160]
+    except Exception as e:
+        return False, 0, str(e)[:160]
 
 
 def main():

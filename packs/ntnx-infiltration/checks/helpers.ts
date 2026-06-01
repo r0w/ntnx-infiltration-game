@@ -287,7 +287,9 @@ async function fetchLcmEntities(
   for (const v of ['v4.2', 'v4.0']) {
     try {
       const all: LcmEntity[] = [];
-      for (let page = 0; ; page++) {
+      // Hard cap (100 pages × 100 = 10k entities, far past any real
+      // inventory) so a misbehaving API that ignores paging can't spin us.
+      for (let page = 0; page < 100; page++) {
         const res = await nutanix.request<{ data?: LcmEntity[] }>(
           'GET',
           `/api/lifecycle/${v}/resources/entities?$limit=100&$page=${page}`,
