@@ -241,6 +241,21 @@ class GameContent(Package):
                     filename=os.path.join("scripts", "cluster_health.py"),
                     target=ref(Game),
                 )
+                # Fire the async LCM inventory scan HERE — after the
+                # node-removal has run and the cluster is back to NORMAL.
+                # LCM and a cluster-shrink can't hold the cluster at the
+                # same time, so firing it concurrently (the old Branch 5)
+                # risked the two contending. We only need the scan to
+                # populate stage 29's update list (we never apply the
+                # updates), so there's no cost to deferring it to a
+                # healthy cluster. Async: returns 202 + a task UUID and
+                # runs in PC bg — the player won't reach stage 29 for
+                # many minutes.
+                CalmTask.Exec.escript.py3(
+                    name="Trigger LCM inventory",
+                    filename=os.path.join("scripts", "trigger_lcm_inventory.py"),
+                    target=ref(Game),
+                )
                 # Idempotent: ensures `secondary` subnet is advanced-
                 # networking + creates `TestNetwork` (used by stage 35
                 # of the game).
@@ -381,16 +396,6 @@ class GameContent(Package):
                     target=ref(Game),
                     target_endpoint=ref(AD),
                     inherit_target=False,
-                )
-
-            # Branch 5 — fire async LCM inventory scan (~5 s API call,
-            # PC runs it in background). Populates stage 29's update
-            # count when the player checks LCM later.
-            with branch(p0):
-                CalmTask.Exec.escript.py3(
-                    name="Trigger LCM inventory",
-                    filename=os.path.join("scripts", "trigger_lcm_inventory.py"),
-                    target=ref(Game),
                 )
 
 
