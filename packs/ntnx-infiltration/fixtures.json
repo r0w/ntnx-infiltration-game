@@ -341,13 +341,13 @@
           }
         },
         {
-          "description": "allow inbound SSH (22/tcp)",
+          "description": "allow inbound SSH (22/tcp) from frontend host",
           "type": "APPLICATION",
           "spec": {
             "$objectType": "microseg.v4.config.ApplicationRuleSpec",
             "securedGroupCategoryAssociatedEntityType": "VM",
             "securedGroupCategoryReferences": ["cat-{Trigram}-critical"],
-            "srcAllowSpec": "ALL",
+            "srcSubnet": { "value": "10.42.0.42", "prefixLength": 32 },
             "tcpServices": [{ "startPort": 22, "endPort": 22 }]
           }
         },
