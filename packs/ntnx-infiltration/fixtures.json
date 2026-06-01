@@ -183,15 +183,22 @@
       }
     }
   },
+  "GET /api/lifecycle/v4.0/resources/lcm-summaries": {
+    "data": [
+      { "clusterExtId": "mock-pe", "clusterType": "AOS" },
+      { "clusterExtId": "mock-pc", "clusterType": "PRISM_CENTRAL" }
+    ]
+  },
   "GET /api/lifecycle/v4.0/resources/entities": {
     "data": [
-      { "entityModel": "AHV", "availableVersions": ["7.3", "7.4"] },
-      { "entityModel": "AOS", "availableVersions": ["7.3.0.5", "7.4"] },
-      { "entityModel": "Foundation", "availableVersions": ["5.7"] },
-      { "entityModel": "NCC", "availableVersions": ["5.0.0"] },
-      { "entityModel": "PC", "availableVersions": ["7.3.1"] },
-      { "entityModel": "LCM", "availableVersions": ["3.5"] },
-      { "entityModel": "Calm", "availableVersions": ["3.10"] }
+      { "entityType": "SOFTWARE", "entityModel": "AHV", "clusterExtId": "mock-pe", "availableVersions": ["7.3", "7.4"] },
+      { "entityType": "SOFTWARE", "entityModel": "AOS", "clusterExtId": "mock-pe", "availableVersions": ["7.3.0.5", "7.4"] },
+      { "entityType": "SOFTWARE", "entityModel": "NCC", "clusterExtId": "mock-pe", "availableVersions": ["5.0.0"] },
+      { "entityType": "SOFTWARE", "entityModel": "Foundation", "clusterExtId": "mock-pe" },
+      { "entityType": "FIRMWARE", "entityModel": "NIC X550T", "clusterExtId": "mock-pe", "availableVersions": ["0x18a5"] },
+      { "entityType": "FIRMWARE", "entityModel": "NIC X550T", "clusterExtId": "mock-pe", "availableVersions": ["0x18a5"] },
+      { "entityType": "SOFTWARE", "entityModel": "NCC", "clusterExtId": "mock-pc", "availableVersions": ["5.0.0"] },
+      { "entityType": "SOFTWARE", "entityModel": "PC", "clusterExtId": "mock-pc", "availableVersions": ["7.3.1"] }
     ]
   },
   "GET /api/iam/v4.0/authn/users": {

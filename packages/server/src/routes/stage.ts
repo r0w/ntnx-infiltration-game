@@ -4,7 +4,7 @@ import { HttpError } from '../session-service';
 import type { LoadedPack } from '../pack-loader';
 import { NutanixTransportError } from '@ntnx-game/nutanix';
 import type { SubmitInputRequest } from '@ntnx-game/shared';
-import { discoverableNodeSerials } from '@ntnx-game/engine';
+import { countLcmAvailableUpdates, discoverableNodeSerials } from '@ntnx-game/engine';
 
 export interface StageRoutesDeps {
   service: SessionService;
@@ -189,21 +189,11 @@ async function lookupNodeSerial(ctx: import('@ntnx-game/engine').CheckContext): 
   }
 }
 
-/** Live lookup for stage 29 — count LCM entities exposing availableVersions. */
+/** Live lookup for stage 29 — count "Prism Element Clusters" LCM updates
+ *  the same way CheckUpdates does, so auto-fill ↔ validation stay aligned. */
 async function lookupNumberUpdates(ctx: import('@ntnx-game/engine').CheckContext): Promise<string | null> {
-  for (const v of ['v4.0.a1', 'v4.0', 'v4.2']) {
-    try {
-      const res = await ctx.nutanix.request<{
-        data?: Array<{ availableVersions?: unknown }>;
-      }>('GET', `/api/lifecycle/${v}/resources/entities`);
-      if (res?.data) {
-        return String(res.data.filter((e) => 'availableVersions' in e).length);
-      }
-    } catch {
-      // try next version
-    }
-  }
-  return null;
+  const count = await countLcmAvailableUpdates(ctx.nutanix, ctx.logger);
+  return count === null ? null : String(count);
 }
 
 /** Live lookup for stage 31 — query OldPC's v3/groups runway endpoint. */

@@ -6,5 +6,6 @@ export * from './action-registry';
 export * from './act-registry';
 export * from './capability-gate';
 export * from './discover-nodes';
+export * from './lcm-updates';
 export * from './locale-catalog';
 export * from './stage-runner';
