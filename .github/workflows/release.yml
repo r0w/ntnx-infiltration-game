@@ -295,9 +295,20 @@ jobs:
           # if absent. `gh release view` exits non-zero when the release
           # doesn't exist yet — that's the trigger to create it.
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --generate-notes \
-              --title "$TAG" \
-              --notes-start-tag "$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || echo "$TAG")"
+            # Bound the auto-generated notes to the previous existing tag
+            # when it's resolvable. On workflow_dispatch the release tag is
+            # often not a git ref yet, so `$TAG^` doesn't resolve — falling
+            # back to "$TAG" itself produced a self-referential, nonexistent
+            # previous_tag that GitHub rejects (HTTP 400 Invalid previous_tag).
+            # When no previous tag resolves, drop the flag entirely and let
+            # --generate-notes auto-pick the prior published release.
+            PREV_TAG="$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)"
+            if [[ -n "$PREV_TAG" ]]; then
+              gh release create "$TAG" --generate-notes --title "$TAG" \
+                --notes-start-tag "$PREV_TAG"
+            else
+              gh release create "$TAG" --generate-notes --title "$TAG"
+            fi
           fi
 
           # Release assets are renamed at upload time with a `nig-NN-`
