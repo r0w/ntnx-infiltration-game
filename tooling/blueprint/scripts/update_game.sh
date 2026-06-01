@@ -16,6 +16,14 @@ if [[ -n "$TOKEN" ]]; then
     echo "$TOKEN" | sudo docker login ghcr.io -u "${USERNAME:-x-access-token}" --password-stdin
 fi
 
+# Source IP the player whitelists for SSH in stage 19 — pinned via the
+# GAME_FRONTEND_HOST runtime var, else derived from this host's primary egress
+# IPv4 (read on the VM, not in the container, since traffic is NAT'd to the host).
+FRONTEND_HOST="@@{GAME_FRONTEND_HOST}@@"
+if [[ -z "$FRONTEND_HOST" ]]; then
+    FRONTEND_HOST="$(ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1)"
+fi
+
 sudo docker pull "$IMAGE"
 sudo docker rm -f "$CONTAINER" 2>/dev/null || true
 
@@ -39,7 +47,7 @@ sudo docker run -d \
     -e GAME_OLD_PC_USERNAME="@@{GAME_OLD_PC_USERNAME}@@" \
     -e GAME_OLD_PC_PASSWORD="@@{GAME_OLD_PC_PASSWORD}@@" \
     -e GAME_EMAIL_REPORT="@@{GAME_EMAIL_REPORT}@@" \
-    -e GAME_FRONTEND_HOST="@@{GAME_FRONTEND_HOST}@@" \
+    -e GAME_FRONTEND_HOST="$FRONTEND_HOST" \
     -e TZ="@@{TIMEZONE}@@" \
     "$IMAGE"
 
