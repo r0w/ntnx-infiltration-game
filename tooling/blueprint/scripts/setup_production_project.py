@@ -220,9 +220,12 @@ def import_ldap_user(directory_id):
 
 
 def get_user_uuid(username):
+    # IAM v4 caps $limit at 100 — filter server-side by username instead of
+    # listing everyone (a $limit=250 here was getting a 400 SchemaValidation).
     r = requests.get(
-        "%s/api/iam/v4.0/authn/users?$limit=250" % BASE,
+        "%s/api/iam/v4.0/authn/users" % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
+        params={"$filter": "username eq '%s'" % username, "$limit": 100},
     )
     # Don't raise on non-200; ACP setup is best-effort. Operator can
     # add the user to the project manually via Prism UI if needed.

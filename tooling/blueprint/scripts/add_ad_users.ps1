@@ -1,19 +1,29 @@
-if (-not (Get-ADUser -Filter "SamAccountName -eq 'TheBadGuy'" -EA SilentlyContinue)) {
-  New-ADUser -Name "TheBadGuy" -GivenName "Henry" -Surname "The Bad Guy" `
-    -SamAccountName "TheBadGuy" -UserPrincipalName "thebadguy" `
-    -EmailAddress "thebadguy@others.com" -Path "CN=Users,DC=ntnxlab,DC=local" `
-    -AccountPassword (ConvertTo-SecureString 'MyPassword4Prod!' -AsPlainText -Force) `
+$ErrorActionPreference = "Stop"
+
+function Ensure-GameUser {
+  param($Sam, $Given, $Surname, $Upn, $Email, $Password)
+  if (Get-ADUser -Filter "SamAccountName -eq '$Sam'" -EA SilentlyContinue) {
+    Write-Host "[skip] user '$Sam' already exists"
+    return
+  }
+  New-ADUser -Name $Sam -GivenName $Given -Surname $Surname `
+    -SamAccountName $Sam -UserPrincipalName $Upn `
+    -EmailAddress $Email -Path "CN=Users,DC=ntnxlab,DC=local" `
+    -AccountPassword (ConvertTo-SecureString $Password -AsPlainText -Force) `
     -Enabled $true -ChangePasswordAtLogon $false -CannotChangePassword $true
-} else {
-  Write-Host "User 'TheBadGuy' already exists, skipping."
+  Write-Host "[ok]   created user '$Sam' (UPN=$Upn)"
 }
 
-if (-not (Get-ADUser -Filter "SamAccountName -eq 'TheProjectManager'" -EA SilentlyContinue)) {
-  New-ADUser -Name "TheProjectManager" -GivenName "Paul" -Surname "Project Manager" `
-    -SamAccountName "TheProjectManager" -UserPrincipalName "theprojectmanager" `
-    -EmailAddress "theprojectmanager@others.com" -Path "CN=Users,DC=ntnxlab,DC=local" `
-    -AccountPassword (ConvertTo-SecureString 'MyPassword4Proj!' -AsPlainText -Force) `
-    -Enabled $true -ChangePasswordAtLogon $false -CannotChangePassword $true
-} else {
-  Write-Host "User 'TheProjectManager' already exists, skipping."
+Ensure-GameUser "TheBadGuy"        "Henry" "The Bad Guy"     "thebadguy"        "thebadguy@others.com"        "MyPassword4Prod!"
+Ensure-GameUser "TheProjectManager" "Paul"  "Project Manager" "theprojectmanager" "theprojectmanager@others.com" "MyPassword4Proj!"
+
+# Verify both are present so the task log proves the end state, not just the actions.
+Write-Host "--- AD users (CN=Users) ---"
+foreach ($sam in @("TheBadGuy", "TheProjectManager")) {
+  $u = Get-ADUser -Filter "SamAccountName -eq '$sam'" -Properties UserPrincipalName -EA SilentlyContinue
+  if ($u) {
+    Write-Host ("[present] {0}  UPN={1}  Enabled={2}" -f $u.SamAccountName, $u.UserPrincipalName, $u.Enabled)
+  } else {
+    Write-Host "[MISSING] $sam — creation failed"
+  }
 }
