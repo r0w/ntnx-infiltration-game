@@ -33,6 +33,14 @@ function readStoredTypingSpeed(): number | null {
   return null;
 }
 
+// Dev toggle: skip <pause/> beats + check-result dwells (independent of
+// text speed) for fast replays.
+const SKIP_PAUSES_KEY = 'terminal-skip-pauses';
+
+function readStoredSkipPauses(): boolean {
+  try { return localStorage.getItem(SKIP_PAUSES_KEY) === '1'; } catch { return false; }
+}
+
 export function GameApp() {
   const session = useSession();
   const [pack, setPack] = useState<PackInfo | null>(null);
@@ -40,6 +48,7 @@ export function GameApp() {
   const [typingSpeedOverride, setTypingSpeedOverride] = useState<number | null>(
     readStoredTypingSpeed,
   );
+  const [skipPauses, setSkipPauses] = useState<boolean>(readStoredSkipPauses);
   const [autoPlay, setAutoPlay] = useState(false);
   const [autoPlayActing, setAutoPlayActing] = useState(false);
   const [autoPlayError, setAutoPlayError] = useState<string | null>(null);
@@ -59,6 +68,10 @@ export function GameApp() {
       else localStorage.setItem(TYPING_SPEED_KEY, String(typingSpeedOverride));
     } catch { /* ignore */ }
   }, [typingSpeedOverride]);
+
+  useEffect(() => {
+    try { localStorage.setItem(SKIP_PAUSES_KEY, skipPauses ? '1' : '0'); } catch { /* ignore */ }
+  }, [skipPauses]);
 
   // null override → follow the server's pack speed.
   const typingSpeedMs = typingSpeedOverride ?? session.typingSpeedMs;
@@ -251,6 +264,7 @@ export function GameApp() {
         checkPending={session.checkPending}
         finished={session.finished}
         typingSpeedMs={typingSpeedMs}
+        skipPauses={skipPauses}
         gatedAt={session.gatedAt}
         locale={session.locale}
         autoPlay={autoPlay}
@@ -273,6 +287,8 @@ export function GameApp() {
           onToggleAutoPlay={() => setAutoPlay((v) => !v)}
           typingSpeedMs={typingSpeedMs}
           onTypingSpeedChange={setTypingSpeedOverride}
+          skipPauses={skipPauses}
+          onSkipPausesChange={setSkipPauses}
           mode={pack?.mode === 'live' ? undefined : pack?.mode}
           onGoto={handleGoto}
         />

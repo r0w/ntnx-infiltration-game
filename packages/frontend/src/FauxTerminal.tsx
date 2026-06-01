@@ -24,6 +24,8 @@ export interface FauxTerminalProps {
   locale: string;
   finished: boolean;
   typingSpeedMs: number;
+  /** Dev toggle: fire <pause/> beats + check dwells instantly. */
+  skipPauses: boolean;
   /**
    * When set, the player is parked at an admin-gated stage. The banner
    * surfaces only after the typewriter has caught up to items.length so
@@ -64,6 +66,7 @@ export function FauxTerminal({
   locale,
   finished,
   typingSpeedMs,
+  skipPauses,
   gatedAt,
   autoPlay,
   onSubmit,
@@ -218,6 +221,7 @@ export function FauxTerminal({
             key={item.id}
             item={item}
             typingSpeedMs={typingSpeedMs}
+            skipPauses={skipPauses}
             isActive={idx === activeIdx}
             onDone={advanceSequencer}
           />
@@ -317,11 +321,13 @@ export function FauxTerminal({
 function Line({
   item,
   typingSpeedMs,
+  skipPauses,
   isActive,
   onDone,
 }: {
   item: RenderItem;
   typingSpeedMs: number;
+  skipPauses: boolean;
   isActive: boolean;
   onDone: () => void;
 }) {
@@ -351,6 +357,7 @@ function Line({
     <TerminalItem
       item={item}
       typingSpeedMs={typingSpeedMs}
+      skipPauses={skipPauses}
       isActive={isActive}
       onDone={handleDone}
     />

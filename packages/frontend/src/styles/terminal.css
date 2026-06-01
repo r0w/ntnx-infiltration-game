@@ -1167,6 +1167,23 @@ a.terminal-link:visited {
   color: var(--fg);
   font-variant-numeric: tabular-nums;
 }
+.devpanel-skippauses {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 12px;
+  color: var(--dim);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  cursor: pointer;
+}
+.devpanel-skippauses input[type='checkbox'] {
+  accent-color: var(--accent);
+  cursor: pointer;
+  margin: 0;
+}
 .devpanel-autoplay-toggle {
   flex: 0 0 auto;
   display: inline-flex;
@@ -1184,9 +1201,13 @@ a.terminal-link:visited {
   letter-spacing: 0.04em;
   text-transform: lowercase;
 }
-.devpanel-autoplay-toggle:hover {
+.devpanel-autoplay-toggle:hover:not(:disabled) {
   color: var(--fg);
   border-color: var(--dim);
+}
+.devpanel-autoplay-toggle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 .devpanel-autoplay-toggle.is-active {
   background: rgba(124, 220, 254, 0.12);

@@ -23,6 +23,10 @@ export interface DevPanelProps {
   typingSpeedMs?: number;
   /** Sets a speed override (ms/char). 0 = instant. */
   onTypingSpeedChange?: (ms: number) => void;
+  /** Whether <pause/> beats + check dwells are skipped. */
+  skipPauses?: boolean;
+  /** Toggles skip-pauses. */
+  onSkipPausesChange?: (v: boolean) => void;
   /**
    * Server mode (`mock` | `test`). Surfaced in the toggle label so the
    * operator knows at a glance which adapter the session is hitting —
@@ -46,6 +50,8 @@ export function DevPanel({
   onToggleAutoPlay,
   typingSpeedMs,
   onTypingSpeedChange,
+  skipPauses,
+  onSkipPausesChange,
   mode,
   onGoto,
 }: DevPanelProps) {
@@ -151,10 +157,20 @@ export function DevPanel({
           {activeStageName ?? currentStage ?? 'pre-game'}
           {awaitingVariable ? ` · awaiting ${awaitingLabel(awaitingVariable)}` : ''}
         </button>
+        {onSkipPausesChange && (
+          <label className="devpanel-skippauses" title="Skip <pause> beats + check-result dwells">
+            <input
+              type="checkbox"
+              checked={!!skipPauses}
+              onChange={(e) => onSkipPausesChange(e.target.checked)}
+            />
+            <span>no pauses</span>
+          </label>
+        )}
         {onTypingSpeedChange && typeof typingSpeedMs === 'number' && (
           <label
             className="devpanel-speed"
-            title="Typewriter speed — drag right to skip the effect"
+            title="Typewriter speed — drag full right for instant"
           >
             <span>speed</span>
             <input
@@ -171,18 +187,23 @@ export function DevPanel({
             </span>
           </label>
         )}
-        {autoPlayEligible && onToggleAutoPlay && (
+        {onToggleAutoPlay && (
+          // Always rendered so the bar layout never shifts — just disabled
+          // until the player reaches a playable stage (post-login).
           <button
             type="button"
             className={`devpanel-autoplay-toggle${autoPlay ? ' is-active' : ''}${
               autoPlayActing ? ' is-acting' : ''
             }`}
             onClick={onToggleAutoPlay}
+            disabled={!autoPlayEligible}
             aria-pressed={autoPlay}
             title={
-              autoPlay
-                ? 'Auto-play armed — disarm to press Enter yourself'
-                : 'Auto-play: press Enter on every continue prompt'
+              !autoPlayEligible
+                ? 'Auto-play available once you reach a playable stage'
+                : autoPlay
+                  ? 'Auto-play armed — disarm to press Enter yourself'
+                  : 'Auto-play: press Enter on every continue prompt'
             }
           >
             <span className="devpanel-autoplay-icon" aria-hidden="true">
