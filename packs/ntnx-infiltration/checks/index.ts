@@ -1083,7 +1083,7 @@ async function CheckProtectionPolicy(ctx: CheckContext): Promise<CheckResult> {
     if (matchingCat.value !== 'Critical') {
       return {
         pass: false,
-        detail: `Protection policy '${expected}' targets '${expectedCatKey}:${matchingCat.value}' — re-target to '${expectedCatKey}:Critical'.`,
+        detail: `Protection policy '${expected}' targets '${expectedCatKey}:${matchingCat.value ?? 'unknown'}' — re-target to '${expectedCatKey}:Critical'.`,
       };
     }
     if (found.extId) {
