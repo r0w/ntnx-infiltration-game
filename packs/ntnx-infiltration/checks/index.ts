@@ -968,6 +968,7 @@ async function CheckSecurityPolicy2(ctx: CheckContext): Promise<CheckResult> {
 
     // A rule "opens SSH" if it references the `ssh` service group or covers tcp/22.
     const opensSsh = (s: MsegRuleSpec): boolean => {
+      if (s.destAllowSpec) return false; // outbound rule — not an inbound SSH allowance
       if (sshExtId && (s.serviceGroupReferences ?? []).includes(sshExtId)) return true;
       return (s.tcpServices ?? []).some((t) => (t.startPort ?? 0) <= 22 && (t.endPort ?? 0) >= 22);
     };
@@ -986,7 +987,9 @@ async function CheckSecurityPolicy2(ctx: CheckContext): Promise<CheckResult> {
     const restricted = sshRules.some((r) => {
       const v = r.spec?.srcSubnet?.value;
       if (!v) return false;
-      return frontendHost ? v === frontendHost : true;
+      // No frontendHost to pin against (offline/misconfigured) — at least demand
+      // a single-host /32 so a broad range like 0.0.0.0/0 can't sneak through.
+      return frontendHost ? v === frontendHost : r.spec?.srcSubnet?.prefixLength === 32;
     });
     if (!restricted) {
       const want = frontendHost ? ` to ${frontendHost}` : ' to a specific source IP';

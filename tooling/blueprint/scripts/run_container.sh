@@ -23,6 +23,8 @@ fi
 FRONTEND_HOST="@@{GAME_FRONTEND_HOST}@@"
 if [[ -z "$FRONTEND_HOST" ]]; then
     FRONTEND_HOST="$(ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1)"
+    # Fallback for hosts with no default route (isolated / host-only networks).
+    [[ -z "$FRONTEND_HOST" ]] && FRONTEND_HOST="$(hostname -I 2>/dev/null | awk '{print $1}')"
 fi
 
 sudo docker pull "$IMAGE"
