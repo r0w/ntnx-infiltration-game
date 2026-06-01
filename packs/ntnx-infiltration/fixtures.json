@@ -379,7 +379,7 @@
             }
           }
         ],
-        "categoryIds": ["cat-{Trigram}-test"]
+        "categoryIds": ["cat-{Trigram}-critical"]
       }
     ]
   },

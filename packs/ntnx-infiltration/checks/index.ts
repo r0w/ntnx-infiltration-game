@@ -1015,8 +1015,9 @@ async function CheckSecurityPolicy2(ctx: CheckContext): Promise<CheckResult> {
  * (a) RPO = 3600s,
  * (b) DAILY auto-rollup retention,
  * (c) scoped to category `{Trigram}-cat`,
- * (d) the category's bound value is NOT `Critical` (the prompt asks the
- *     player to attach to the *non-critical* tier — `Test`).
+ * (d) the category's bound value is `Critical` (matches the stage prompt:
+ *     "catégorie {Trigram}-cat et la valeur Critical"). This intentionally
+ *     diverges from the Python check, which rejected `Critical`.
  * Field paths use v4 datapolicies shape: `replicationConfigurations[].schedule`
  * + `categories[]` (each `{name, value}` per category-binding entry).
  */
@@ -1079,10 +1080,10 @@ async function CheckProtectionPolicy(ctx: CheckContext): Promise<CheckResult> {
         detail: `Protection policy '${expected}' is not scoped to '${expectedCatKey}'.`,
       };
     }
-    if (matchingCat.value === 'Critical') {
+    if (matchingCat.value !== 'Critical') {
       return {
         pass: false,
-        detail: `Protection policy '${expected}' targets '${expectedCatKey}:Critical' — re-target to '${expectedCatKey}:Test' (the non-critical tier).`,
+        detail: `Protection policy '${expected}' targets '${expectedCatKey}:${matchingCat.value}' — re-target to '${expectedCatKey}:Critical'.`,
       };
     }
     if (found.extId) {

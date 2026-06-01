@@ -950,10 +950,9 @@ async function actAllowSshInMicroseg(ctx: ActContext): Promise<void> {
 }
 
 /** Stage 20 create-protection-policy — creates `{Trigram}-prot-policy` with
- * RPO=3600s, DAILY auto-rollup retention, scoped to `{Trigram}-cat:Test`
- * (the non-critical tier — Python `CheckProtectionPolicy` rejects `Critical`
- * because the prompt asks the player to attach to the lower tier so the
- * snapshot policy doesn't churn against the critical workloads). */
+ * RPO=3600s, DAILY auto-rollup retention, scoped to `{Trigram}-cat:Critical`
+ * (the tier the prompt names; CheckProtectionPolicy now requires `Critical`,
+ * diverging from the Python check which rejected it). */
 async function actCreateProtectionPolicy(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
@@ -973,13 +972,12 @@ async function actCreateProtectionPolicy(ctx: ActContext): Promise<void> {
     ctx.logger.warn('actCreateProtectionPolicy: no domain-manager found');
     return;
   }
-  // Look up the player's `{trigram}-cat:Test` category to bind the policy
-  // to the non-critical tier. CheckProtectionPolicy rejects `Critical` by
-  // design — the prompt explicitly hands the player the low-impact category.
+  // Bind the policy to the player's `{trigram}-cat:Critical` category — the
+  // tier the prompt names, and what CheckProtectionPolicy now requires.
   const cats = await listAllSdk<AnyRec>(($p) => sdk(ctx).prism.categories.listCategories($p));
-  const testCat = cats.find((c) => c.key === `${trigram}-cat` && c.value === 'Test');
-  if (!testCat?.extId) {
-    ctx.logger.warn(`actCreateProtectionPolicy: ${trigram}-cat:Test missing — run create-category first`);
+  const criticalCat = cats.find((c) => c.key === `${trigram}-cat` && c.value === 'Critical');
+  if (!criticalCat?.extId) {
+    ctx.logger.warn(`actCreateProtectionPolicy: ${trigram}-cat:Critical missing — run create-category first`);
     return;
   }
   await ensure<AnyRec>({
@@ -1020,7 +1018,7 @@ async function actCreateProtectionPolicy(ctx: ActContext): Promise<void> {
           // Cluster v4 stores the binding as `categoryIds: [extId]` —
           // confirmed against an existing live `cur-prot-policy`. Sending
           // `categories: [{extId}]` is silently dropped.
-          categoryIds: [testCat.extId],
+          categoryIds: [criticalCat.extId],
         },
       )).data,
   });
