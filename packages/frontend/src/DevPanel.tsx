@@ -72,6 +72,7 @@ export function DevPanel({
   // (a backward goto truncates history), so we track it client-side to know
   // how far forward `test` mode may safely jump (cluster state exists there).
   const [highWaterIdx, setHighWaterIdx] = useState(0);
+  const [prevSessionId, setPrevSessionId] = useState(sessionId);
 
   useEffect(() => {
     let cancelled = false;
@@ -139,8 +140,15 @@ export function DevPanel({
     : null;
 
   const activeIdx = activeStageName && pack
-    ? pack.stages.findIndex((s) => s.name === activeStageName)
+    ? Math.max(0, pack.stages.findIndex((s) => s.name === activeStageName))
     : 0;
+  // A session hand-off (switch-identity / recovery switchTo) swaps sessionId
+  // without unmounting the panel — reset the high-water so the new session
+  // can't inherit the old one's reach.
+  if (sessionId !== prevSessionId) {
+    setPrevSessionId(sessionId);
+    setHighWaterIdx(activeIdx);
+  }
   useEffect(() => {
     setHighWaterIdx((hw) => (activeIdx > hw ? activeIdx : hw));
   }, [activeIdx]);
