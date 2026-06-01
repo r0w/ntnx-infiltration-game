@@ -189,7 +189,9 @@ function CheckDwell({
     }, ms);
     return () => clearTimeout(t);
   }, [isActive, ms, done]);
-  if (done || !isActive) return null;
+  // ms===0 (skip-pauses) would flash the spinner for one frame before the
+  // 0ms timeout fires — render nothing in that case.
+  if (done || !isActive || ms === 0) return null;
   return (
     <div className="terminal-check-pending" aria-live="polite">
       <BrailleSpinner className="terminal-check-pending-spinner" />
