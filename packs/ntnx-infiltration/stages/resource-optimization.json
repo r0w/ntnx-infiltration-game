@@ -10,6 +10,5 @@
     "stage-032.line-04"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "requires": ["PlannerCluster"]
 }

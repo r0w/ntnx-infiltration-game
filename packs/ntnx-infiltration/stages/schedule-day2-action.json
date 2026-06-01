@@ -12,7 +12,6 @@
     "stage-036.line-06"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "requiresOnOther": ["ApprovalPolicy"],
   "check": {
     "fn": "CheckSchedDay2"

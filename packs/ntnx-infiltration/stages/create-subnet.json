@@ -19,7 +19,6 @@
     "stage-010.line-13"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "check": {
     "fn": "CheckNetwork"
   },

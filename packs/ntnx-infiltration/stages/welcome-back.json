@@ -9,7 +9,6 @@
     "stage-025.line-03"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "needs": [
     "Username"
   ]

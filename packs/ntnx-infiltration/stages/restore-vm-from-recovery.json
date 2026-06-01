@@ -14,7 +14,6 @@
     "stage-026.line-08"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "check": {
     "fn": "CheckRestoreVM"
   },

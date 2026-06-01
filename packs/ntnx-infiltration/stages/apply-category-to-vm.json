@@ -10,7 +10,6 @@
     "stage-016.line-04"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "check": {
     "fn": "CheckCatVM"
   },

@@ -23,7 +23,6 @@
     "stage-035.line-17"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "check": {
     "fn": "CheckCloneApp"
   },

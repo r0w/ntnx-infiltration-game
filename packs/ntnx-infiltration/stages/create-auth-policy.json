@@ -9,7 +9,6 @@
     "stage-007.line-03"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "check": {
     "fn": "CheckAuthPolicy"
   },

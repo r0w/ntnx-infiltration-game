@@ -12,7 +12,6 @@
     "stage-009.line-06"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "check": {
     "fn": "CheckProject"
   },

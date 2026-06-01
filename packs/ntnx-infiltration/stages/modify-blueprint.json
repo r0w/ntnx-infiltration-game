@@ -14,7 +14,6 @@
     "stage-037.line-09"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "check": {
     "fn": "CheckUpdateBP"
   }

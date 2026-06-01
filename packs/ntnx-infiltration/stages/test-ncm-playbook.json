@@ -10,7 +10,6 @@
     "stage-034.line-04"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "needs": [
     "Trigram"
   ]

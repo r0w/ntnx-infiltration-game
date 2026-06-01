@@ -16,7 +16,6 @@
     "stage-006.line-10"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "check": {
     "fn": "CheckUser"
   },

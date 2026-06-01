@@ -13,7 +13,6 @@
     "stage-011.line-07"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "check": {
     "fn": "CheckImage"
   },

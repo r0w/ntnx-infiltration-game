@@ -17,7 +17,6 @@
     "stage-021.line-11"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "requiresOnOther": ["ApprovalPolicy"],
   "check": {
     "fn": "CheckApprovalPolicy"

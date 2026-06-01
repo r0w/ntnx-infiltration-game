@@ -18,7 +18,6 @@
     "stage-020.line-12"
   ],
   "saveScore": false,
-  "waitForInputValue": "Ok",
   "check": {
     "fn": "CheckProtectionPolicy"
   },

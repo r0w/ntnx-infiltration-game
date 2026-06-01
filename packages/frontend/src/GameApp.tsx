@@ -4,7 +4,7 @@ import { DevPanel } from './DevPanel';
 import { FauxTerminal } from './FauxTerminal';
 import { LoginForm } from './LoginForm';
 import { ConfirmModal } from './Modal';
-import { useSession } from './useSession';
+import { useSession, CONTINUE_VAR } from './useSession';
 
 type MaxWidth = '80ch' | '100ch' | '120ch' | 'none';
 const MAX_WIDTH_KEY = 'terminal-max-width';
@@ -84,14 +84,14 @@ export function GameApp() {
   );
   const handleAdvance = useCallback(() => void advance(), [advance]);
 
-  // Auto-play "Ok" handler. In `test` mode, fire the awaiting stage's act
+  // Auto-play continue handler. In `test` mode, fire the awaiting stage's act
   // first (= the cluster-side step the player would normally do via Prism)
-  // and only submit "Ok" once it succeeds — otherwise the check would run
+  // and only press Enter once it succeeds — otherwise the check would run
   // against a missing resource and fail. In `mock` we skip the act (no
-  // POST fixtures) and just submit; the GET fixtures already simulate the
+  // POST fixtures) and just advance; the GET fixtures already simulate the
   // post-act state. Act errors disarm autoplay so we don't loop on a
   // broken stage. 404 (no act registered) is expected for narrative-only
-  // stages — submit "Ok" anyway, there's no cluster work to do.
+  // stages — press Enter anyway, there's no cluster work to do.
   const handleAutoPlayOk = useCallback(async () => {
     if (!session.sessionId || !awaitingRef) return;
     // Named-var prompts that auto-fill from the cluster (NodeSerial,
@@ -170,7 +170,9 @@ export function GameApp() {
         setAutoPlayActing(false);
       }
     }
-    void submitInput(awaitingRef, 'Ok');
+    // Continue prompts now advance on a bare Enter (no waitForInputValue),
+    // so auto-play submits empty — same as the player pressing Enter.
+    void submitInput(awaitingRef, awaitingRef === CONTINUE_VAR ? '' : 'Ok');
   }, [session.sessionId, session.awaitingStageName, awaitingRef, pack?.mode, submitInput]);
   const handleGoto = useCallback((stageName: string) => void gotoStage(stageName), [gotoStage]);
   const handleSwitchIdentity = useCallback(
