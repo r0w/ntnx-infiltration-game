@@ -100,7 +100,11 @@ export function loadConfig(env = process.env): ServerConfig {
   return {
     port: asInt(env.PORT, 3000),
     dataDir: env.DATA_DIR ?? './data',
-    gamePack: env.GAME_PACK ?? 'ntnx-infiltration',
+    // `||` not `??` throughout: Calm var-substitution lands an empty string
+    // (not undefined) when a runtime var is left blank, which `??` won't catch
+    // — so an empty env would defeat these defaults. Same reasoning as
+    // adminPassword below.
+    gamePack: env.GAME_PACK || 'ntnx-infiltration',
     packsDir: env.PACKS_DIR ?? './packs',
     mode: asMode(env.MODE),
     pcEndpoint: env.PC_ENDPOINT ?? '',
@@ -116,9 +120,9 @@ export function loadConfig(env = process.env): ServerConfig {
     // Default to Jammy (cohérent w/ BP substrate; Noble cidata is unreliable
     // on some HPoC AHV builds — cf. project_ahv_use_jammy memory).
     gameImageUrl:
-      env.GAME_IMAGE_URL ??
+      env.GAME_IMAGE_URL ||
       'https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img',
-    gameEmailReport: env.GAME_EMAIL_REPORT ?? '-secret-message@ntnxlab.com',
+    gameEmailReport: env.GAME_EMAIL_REPORT || '-secret-message@ntnxlab.com',
     gameProdUsername: env.GAME_PROD_USERNAME ?? '',
     gameProdPassword: env.GAME_PROD_PASSWORD ?? '',
     gameFrontendHost: env.GAME_FRONTEND_HOST ?? '',
