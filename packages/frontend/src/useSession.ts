@@ -219,10 +219,16 @@ export function useSession(): SessionHandle {
       // popping in mid-pause. The advance() trigger is suppressed by
       // gatedRef.current; the poll effect below pings the server until
       // the operator unlocks.
-      setGatedAt({
-        stageName: r.stageName ?? null,
-        reason: r.gatedReason ?? 'stage',
-      });
+      // Keep the object reference stable across poll ticks — the gate poll
+      // re-runs handleResponse every 1 s, and a fresh object each time would
+      // re-fire FauxTerminal's gate scroll-to-bottom effect, yanking the
+      // player back down every second and blocking free scroll while paused.
+      const nextStage = r.stageName ?? null;
+      const nextReason = r.gatedReason ?? 'stage';
+      const prevGate = gatedRef.current;
+      if (!prevGate || prevGate.stageName !== nextStage || prevGate.reason !== nextReason) {
+        setGatedAt({ stageName: nextStage, reason: nextReason });
+      }
       return;
     }
     // Any non-gated response clears a prior gated state so the normal flow
