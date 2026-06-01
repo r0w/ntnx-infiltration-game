@@ -179,7 +179,7 @@
   "stage-028.line-03": "Prenez simplement une capture d'écran de la page de revue, cela sera utile pour une future mission. Je ne peux pas vous en dire plus pour le moment. <pause sec='3'/>\n\n",
   "stage-028.line-04": "Veuillez me donner <white>le numéro de série</white> du nouveau noeud : <input var='NodeSerial'/>",
   "stage-029.line-01": "Il y a un autre point que je voudrais que vous vérifiez pour cette future mission : l'état des mises à jour.\n\n",
-  "stage-029.line-02": "Allez jeter un oeil sur la page <white>Admin Center > LCM</white> pour voir ce qui est intallé dans <white>Prism Central</white> et prenez une capture d'écran de la liste des produits et de la version actuelle.\n",
+  "stage-029.line-02": "Allez jeter un oeil sur la page <white>Admin Center > LCM</white> pour voir ce qui est installé dans <white>Prism Central</white> et prenez une capture d'écran de la liste des produits et de la version actuelle.\n",
   "stage-029.line-03": "Vérifiez également si des mises à jour sont disponibles pour la plateforme. Vous me l'enverrez plus tard. <pause sec='3'/>\n\n",
   "stage-029.line-04": "Dites-moi <white>combien de mises à jour</white> sont disponibles : <input var='NumberUpdates'/>",
   "stage-030.line-01": "Très bien !<pause sec='2'/> Il y a une dernière vérification à faire ... <pause sec='1'/>\n\n",
