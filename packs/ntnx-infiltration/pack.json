@@ -51,5 +51,5 @@
   ],
   "locales": "./locales",
   "defaultLocale": "en",
-  "supportedLocales": ["en", "fr"]
+  "supportedLocales": ["en", "fr", "de"]
 }
