@@ -42,6 +42,15 @@ export const TerminalItem = memo(function TerminalItem({
     // replaying for the Nth time doesn't wait them out.
     return <PauseUnit ms={skipPauses ? 0 : item.ms} isActive={isActive} onDone={onDone} />;
   }
+  if (item.kind === 'check-dwell') {
+    // The "let me check…" beat: hold a labelled spinner between the
+    // operator's narration and the verdict so the check reads as actually
+    // happening, instead of the result landing on the same frame as the
+    // line announcing it. skip-pauses drops it for dev/auto replays.
+    return (
+      <CheckDwell ms={skipPauses ? 0 : item.ms} label={item.label} isActive={isActive} onDone={onDone} />
+    );
+  }
   if (item.kind === 'info') {
     return (
       <InstantLine color={item.color} isActive={isActive} onDone={onDone}>
@@ -114,6 +123,16 @@ const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', 
 const SPINNER_FRAME_MS = 80;
 const SPINNER_MIN_PAUSE_MS = 400;
 
+/** Localized label for the check-pending spinner. Falls back to `en` when the
+ *  active locale isn't translated. Single source of truth — consumed by the
+ *  inline network spinner in FauxTerminal and by the post-narration
+ *  `check-dwell` item below. */
+export const VERIFYING_LABELS: Record<string, string> = {
+  en: 'verifying…',
+  fr: 'vérification…',
+  de: 'Überprüfung…',
+};
+
 /** Animated Braille-dot glyph. Reused by PauseUnit (in-line during long
  *  `<pause/>`s) and by FauxTerminal's `verifying…` indicator. `className`
  *  defaults to `pause-spinner` to match the existing visual; pass a custom
@@ -143,6 +162,40 @@ function PauseUnit({ ms, isActive, onDone }: { ms: number; isActive: boolean; on
   }, [isActive, ms, done]);
   if (done || !isActive || ms < SPINNER_MIN_PAUSE_MS) return null;
   return <BrailleSpinner />;
+}
+
+/** Holds the labelled `verifying…` spinner for `ms` then passes the baton to
+ *  the check-result. Same markup as FauxTerminal's network spinner so the two
+ *  read as one continuous "checking" beat. Fires onDone once. */
+function CheckDwell({
+  ms,
+  label,
+  isActive,
+  onDone,
+}: {
+  ms: number;
+  label: string;
+  isActive: boolean;
+  onDone: () => void;
+}) {
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    if (!isActive || done) return;
+    const t = setTimeout(() => {
+      setDone(true);
+      onDoneRef.current();
+    }, ms);
+    return () => clearTimeout(t);
+  }, [isActive, ms, done]);
+  if (done || !isActive) return null;
+  return (
+    <div className="terminal-check-pending" aria-live="polite">
+      <BrailleSpinner className="terminal-check-pending-spinner" />
+      <span className="c-dim">{label}</span>
+    </div>
+  );
 }
 
 function InstantLine({
