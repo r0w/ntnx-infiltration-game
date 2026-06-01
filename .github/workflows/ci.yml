@@ -185,7 +185,7 @@ jobs:
         # (the test steps above already failed the job on a real failure).
         # require_tests=false: if an earlier step (e.g. typecheck) failed
         # before tests ran, just warn on the missing file instead of erroring.
-        uses: mikepenz/action-junit-report@v5
+        uses: mikepenz/action-junit-report@v6
         if: always()
         with:
           report_paths: 'junit-*.xml'
