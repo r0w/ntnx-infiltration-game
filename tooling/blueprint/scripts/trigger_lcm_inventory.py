@@ -32,24 +32,21 @@ HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
 def main():
     # The v4 LCM action is `inventory` (NOT `perform-inventory` — that
-    # path 404s, the bug seen in the 2026-06-01 run). Try newest version
-    # first, fall back to older ones for clusters that lag.
-    last = None
-    for path in (
-        "/api/lifecycle/v4.2/operations/$actions/inventory",
-        "/api/lifecycle/v4.0/operations/$actions/inventory",
-    ):
-        r = requests.post(BASE + path, auth=AUTH, headers=HEADERS,
-                          verify=False, timeout=20, data="{}")
-        last = (path, r.status_code, r.text[:200])
-        if r.status_code in (200, 201, 202):
-            print("[ok]   LCM inventory triggered via %s — task running async" % path)
-            return 0
+    # path 404s, the bug seen in the 2026-06-01 run). v4.2 (PC 7.3+) is
+    # the only version we target: verified live = 202 with a `{}` body.
+    # No older fallback — v4.0 rejects any body ("No request body is
+    # expected"), so it'd 400 anyway on the 7.5 HPoC we ship to.
+    path = "/api/lifecycle/v4.2/operations/$actions/inventory"
+    r = requests.post(BASE + path, auth=AUTH, headers=HEADERS,
+                      verify=False, timeout=20, data="{}")
+    if r.status_code in (200, 201, 202):
+        print("[ok]   LCM inventory triggered via %s — task running async" % path)
+        return 0
 
-    # All v4 paths failed. Best-effort log + non-fatal exit (the LCM scan
-    # might still fire from the regular scheduler before the player reaches
-    # stage 29).
-    print("[warn] could not trigger LCM inventory: last=%r — relying on PC's scheduler" % (last,))
+    # Failed. Best-effort log + non-fatal exit (the LCM scan might still
+    # fire from the regular scheduler before the player reaches stage 29).
+    print("[warn] could not trigger LCM inventory: %s -> %d %s — relying on PC's scheduler"
+          % (path, r.status_code, r.text[:200]))
     return 0
 
 
