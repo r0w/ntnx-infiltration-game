@@ -241,3 +241,99 @@ async function pollDiscoverTask(
   }
   throw new Error(`discover task timed out (last status: ${lastStatus ?? 'none'})`);
 }
+
+/** Shape we read off `/lifecycle/.../resources/entities` (only the counted fields). */
+interface LcmEntity {
+  entityType?: string;
+  entityModel?: string;
+  availableVersions?: unknown;
+  clusterExtId?: string;
+}
+
+/**
+ * Pack-local copy of the engine's `countLcmAvailableUpdates` (same body, same
+ * semantics — see the note on `discoverableNodeSerials` above for why the pack
+ * carries its own copy). Counts the "Prism Element Clusters" LCM updates the
+ * player sees: paginate all entities, keep only PE clusters
+ * (`clusterType === 'AOS'` per lcm-summaries — the PCVM is itself an AOS-
+ * software cluster so locationType can't tell the tabs apart), dedup per-node
+ * rows by (cluster, type, model). Returns null when LCM is unreachable so the
+ * caller falls back to format-only validation. Keep in sync with
+ * `packages/engine/src/lcm-updates.ts`.
+ */
+export async function countLcmAvailableUpdates(
+  nutanix: NutanixClient,
+  logger?: Pick<Logger, 'debug' | 'warn'>,
+): Promise<number | null> {
+  const entities = await fetchLcmEntities(nutanix, logger);
+  if (entities === null) return null;
+  const peClusters = await fetchPeClusterIds(nutanix, logger);
+  if (peClusters === null) return null;
+  const seen = new Set<string>();
+  for (const e of entities) {
+    const av = e.availableVersions;
+    const hasUpdate = Array.isArray(av) ? av.length > 0 : Boolean(av);
+    if (!hasUpdate) continue;
+    if (!e.clusterExtId || !peClusters.has(e.clusterExtId)) continue; // PE tab only
+    seen.add(`${e.clusterExtId}|${e.entityType ?? ''}|${e.entityModel ?? ''}`);
+  }
+  return seen.size;
+}
+
+async function fetchLcmEntities(
+  nutanix: NutanixClient,
+  logger?: Pick<Logger, 'debug' | 'warn'>,
+): Promise<LcmEntity[] | null> {
+  for (const v of ['v4.2', 'v4.0']) {
+    try {
+      const all: LcmEntity[] = [];
+      for (let page = 0; ; page++) {
+        const res = await nutanix.request<{ data?: LcmEntity[] }>(
+          'GET',
+          `/api/lifecycle/${v}/resources/entities?$limit=100&$page=${page}`,
+        );
+        const batch = res?.data;
+        if (!Array.isArray(batch)) {
+          if (page === 0) throw new Error('no data field');
+          break;
+        }
+        all.push(...batch);
+        if (batch.length < 100) break;
+      }
+      return all;
+    } catch (err) {
+      logger?.debug?.('LCM entities fetch failed, trying next version', {
+        version: v,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return null;
+}
+
+/** clusterExtId set for every PE cluster (clusterType === 'AOS'). */
+async function fetchPeClusterIds(
+  nutanix: NutanixClient,
+  logger?: Pick<Logger, 'debug' | 'warn'>,
+): Promise<Set<string> | null> {
+  for (const v of ['v4.2', 'v4.0']) {
+    try {
+      const res = await nutanix.request<{
+        data?: Array<{ clusterExtId?: string; clusterType?: string }>;
+      }>('GET', `/api/lifecycle/${v}/resources/lcm-summaries`);
+      const data = res?.data;
+      if (!Array.isArray(data)) throw new Error('no data field');
+      const ids = new Set<string>();
+      for (const s of data) {
+        if (s.clusterType === 'AOS' && s.clusterExtId) ids.add(s.clusterExtId);
+      }
+      return ids;
+    } catch (err) {
+      logger?.debug?.('LCM summaries fetch failed, trying next version', {
+        version: v,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return null;
+}

@@ -1,6 +1,7 @@
 import type { CheckContext, CheckResult } from '@ntnx-game/engine';
 import {
   cacheEntity,
+  countLcmAvailableUpdates,
   discoverableNodeSerials,
   getTrigram,
   listAll,
@@ -1327,24 +1328,11 @@ async function CheckUpdates(ctx: CheckContext): Promise<CheckResult> {
   // Always query live — operators want this stage to validate against
   // the current LCM inventory (a scan + new updates may have landed
   // since boot). Boot-time cache was an optimization that went stale;
-  // pay the LCM round-trip per attempt instead.
+  // pay the LCM round-trip per attempt instead. Count matches the
+  // "Prism Element Clusters" LCM tab, grouped by component.
   try {
-    let entities: Array<{ availableVersions?: unknown }> = [];
-    for (const v of ['v4.0.a1', 'v4.0', 'v4.2']) {
-      try {
-        const res = await ctx.nutanix.request<{ data?: typeof entities }>(
-          'GET',
-          `/api/lifecycle/${v}/resources/entities`,
-        );
-        if (res?.data) {
-          entities = res.data;
-          break;
-        }
-      } catch {
-        // try next version
-      }
-    }
-    if (entities.length === 0) {
+    const actual = await countLcmAvailableUpdates(ctx.nutanix, ctx.logger);
+    if (actual === null) {
       // LCM endpoint not reachable on this PC — fall back to format-only
       // validation so the stage doesn't block when LCM isn't reachable.
       return {
@@ -1352,7 +1340,6 @@ async function CheckUpdates(ctx: CheckContext): Promise<CheckResult> {
         detail: `${submitted} update(s) recorded (LCM endpoint unreachable, format-only validation).`,
       };
     }
-    const actual = entities.filter((e) => 'availableVersions' in e).length;
     if (actual !== submitted) {
       return {
         pass: false,

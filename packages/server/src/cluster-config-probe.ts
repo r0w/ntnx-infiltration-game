@@ -1,5 +1,5 @@
 import type { Logger, NutanixClient } from '@ntnx-game/engine';
-import { discoverableNodeSerials } from '@ntnx-game/engine';
+import { countLcmAvailableUpdates, discoverableNodeSerials } from '@ntnx-game/engine';
 import { ClusterConfigQueries } from './db/queries';
 
 export interface ClusterConfigProbeDeps {
@@ -51,24 +51,12 @@ export async function probeClusterConfig(deps: ClusterConfigProbeDeps): Promise<
   }
 
   // ─── LCM available updates count ────────────────────────────────────
+  // "Prism Element Clusters" tab, grouped by component (see
+  // countLcmAvailableUpdates). null = LCM unreachable → leave the key unset
+  // so check-time falls back to a live query.
   try {
-    let entities: Array<{ availableVersions?: unknown }> = [];
-    for (const v of ['v4.0.a1', 'v4.0', 'v4.2']) {
-      try {
-        const res = await nutanix.request<{ data?: typeof entities }>(
-          'GET',
-          `/api/lifecycle/${v}/resources/entities`,
-        );
-        if (res?.data) {
-          entities = res.data;
-          break;
-        }
-      } catch {
-        // try next version
-      }
-    }
-    if (entities.length > 0) {
-      const count = entities.filter((e) => 'availableVersions' in e).length;
+    const count = await countLcmAvailableUpdates(nutanix, logger);
+    if (count !== null) {
       const inserted = cfg.setIfAbsent('lcm_available_updates', count);
       logger.info(
         inserted
