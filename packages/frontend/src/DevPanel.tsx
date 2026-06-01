@@ -55,6 +55,10 @@ export function DevPanel({
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Furthest stage actually reached this session. The server forgets it
+  // (a backward goto truncates history), so we track it client-side to know
+  // how far forward `test` mode may safely jump (cluster state exists there).
+  const [highWaterIdx, setHighWaterIdx] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -121,6 +125,13 @@ export function DevPanel({
           ]?.name ?? null)
     : null;
 
+  const activeIdx = activeStageName && pack
+    ? pack.stages.findIndex((s) => s.name === activeStageName)
+    : 0;
+  useEffect(() => {
+    setHighWaterIdx((hw) => (activeIdx > hw ? activeIdx : hw));
+  }, [activeIdx]);
+
   return (
     <div className={`devpanel ${open ? 'devpanel-open' : ''}`}>
       {/* Flex row: a button can't nest in a button, so the auto-play
@@ -170,8 +181,8 @@ export function DevPanel({
             aria-pressed={autoPlay}
             title={
               autoPlay
-                ? 'Auto-play armed — disarm to type "Ok" yourself'
-                : 'Auto-play: submit "Ok" on every press-enter prompt'
+                ? 'Auto-play armed — disarm to press Enter yourself'
+                : 'Auto-play: press Enter on every continue prompt'
             }
           >
             <span className="devpanel-autoplay-icon" aria-hidden="true">
@@ -203,9 +214,11 @@ export function DevPanel({
           {pack && (
             <>
               <div className="devpanel-legend">
-                <strong>{pack.name}</strong> · click a stage to <em>jump back</em>
-                {' '}(forward jumps are disabled to prevent skipping cluster-side
-                state). Captured variables &amp; UUIDs are kept.
+                <strong>{pack.name}</strong> · click a stage to <em>jump</em> there.
+                {' '}{mode === 'mock'
+                  ? 'Any stage — mock has no real cluster deps.'
+                  : 'Forward only up to the furthest stage you reached (test cluster has no state beyond it).'}
+                {' '}Captured variables &amp; UUIDs are kept.
               </div>
               {/* Actions only make sense in mock mode — they simulate a
                   cluster side-effect via the mock overlay. In `test` the
@@ -235,20 +248,15 @@ export function DevPanel({
                 </div>
               )}
               <div className="devpanel-stages">
-                {(() => {
-                  const activeIdx = activeStageName
-                    ? pack.stages.findIndex((s) => s.name === activeStageName)
-                    : 0;
-                  return pack.stages.map((s, idx) => {
+                {pack.stages.map((s, idx) => {
                     // Highlight the stage that's about to play (== the one
                     // right after the last completed stage). Clicking a chip
-                    // jumps the session BACK to that stage's name. Forward
-                    // jumps disabled — skipping past a stage leaves cluster
-                    // state in an undefined shape (e.g. jumping from #5 to
-                    // #20 means VM/category/etc. were never created and
-                    // every downstream check fails).
+                    // jumps the session to that stage. Mock has no real
+                    // cluster deps so any jump is fine; test/live only allow
+                    // jumping up to the furthest stage actually reached
+                    // (the cluster has no state for stages never played).
                     const isCurrent = s.name === activeStageName;
-                    const isForward = idx > activeIdx;
+                    const blocked = mode === 'mock' ? false : idx > highWaterIdx;
                     // Only mark hpoc-only stages red when the engine
                     // would actually skip them (clusterProfile=other).
                     // On hpoc those stages play normally and red is just
@@ -258,7 +266,7 @@ export function DevPanel({
                     const cls = [
                       'devpanel-stage',
                       isCurrent && 'devpanel-stage-current',
-                      isForward && 'devpanel-stage-forward',
+                      blocked && 'devpanel-stage-forward',
                       !s.active && 'devpanel-stage-inactive',
                       hpocOnlyFiltered && 'devpanel-stage-destructive',
                     ]
@@ -270,10 +278,10 @@ export function DevPanel({
                         type="button"
                         className={cls}
                         onClick={() => onGoto(s.name)}
-                        disabled={busy || isForward}
+                        disabled={busy || blocked}
                         title={[
                           s.name,
-                          isForward ? 'forward jump disabled' : null,
+                          blocked ? 'not reached yet (test mode)' : null,
                           hpocOnlyFiltered
                             ? `hpoc-only (filtered on clusterProfile='${pack.clusterProfile}')`
                             : null,
@@ -286,8 +294,7 @@ export function DevPanel({
                         {s.name}
                       </button>
                     );
-                  });
-                })()}
+                  })}
               </div>
             </>
           )}
