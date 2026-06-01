@@ -10,6 +10,7 @@ import { awaitingLabel, CONTINUE_VAR, type GatedAt, type RenderItem } from './us
 const VERIFYING_LABELS: Record<string, string> = {
   en: 'verifying…',
   fr: 'vérification…',
+  de: 'Überprüfung…',
 };
 
 export interface FauxTerminalProps {
