@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import { api, type PackInfo } from './api';
 import { awaitingLabel } from './useSession';
 
+// Slowest the speed slider goes (ms/char). Slider right edge = 0 = instant.
+const SPEED_MAX_MS = 50;
+
 export interface DevPanelProps {
   sessionId: string | null;
   /** Canonical name of the last completed stage; `null` = pre-game. */
@@ -16,6 +19,10 @@ export interface DevPanelProps {
   autoPlayEligible?: boolean;
   /** Arms / disarms auto-play. */
   onToggleAutoPlay?: () => void;
+  /** Current typewriter speed (ms/char) — drives the speed slider. */
+  typingSpeedMs?: number;
+  /** Sets a speed override (ms/char). 0 = instant. */
+  onTypingSpeedChange?: (ms: number) => void;
   /**
    * Server mode (`mock` | `test`). Surfaced in the toggle label so the
    * operator knows at a glance which adapter the session is hitting —
@@ -37,6 +44,8 @@ export function DevPanel({
   autoPlayActing,
   autoPlayEligible,
   onToggleAutoPlay,
+  typingSpeedMs,
+  onTypingSpeedChange,
   mode,
   onGoto,
 }: DevPanelProps) {
@@ -131,6 +140,26 @@ export function DevPanel({
           {activeStageName ?? currentStage ?? 'pre-game'}
           {awaitingVariable ? ` · awaiting ${awaitingLabel(awaitingVariable)}` : ''}
         </button>
+        {onTypingSpeedChange && typeof typingSpeedMs === 'number' && (
+          <label
+            className="devpanel-speed"
+            title="Typewriter speed — drag right to skip the effect"
+          >
+            <span>speed</span>
+            <input
+              type="range"
+              min={0}
+              max={SPEED_MAX_MS}
+              step={1}
+              // Slider value is inverted so right = fast (low ms).
+              value={SPEED_MAX_MS - Math.min(typingSpeedMs, SPEED_MAX_MS)}
+              onChange={(e) => onTypingSpeedChange(SPEED_MAX_MS - Number(e.target.value))}
+            />
+            <span className="devpanel-speed-val">
+              {typingSpeedMs === 0 ? 'instant' : `${typingSpeedMs}ms`}
+            </span>
+          </label>
+        )}
         {autoPlayEligible && onToggleAutoPlay && (
           <button
             type="button"

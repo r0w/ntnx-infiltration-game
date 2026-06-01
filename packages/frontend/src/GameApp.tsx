@@ -18,10 +18,28 @@ function readStoredMaxWidth(): MaxWidth {
   return 'none';
 }
 
+// Dev override for the typewriter speed (ms/char). null = use the server's
+// pack value. Lets the operator speed up / skip the effect on the 20th replay.
+const TYPING_SPEED_KEY = 'terminal-typing-speed';
+
+function readStoredTypingSpeed(): number | null {
+  try {
+    const v = localStorage.getItem(TYPING_SPEED_KEY);
+    if (v !== null && v !== '') {
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 0) return n;
+    }
+  } catch { /* localStorage blocked */ }
+  return null;
+}
+
 export function GameApp() {
   const session = useSession();
   const [pack, setPack] = useState<PackInfo | null>(null);
   const [maxWidth, setMaxWidth] = useState<MaxWidth>(readStoredMaxWidth);
+  const [typingSpeedOverride, setTypingSpeedOverride] = useState<number | null>(
+    readStoredTypingSpeed,
+  );
   const [autoPlay, setAutoPlay] = useState(false);
   const [autoPlayActing, setAutoPlayActing] = useState(false);
   const [autoPlayError, setAutoPlayError] = useState<string | null>(null);
@@ -34,6 +52,16 @@ export function GameApp() {
   useEffect(() => {
     try { localStorage.setItem(MAX_WIDTH_KEY, maxWidth); } catch { /* ignore */ }
   }, [maxWidth]);
+
+  useEffect(() => {
+    try {
+      if (typingSpeedOverride === null) localStorage.removeItem(TYPING_SPEED_KEY);
+      else localStorage.setItem(TYPING_SPEED_KEY, String(typingSpeedOverride));
+    } catch { /* ignore */ }
+  }, [typingSpeedOverride]);
+
+  // null override → follow the server's pack speed.
+  const typingSpeedMs = typingSpeedOverride ?? session.typingSpeedMs;
 
   useEffect(() => {
     document.title = 'ntnx infiltration game';
@@ -159,8 +187,8 @@ export function GameApp() {
     (session.currentStage === null || session.currentStage === 'lore');
 
   // Auto-play eligibility: the toggle only appears once the player has typed
-  // their Trigram + PIN (login) and Username (intro-ego-greet). currentStage
-  // tracks the last completed stage, so it lands on `intro-ego-greet` exactly
+  // their Trigram + PIN (login) and Username (intro-tank-greet). currentStage
+  // tracks the last completed stage, so it lands on `intro-tank-greet` exactly
   // when Username has just been captured. Also gated on `mode !== 'live'` —
   // production demos should never let the operator skip a stage with one
   // click. Defaults to **hidden** until the pack loads so live mode never
@@ -220,7 +248,7 @@ export function GameApp() {
         busy={session.busy || autoPlayActing}
         checkPending={session.checkPending}
         finished={session.finished}
-        typingSpeedMs={session.typingSpeedMs}
+        typingSpeedMs={typingSpeedMs}
         gatedAt={session.gatedAt}
         locale={session.locale}
         autoPlay={autoPlay}
@@ -241,6 +269,8 @@ export function GameApp() {
           autoPlayActing={autoPlayActing}
           autoPlayEligible={autoPlayVisible}
           onToggleAutoPlay={() => setAutoPlay((v) => !v)}
+          typingSpeedMs={typingSpeedMs}
+          onTypingSpeedChange={setTypingSpeedOverride}
           mode={pack?.mode === 'live' ? undefined : pack?.mode}
           onGoto={handleGoto}
         />

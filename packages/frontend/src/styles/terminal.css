@@ -1145,6 +1145,28 @@ a.terminal-link:visited {
 .devpanel-mode-unknown {
   color: var(--dim);
 }
+.devpanel-speed {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 12px;
+  color: var(--dim);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  cursor: pointer;
+}
+.devpanel-speed input[type='range'] {
+  width: 80px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.devpanel-speed-val {
+  min-width: 46px;        /* fixed so the bar doesn't jitter as the value changes */
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
 .devpanel-autoplay-toggle {
   flex: 0 0 auto;
   display: inline-flex;
