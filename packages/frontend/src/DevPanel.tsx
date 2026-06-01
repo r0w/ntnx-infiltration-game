@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { api, type PackInfo } from './api';
 import { awaitingLabel } from './useSession';
 
-// Slowest the speed slider goes (ms/char). Slider right edge = 0 = instant.
-const SPEED_MAX_MS = 50;
+// Fallback typewriter speed (ms/char) when the pack default isn't known yet.
+// The slider's slowest step is 2× the default; its right edge is 0 = instant.
+const DEFAULT_TYPING_MS = 15;
 
 export interface DevPanelProps {
   sessionId: string | null;
@@ -21,8 +22,12 @@ export interface DevPanelProps {
   onToggleAutoPlay?: () => void;
   /** Current typewriter speed (ms/char) — drives the speed slider. */
   typingSpeedMs?: number;
+  /** Server/pack default speed (ms/char). Slowest slider step = 2× this. */
+  typingSpeedDefaultMs?: number;
   /** Sets a speed override (ms/char). 0 = instant. */
   onTypingSpeedChange?: (ms: number) => void;
+  /** Clears the override (double-click) → back to the default speed. */
+  onTypingSpeedReset?: () => void;
   /** Whether <pause/> beats + check dwells are skipped. */
   skipPauses?: boolean;
   /** Toggles skip-pauses. */
@@ -49,7 +54,9 @@ export function DevPanel({
   autoPlayEligible,
   onToggleAutoPlay,
   typingSpeedMs,
+  typingSpeedDefaultMs,
   onTypingSpeedChange,
+  onTypingSpeedReset,
   skipPauses,
   onSkipPausesChange,
   mode,
@@ -167,26 +174,32 @@ export function DevPanel({
             <span>no pauses</span>
           </label>
         )}
-        {onTypingSpeedChange && typeof typingSpeedMs === 'number' && (
-          <label
-            className="devpanel-speed"
-            title="Typewriter speed — drag full right for instant"
-          >
-            <span>speed</span>
-            <input
-              type="range"
-              min={0}
-              max={SPEED_MAX_MS}
-              step={1}
-              // Slider value is inverted so right = fast (low ms).
-              value={SPEED_MAX_MS - Math.min(typingSpeedMs, SPEED_MAX_MS)}
-              onChange={(e) => onTypingSpeedChange(SPEED_MAX_MS - Number(e.target.value))}
-            />
-            <span className="devpanel-speed-val">
-              {typingSpeedMs === 0 ? 'instant' : `${typingSpeedMs}ms`}
-            </span>
-          </label>
-        )}
+        {onTypingSpeedChange && typeof typingSpeedMs === 'number' && (() => {
+          // Slowest = 2× the pack default; right edge = 0 = instant. The
+          // default sits at the slider's midpoint.
+          const speedMax = 2 * (typingSpeedDefaultMs ?? DEFAULT_TYPING_MS);
+          return (
+            <label
+              className="devpanel-speed"
+              title="Typewriter speed — full right = instant · double-click to reset"
+              onDoubleClick={() => onTypingSpeedReset?.()}
+            >
+              <span>speed</span>
+              <input
+                type="range"
+                min={0}
+                max={speedMax}
+                step={1}
+                // Slider value is inverted so right = fast (low ms).
+                value={speedMax - Math.min(typingSpeedMs, speedMax)}
+                onChange={(e) => onTypingSpeedChange(speedMax - Number(e.target.value))}
+              />
+              <span className="devpanel-speed-val">
+                {typingSpeedMs === 0 ? 'instant' : `${typingSpeedMs}ms`}
+              </span>
+            </label>
+          );
+        })()}
         {onToggleAutoPlay && (
           // Always rendered so the bar layout never shifts — just disabled
           // until the player reaches a playable stage (post-login).

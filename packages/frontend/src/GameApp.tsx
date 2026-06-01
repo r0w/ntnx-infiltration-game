@@ -286,7 +286,9 @@ export function GameApp() {
           autoPlayEligible={autoPlayVisible}
           onToggleAutoPlay={() => setAutoPlay((v) => !v)}
           typingSpeedMs={typingSpeedMs}
+          typingSpeedDefaultMs={session.typingSpeedMs}
           onTypingSpeedChange={setTypingSpeedOverride}
+          onTypingSpeedReset={() => setTypingSpeedOverride(null)}
           skipPauses={skipPauses}
           onSkipPausesChange={setSkipPauses}
           mode={pack?.mode === 'live' ? undefined : pack?.mode}
