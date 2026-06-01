@@ -853,6 +853,7 @@ interface MsegRuleSpec {
   securedGroupCategoryReferences?: string[];
   srcAllowSpec?: string;
   destAllowSpec?: string;
+  srcSubnet?: { value?: string; prefixLength?: number };
   isAllProtocolAllowed?: boolean;
   tcpServices?: Array<{ startPort?: number; endPort?: number }>;
   udpServices?: Array<{ startPort?: number; endPort?: number }>;
@@ -925,21 +926,23 @@ async function CheckSecurityPolicy(ctx: CheckContext): Promise<CheckResult> {
 }
 
 /**
- * Stage 19 `allow-ssh-in-microseg`. 1:1 port of Python `CheckSecurityPolicy2`
- * (CheckLabs.py): asserts (a) NO rule has `serviceGroupReferences`
- * containing the cluster's built-in `ssh` service-group extId, (b) at least
- * one rule has `icmpServices` populated.
- *
- * The (a) clause looks inverted at first read, but matches the stage prompt:
- * the player is told to add a Traffic Filter "ssh from {frontendHost} only".
- * In Flow's data model, source-IP-restricted ssh stores as a tcp-port-22
- * rule with a source filter, NOT as a generic `serviceGroupReferences=ssh`.
- * A rule with `serviceGroupReferences=ssh` would mean "allow ssh from
- * anywhere" — the bad answer the check guards against.
+ * Stage 19 `allow-ssh-in-microseg`. Diverges intentionally from the Python
+ * `CheckSecurityPolicy2` (which rejected ANY rule referencing the built-in
+ * `ssh` service group). The prompt tells the player to add a Traffic Filter
+ * "ssh from {frontendHost} only" — so we now assert what the prompt actually
+ * asks for:
+ *   (a) at least one inbound rule opens SSH (references the `ssh` service
+ *       group OR covers tcp/22) AND is restricted to the `frontendHost` source
+ *       IP (`srcSubnet`), never `srcAllowSpec: ALL`;
+ *   (b) at least one rule has `icmpServices` populated.
+ * Both ways of expressing the SSH rule (the `ssh` service group with a source
+ * filter, or a raw tcp/22 + source filter) pass — what matters is that SSH is
+ * locked to the IP, not open to the world.
  */
 async function CheckSecurityPolicy2(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const expected = `${trigram}-mseg-policy`;
+  const frontendHost = String(ctx.vars.get('frontendHost') ?? '').trim();
   try {
     const policies = await listAll<{ extId?: string; name?: string }>(
       ctx,
@@ -949,33 +952,47 @@ async function CheckSecurityPolicy2(ctx: CheckContext): Promise<CheckResult> {
     if (!listEntry?.extId) {
       return { pass: false, detail: `Security policy '${expected}' not found.` };
     }
-    // Python step 1 : look up the cluster's built-in `ssh` service-group
-    // extId. Flow ships with system-defined service groups; we filter by
-    // name. Skip the assertion if the service-group is missing on this PC
-    // (defensive — older clusters may not ship it; Python would silently
-    // pass through retrieveFlowServiceID returning None).
+    // The built-in `ssh` service group is one of the two valid ways to express
+    // the SSH rule; look up its extId so we recognise it. Missing on older PCs
+    // is fine — a raw tcp/22 rule is the other accepted shape.
     const serviceGroups = await listAll<{ extId?: string; name?: string }>(
       ctx,
       '/api/microseg/v4.0/config/service-groups',
     );
-    const sshSvc = serviceGroups.find((g) => g.name === 'ssh');
+    const sshExtId = serviceGroups.find((g) => g.name === 'ssh')?.extId;
     const detail = await ctx.nutanix.request<{ data?: { rules?: MsegRule[] } }>(
       'GET',
       `/api/microseg/v4.0/config/policies/${listEntry.extId}`,
     );
     const rules = detail?.data?.rules ?? [];
-    if (sshSvc?.extId) {
-      const broadSshRule = rules.find((r) =>
-        (r.spec?.serviceGroupReferences ?? []).includes(sshSvc.extId!),
-      );
-      if (broadSshRule) {
-        return {
-          pass: false,
-          detail: `Security policy '${expected}' has an unrestricted SSH rule — restrict the SSH Traffic Filter to a specific source IP.`,
-        };
-      }
+
+    // A rule "opens SSH" if it references the `ssh` service group or covers tcp/22.
+    const opensSsh = (s: MsegRuleSpec): boolean => {
+      if (sshExtId && (s.serviceGroupReferences ?? []).includes(sshExtId)) return true;
+      return (s.tcpServices ?? []).some((t) => (t.startPort ?? 0) <= 22 && (t.endPort ?? 0) >= 22);
+    };
+    const sshRules = rules.filter((r) => r.spec && opensSsh(r.spec));
+    if (sshRules.length === 0) {
+      return { pass: false, detail: `Security policy '${expected}' has no SSH rule — add an inbound 'ssh' Traffic Filter.` };
     }
-    // Python step 2 : at least one rule with icmp services populated.
+    // SSH must never be open to all sources.
+    if (sshRules.some((r) => r.spec?.srcAllowSpec === 'ALL')) {
+      return {
+        pass: false,
+        detail: `Security policy '${expected}' allows SSH from anywhere — restrict the SSH Traffic Filter to source ${frontendHost || 'IP'} only.`,
+      };
+    }
+    // …and at least one SSH rule must be scoped to the expected source IP.
+    const restricted = sshRules.some((r) => {
+      const v = r.spec?.srcSubnet?.value;
+      if (!v) return false;
+      return frontendHost ? v === frontendHost : true;
+    });
+    if (!restricted) {
+      const want = frontendHost ? ` to ${frontendHost}` : ' to a specific source IP';
+      return { pass: false, detail: `Security policy '${expected}' SSH Traffic Filter is not restricted${want}.` };
+    }
+    // ICMP must be present.
     const hasIcmp = rules.some((r) => (r.spec?.icmpServices ?? []).length > 0);
     if (!hasIcmp) {
       return {
@@ -983,7 +1000,7 @@ async function CheckSecurityPolicy2(ctx: CheckContext): Promise<CheckResult> {
         detail: `Security policy '${expected}' missing an ICMP rule — add it as a Traffic Filter.`,
       };
     }
-    return { pass: true, detail: `Security policy '${expected}' SSH is source-restricted + ICMP allowed.` };
+    return { pass: true, detail: `Security policy '${expected}' SSH restricted to ${frontendHost || 'source IP'} + ICMP allowed.` };
   } catch (err) {
     return { pass: false, detail: `Security policy query failed: ${nutanixErrorDetail(err)}` };
   }

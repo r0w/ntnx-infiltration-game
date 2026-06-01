@@ -890,31 +890,33 @@ async function actAllowSshInMicroseg(ctx: ActContext): Promise<void> {
   }
   const body = (full.body as AnyRec)?.data;
   const rules: AnyRec[] = Array.isArray(body?.rules) ? [...body.rules] : [];
-  const isInbound = (s: AnyRec) => s.srcAllowSpec !== undefined && !s.destAllowSpec;
+  const frontendHost = String(ctx.vars.get('frontendHost') ?? '').trim();
+  const coversSsh = (s: AnyRec) =>
+    (s.tcpServices ?? []).some((t: AnyRec) => (t.startPort ?? 0) <= 22 && (t.endPort ?? 0) >= 22);
+  // A correctly-restricted inbound SSH rule: covers tcp/22, scoped to a source
+  // subnet, and NOT open to all sources — matches CheckSecurityPolicy2.
   const hasSsh = rules.some((r) => {
     const s = r.spec;
-    if (!s || !isInbound(s)) return false;
-    if (s.isAllProtocolAllowed && s.srcAllowSpec !== 'NONE') return true;
-    return (s.tcpServices ?? []).some(
-      (t: AnyRec) => (t.startPort ?? 0) <= 22 && (t.endPort ?? 0) >= 22,
-    );
+    if (!s || s.destAllowSpec) return false;
+    if (s.srcAllowSpec === 'ALL') return false;
+    return coversSsh(s) && Boolean(s.srcSubnet?.value);
   });
   const hasIcmp = rules.some((r) => (r.spec?.icmpServices ?? []).length > 0);
   if (hasSsh && hasIcmp) return;
-  // Shape: inbound rule carries `srcAllowSpec` (source side) — we open for
-  // ALL sources, and scope the protocol to TCP port 22 via `tcpServices`.
   // `securedGroupCategoryAssociatedEntityType` + `securedGroupCategoryReferences`
   // must match the existing rules so the new rule binds to the same VMs.
   const critical = (rules[0]?.spec?.securedGroupCategoryReferences?.[0] as string) ?? '';
   if (!hasSsh) {
+    // Inbound SSH locked to the frontend host only (the /ssh console's source
+    // IP) — scoped to tcp/22 via `tcpServices` + a /32 `srcSubnet`.
     rules.push({
-      description: 'allow inbound SSH (22/tcp)',
+      description: 'allow inbound SSH (22/tcp) from frontend host',
       type: 'APPLICATION',
       spec: {
         '$objectType': 'microseg.v4.config.ApplicationRuleSpec',
         securedGroupCategoryAssociatedEntityType: 'VM',
         securedGroupCategoryReferences: critical ? [critical] : [],
-        srcAllowSpec: 'ALL',
+        srcSubnet: { value: frontendHost || '0.0.0.0', prefixLength: 32 },
         tcpServices: [{ startPort: 22, endPort: 22 }],
       },
     });
