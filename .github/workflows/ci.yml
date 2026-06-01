@@ -18,6 +18,13 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Default token is read-only; the test-report publisher needs to write a
+# check run + a PR comment with the results.
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -43,7 +50,9 @@ jobs:
         # nutanix / frontend (incl. `e2e-mock-autoplay.test.ts` which
         # walks the full pack against fixture-backed checks — catches
         # regressions in act / check / fixture wiring).
-        run: bun test
+        # --reporter=junit writes a JUnit XML alongside the normal console
+        # output so the publish step can surface results in the PR.
+        run: bun test --reporter=junit --reporter-outfile=./junit-bun.xml
 
       - name: Set up Python 3.9 (calm-dsl needs 3.9)
         uses: actions/setup-python@v6
@@ -167,4 +176,20 @@ jobs:
         # patched output (no stub UUIDs in metadata, secrets in canonical
         # no-secret shape, CUSTOM→DEB on service-bearing pkgs, boot disk
         # grown ≥40 GiB, no banned imports in escripts).
-        run: pytest tooling/blueprint/tests/
+        run: pytest tooling/blueprint/tests/ --junit-xml=./junit-blueprint.xml
+
+      - name: Publish test results
+        # Surfaces the JUnit reports as a check run + a PR comment +
+        # the job summary, so results are visible without digging through
+        # the raw logs. `if: always()` so failing tests still get reported
+        # (the test steps above already failed the job on a real failure).
+        # require_tests=false: if an earlier step (e.g. typecheck) failed
+        # before tests ran, just warn on the missing file instead of erroring.
+        uses: mikepenz/action-junit-report@v5
+        if: always()
+        with:
+          report_paths: 'junit-*.xml'
+          check_name: Test results
+          comment: true
+          detailed_summary: true
+          require_tests: false
