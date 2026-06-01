@@ -31,12 +31,13 @@ HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
 
 def main():
-    # Try v4 paths in order, fall back to v3 if all fail.
+    # The v4 LCM action is `inventory` (NOT `perform-inventory` — that
+    # path 404s, the bug seen in the 2026-06-01 run). Try newest version
+    # first, fall back to older ones for clusters that lag.
     last = None
     for path in (
-        "/api/lifecycle/v4.0.b1/operations/$actions/perform-inventory",
-        "/api/lifecycle/v4.0/operations/$actions/perform-inventory",
-        "/api/lifecycle/v4.0/resources/$actions/perform-inventory",
+        "/api/lifecycle/v4.2/operations/$actions/inventory",
+        "/api/lifecycle/v4.0/operations/$actions/inventory",
     ):
         r = requests.post(BASE + path, auth=AUTH, headers=HEADERS,
                           verify=False, timeout=20, data="{}")
