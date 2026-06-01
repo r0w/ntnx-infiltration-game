@@ -1,7 +1,7 @@
 {
   "name": "welcome-back",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-025.line-01",

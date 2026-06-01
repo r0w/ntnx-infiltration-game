@@ -1,7 +1,7 @@
 {
   "name": "modify-blueprint",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-037.line-01",

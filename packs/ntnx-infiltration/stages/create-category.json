@@ -1,7 +1,7 @@
 {
   "name": "create-category",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-015.line-02",

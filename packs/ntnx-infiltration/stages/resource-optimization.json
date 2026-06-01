@@ -1,7 +1,7 @@
 {
   "name": "resource-optimization",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-032.line-01",

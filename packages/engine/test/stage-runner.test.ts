@@ -118,7 +118,7 @@ describe('StageRunner', () => {
     // other text-unit prop) flowing through.
     const runner = new StageRunner(
       [
-        { id: 1, active: true, prompt: 'ego', messages: ['s1.m'], saveScore: true },
+        { id: 1, active: true, prompt: 'tank', messages: ['s1.m'], saveScore: true },
       ],
       new CheckRegistry(),
     );
@@ -139,7 +139,7 @@ describe('StageRunner', () => {
     // on each side of the split.
     const runner = new StageRunner(
       [
-        { id: 1, active: true, prompt: 'ego', messages: ['s1.m'], saveScore: true },
+        { id: 1, active: true, prompt: 'tank', messages: ['s1.m'], saveScore: true },
       ],
       new CheckRegistry(),
     );
@@ -161,7 +161,7 @@ describe('StageRunner', () => {
         {
           id: 1,
           active: true,
-          prompt: 'ego',
+          prompt: 'tank',
           messages: ['s1.m1', 's1.m2'],
           saveScore: true,
         },
@@ -176,11 +176,11 @@ describe('StageRunner', () => {
     });
     const rendered = runner.render(runner.listStages()[0], new VariableStore(), 'en', local);
     const tags = rendered.units.filter(
-      (u) => u.kind === 'text' && u.text === '<ego> ' && u.color === 'dim',
+      (u) => u.kind === 'text' && u.text === '<tank> ' && u.color === 'dim',
     );
     // One tag at stage start, one after the \n\n between m1 and m2.
     expect(tags.length).toBe(2);
-    expect(rendered.units[0]).toEqual({ kind: 'text', text: '<ego> ', color: 'dim' });
+    expect(rendered.units[0]).toEqual({ kind: 'text', text: '<tank> ', color: 'dim' });
   });
 
   test('render skips speaker injection when stage.prompt is empty', () => {

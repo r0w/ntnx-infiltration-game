@@ -1,7 +1,7 @@
 {
   "name": "verify-prod-user-isolation",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-013.line-01",

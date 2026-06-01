@@ -1,7 +1,7 @@
 {
   "name": "create-report",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-027.line-01",

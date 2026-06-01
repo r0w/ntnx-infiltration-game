@@ -1,7 +1,7 @@
 {
   "name": "security-dashboard",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-030.line-01",

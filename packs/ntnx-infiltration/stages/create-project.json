@@ -1,7 +1,7 @@
 {
   "name": "create-project",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-009.line-01",

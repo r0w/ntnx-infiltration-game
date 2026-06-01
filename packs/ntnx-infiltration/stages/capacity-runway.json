@@ -1,7 +1,7 @@
 {
   "name": "capacity-runway",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-031.line-01",

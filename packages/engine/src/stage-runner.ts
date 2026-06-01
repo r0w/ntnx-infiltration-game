@@ -171,7 +171,7 @@ export class StageRunner {
  * Inject a `<speaker> ` label at the start of every "chat beat" in the
  * rendered unit stream. A beat starts at stage entry, after a `<clear/>`,
  * and after any `\n\n` gap inside a text unit — matching the cadence of the
- * legacy Python `<ego> ` / `<system> ` prefix without relying on per-line
+ * legacy Python per-beat `<speaker> ` prefix without relying on per-line
  * emission (which would clutter list items and slow typing).
  */
 function injectSpeakerTag(units: readonly MessageUnit[], speaker: string): MessageUnit[] {

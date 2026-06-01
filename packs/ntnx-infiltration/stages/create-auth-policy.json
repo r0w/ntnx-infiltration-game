@@ -1,7 +1,7 @@
 {
   "name": "create-auth-policy",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-007.line-01",

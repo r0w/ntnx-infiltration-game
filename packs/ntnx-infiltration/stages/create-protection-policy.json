@@ -1,7 +1,7 @@
 {
   "name": "create-protection-policy",
   "active": true,
-  "prompt": "ego",
+  "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
     "stage-020.line-01",
