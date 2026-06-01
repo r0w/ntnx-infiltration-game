@@ -220,19 +220,30 @@ def import_ldap_user(directory_id):
 
 
 def get_user_uuid(username):
-    r = requests.get(
-        "%s/api/iam/v4.0/authn/users?$limit=250" % BASE,
-        auth=AUTH, headers=HEADERS, verify=False, timeout=20,
-    )
-    # Don't raise on non-200; ACP setup is best-effort. Operator can
-    # add the user to the project manually via Prism UI if needed.
-    if r.status_code >= 400:
-        print("[warn] GET users returned %d %s" % (r.status_code, r.text[:200]))
-        return None
-    for u in r.json().get('data') or []:
-        if u.get('username') == username:
-            return u['extId']
-    return None
+    # IAM v4 caps $limit at 100 (a $limit=250 here was getting a 400) and its
+    # OData `eq` is case-sensitive, while the LDAP import may store the username
+    # with AD's casing. So page through and match case-insensitively rather than
+    # trusting an exact-case server filter.
+    target = username.lower()
+    page = 0
+    while True:
+        r = requests.get(
+            "%s/api/iam/v4.0/authn/users" % BASE,
+            auth=AUTH, headers=HEADERS, verify=False, timeout=20,
+            params={"$limit": 100, "$page": page},
+        )
+        # Don't raise on non-200; ACP setup is best-effort. Operator can
+        # add the user to the project manually via Prism UI if needed.
+        if r.status_code >= 400:
+            print("[warn] GET users returned %d %s" % (r.status_code, r.text[:200]))
+            return None
+        rows = r.json().get('data') or []
+        for u in rows:
+            if (u.get('username') or '').lower() == target:
+                return u['extId']
+        if len(rows) < 100:
+            return None
+        page += 1
 
 
 def get_project_admin_role_uuid():
