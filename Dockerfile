@@ -24,8 +24,10 @@ RUN bun build packages/server/src/index.ts --target=bun --outdir=dist/server --m
 FROM oven/bun:1.3-slim AS runtime
 WORKDIR /app
 # The /ssh sandbox shells out to the real `ping` binary, absent from the slim image.
+# setuid so it keeps working if the container is ever run as non-root (file caps alone wouldn't).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends iputils-ping \
+    && chmod u+s /usr/bin/ping \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build-server /app/dist/server ./dist/server
 # database.ts resolves schema.sql relative to its own import.meta.url, which
