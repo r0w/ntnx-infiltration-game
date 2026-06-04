@@ -1,31 +1,17 @@
 /**
- * Act + cleanup handlers for the ntnx-infiltration pack. Each **act**
- * performs the cluster-side step the player would do via Prism (create
- * user, create VM, attach category, …) — auto-play fires it for the
- * stage that's awaiting input so the check finds what it expects. Each
- * cleanup undoes the act by name. Both are idempotent — running twice
- * is safe, and cleaning up something that's already gone is not an error.
+ * Act + cleanup handlers for the ntnx-infiltration pack. An **act** performs
+ * the cluster step a player would do in Prism (create user, VM, category, …);
+ * auto-play fires it for the awaiting stage so the check finds what it expects.
+ * A **cleanup** undoes it by name. Both are idempotent.
  *
- * Fired by:
- * - `POST /api/act/run/:trigram/:stage` (manual, dev/test)
- * - `POST /api/act/cleanup/:trigram/:stage` (manual, dev/test)
- * - `POST /api/act/auto-play/:trigram` — walks pack order firing acts
- * - `POST /api/act/cleanup-all/:trigram` — reverse-order sweep
+ * Fired by `/api/act/run|cleanup/:trigram/:stage` (manual), `/auto-play/:trigram`
+ * (walks pack order), and `/cleanup-all/:trigram` (reverse sweep).
  *
- * Transport mix — mandatory because the generated SDK crashes Bun on
- * non-2xx responses (its error-wrap code does `err.data = ...` on a frozen
- * Bun response-error, uncaught TypeError crashes the process). So:
- *   - **Lists (reads)** use SDK (`ctx.nutanix.sdk.<domain>.<resource>.list*()`)
- *     — 200 responses don't hit the broken code path, and we benefit from
- *     the typed surface + pagination helpers.
- *   - **Creates/updates (writes)** go through REST via `postV4`/`putV4`
- *     helpers — the REST adapter throws a clean `NutanixHttpError` on
- *     non-2xx, the act's try/catch turns it into a structured `ok:false`
- *     response for the operator.
- *   - **Deletes** go through `deleteV4Entity` (GET for ETag → DELETE with
- *     `If-Match: <hash>`). Same rationale.
- *   - **v3 endpoints** (projects, X-Play action_rules, Calm apps/blueprints
- *     /scheduler) always REST — no SDK exists for v3.
+ * Transport mix is deliberate: the generated SDK crashes Bun on non-2xx (its
+ * error-wrap does `err.data=...` on a frozen response-error, an uncaught
+ * TypeError). So reads use the SDK (200 is safe, typed, paginated); writes and
+ * deletes go through REST (`postV4`/`putV4`/`deleteV4Entity`), which throws a
+ * clean `NutanixHttpError`. v3 endpoints are always REST (no SDK exists).
  */
 import type { ActContext } from '@ntnx-game/engine';
 import type { NutanixSdk } from '@ntnx-game/nutanix';
@@ -49,10 +35,10 @@ function sdk(ctx: ActContext): NutanixSdk {
 }
 
 // ───────────────────────────────────────────────────────────────────────
-//  Seeds — create the resources downstream stages need
+//  Seeds: create the resources downstream stages need
 // ───────────────────────────────────────────────────────────────────────
 
-/** Stage 6 create-admin-user — creates `{Trigram}-adm` with Super Admin intent. */
+/** Stage 6 create-admin-user: creates `{Trigram}-adm` with Super Admin intent. */
 async function actCreateAdminUser(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
@@ -61,7 +47,7 @@ async function actCreateAdminUser(ctx: ActContext): Promise<void> {
   // 4 digits, so we derive a deterministic 13+ char password from the
   // trigram instead. Player never logs in as `{Trigram}-adm` during the
   // game (it's a narrative artifact), so the actual value doesn't matter
-  // for gameplay — only that IAM accepts it.
+  // for gameplay, only that IAM accepts it.
   const password = `ChangeMe-${trigram}-1!`;
   const usernameLc = username.toLowerCase();
   await ensure<AnyRec>({
@@ -82,7 +68,7 @@ async function actCreateAdminUser(ctx: ActContext): Promise<void> {
   });
 }
 
-/** Stage 7 create-auth-policy — creates `{Trigram}-auth` granting Super Admin to `{Trigram}-adm`. */
+/** Stage 7 create-auth-policy: creates `{Trigram}-auth` granting Super Admin to `{Trigram}-adm`. */
 async function actCreateAuthPolicy(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
@@ -114,7 +100,7 @@ async function actCreateAuthPolicy(ctx: ActContext): Promise<void> {
           // Shape confirmed against live PC GET: identities use a
           // nested `identityFilter.user.uuid.anyof[]`, not the flat
           // `user.values[]` guess from the spec. Same story for
-          // entities — `entityFilter: { "*": ... }`, not bare `*`.
+          // entities, `entityFilter: { "*": ... }`, not bare `*`.
           displayName: name,
           role: superAdmin.extId,
           identities: [
@@ -127,10 +113,10 @@ async function actCreateAuthPolicy(ctx: ActContext): Promise<void> {
   });
 }
 
-/** Stage 9 create-project — v3 `/api/nutanix/v3/projects` with cluster +
+/** Stage 9 create-project: v3 `/api/nutanix/v3/projects` with cluster +
  * Nutanix account ("Infrastructure tab" binding) + secondary subnet.
- * Python `CheckProject` rejects a project without `account_reference_list`
- * — adding the bare `cluster_reference_list` (what we did before) doesn't
+ * Python `CheckProject` rejects a project without `account_reference_list`.
+ * Adding the bare `cluster_reference_list` (what we did before) doesn't
  * count as "infrastructure" in NCM's data model. */
 async function actCreateProject(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
@@ -164,11 +150,11 @@ async function actCreateProject(ctx: ActContext): Promise<void> {
   );
   if (!account?.metadata?.uuid) {
     ctx.logger.warn(
-      'actCreateProject: no nutanix_pc account on PC — project will be created without an infrastructure binding (CheckProject will fail)',
+      'actCreateProject: no nutanix_pc account on PC, project will be created without an infrastructure binding (CheckProject will fail)',
     );
   }
   // Secondary subnet binding mirrors what the stage prompt asks the
-  // player to pick (`Use the VLAN named secondary`). Best-effort —
+  // player to pick (`Use the VLAN named secondary`). Best-effort:
   // if missing, project still creates but with empty subnet list.
   const subnets = await listAllSdk<AnyRec>(($p) => sdk(ctx).networking.subnets.listSubnets($p));
   const secondary = subnets.find((s) => /^secondary$/i.test(s.name ?? ''));
@@ -192,7 +178,7 @@ async function actCreateProject(ctx: ActContext): Promise<void> {
   });
 }
 
-/** Stage 10 create-subnet — creates `{Trigram}-subnet` on VLAN `{Vlanid}` with
+/** Stage 10 create-subnet: creates `{Trigram}-subnet` on VLAN `{Vlanid}` with
  * Nutanix IPAM enabled (`192.168.{Vlanid}.0/24`, gateway `.1`, pool .50–.200)
  * matching the stage prompt. IPAM is required upstream of stage 12: AHV
  * refuses a 2-NIC VM combining a non-IPAM subnet with another (CheckVM's
@@ -204,12 +190,12 @@ async function actCreateSubnet(ctx: ActContext): Promise<void> {
   const vlanRaw = getVarString(ctx, 'Vlanid');
   const vlanId = vlanRaw ? Number.parseInt(vlanRaw, 10) : undefined;
   if (!Number.isFinite(vlanId)) {
-    // Throw rather than silently `return` — auto-play would then submit "Ok"
+    // Throw rather than silently `return`: auto-play would then submit "Ok"
     // against a missing subnet and the player gets a useless "subnet not
     // found" check failure. Bailing loud lets the UI banner point at the
     // real cause.
     throw new Error(
-      'actCreateSubnet: Vlanid missing — set GAME_VLAN_ID in .env (e.g. 20)',
+      'actCreateSubnet: Vlanid missing: set GAME_VLAN_ID in .env (e.g. 20)',
     );
   }
   const clusters = await ctx.nutanix.rest.request<{ data?: Array<{ extId?: string }> }>(
@@ -260,7 +246,7 @@ async function actCreateSubnet(ctx: ActContext): Promise<void> {
   });
 }
 
-/** Stage 11 add-ubuntu-image — uploads `{Trigram}-ubuntu` from GAME_IMAGE_URL. */
+/** Stage 11 add-ubuntu-image: uploads `{Trigram}-ubuntu` from GAME_IMAGE_URL. */
 async function actAddUbuntuImage(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
@@ -268,7 +254,7 @@ async function actAddUbuntuImage(ctx: ActContext): Promise<void> {
   const url = getVarString(ctx, 'ImageURL');
   if (!url) {
     throw new Error(
-      'actAddUbuntuImage: ImageURL missing — set GAME_IMAGE_URL in .env',
+      'actAddUbuntuImage: ImageURL missing: set GAME_IMAGE_URL in .env',
     );
   }
   // Pre-existence check: if the image is already there from a previous run,
@@ -281,7 +267,7 @@ async function actAddUbuntuImage(ctx: ActContext): Promise<void> {
   // POST kicks off the URL-source download; the image appears in the list
   // a few seconds *after* the 202 (Ubuntu Jammy is ~280 MB, the PC fetches
   // it on its own). Returning before the image is listable would let the
-  // immediately-following stage check fail with "not found in library" —
+  // immediately-following stage check fail with "not found in library", so
   // poll until either the image is visible (success) or we hit the 90 s
   // budget (the player can re-run; we don't want auto-play to hang
   // forever on a transient HPoC).
@@ -305,7 +291,7 @@ async function actAddUbuntuImage(ctx: ActContext): Promise<void> {
   );
 }
 
-/** Cloud-init userData mirroring stage-012 prompt — users `nutanix` + `admin`
+/** Cloud-init userData mirroring stage-012 prompt: users `nutanix` + `admin`
  * with sudo NOPASSWD and password `MyPassword`. v4 expects the value
  * base64-encoded under `guestCustomization.config.cloudInitScript.value`. */
 const STAGE12_CLOUD_INIT_YAML = `#cloud-config
@@ -327,7 +313,7 @@ chpasswd:
 ssh_pwauth: true
 `;
 
-/** Stage 12 create-vm — creates `{Trigram}-vm` matching the prompt: 2 vCPU,
+/** Stage 12 create-vm: creates `{Trigram}-vm` matching the prompt: 2 vCPU,
  * 4 GB RAM, UEFI, 2 NICs (`secondary` + `{Trigram}-subnet`), boot disk from
  * the player's image, cloud-init for nutanix+admin users, then assigns to
  * `{Trigram}-proj` via v3 Manage-Ownership. Tightened CheckVM (parity with
@@ -338,13 +324,13 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
   const name = `${trigram}-vm`;
   const subnets = await listAllSdk<AnyRec>(($p) => sdk(ctx).networking.subnets.listSubnets($p));
   const subnet = subnets.find((s) => s.name === `${trigram}-subnet`);
-  // `secondary` is the literal subnet name used in the stage prompt — the
+  // `secondary` is the literal subnet name used in the stage prompt, the
   // same name the player is asked to pick. Match case-insensitively to
   // tolerate clusters that name it `Secondary`.
   const secondary = subnets.find((s) => /^secondary$/i.test(s.name ?? ''));
   if (!secondary) {
     ctx.logger.warn(
-      `actCreateVm: 'secondary' subnet missing on cluster — VM will be created with 1 NIC and CheckVM (NIC-count) will fail`,
+      `actCreateVm: 'secondary' subnet missing on cluster, VM will be created with 1 NIC and CheckVM (NIC-count) will fail`,
     );
   }
   const images = await listAllSdk<AnyRec>(($p) => sdk(ctx).vmm.images.listImages($p));
@@ -354,7 +340,7 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
     '/api/clustermgmt/v4.0/config/clusters',
   );
   const clusterUuid = clusters.data?.[0]?.extId;
-  // Track whether we just created the VM (vs found pre-existing) — only fire
+  // Track whether we just created the VM (vs found pre-existing): only fire
   // the recovery-point creation on a fresh VM so re-runs don't pile up RPs.
   let justCreated = false;
   await ensure<AnyRec>({
@@ -425,7 +411,7 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
         },
       },
     });
-    // Poll until the new VM appears in listVms — `vmCreate` returns 202
+    // Poll until the new VM appears in listVms: `vmCreate` returns 202
     // + a task ref, the VM may take 5–20 s to propagate. A short single
     // wait + fetch was racing on slower clusters: lookup further down
     // would miss the VM and the power-on branch never fired, leaving
@@ -438,12 +424,12 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
       if (created?.extId) break;
     }
     if (!created?.extId) {
-      ctx.logger.warn(`actCreateVm: VM ${name} did not appear in listVms after 45s — power-on branch will skip`);
+      ctx.logger.warn(`actCreateVm: VM ${name} did not appear in listVms after 45s, power-on branch will skip`);
     }
     if (created?.extId) {
       // Mirror Python `CheckVM`'s side-effect: kick off a recovery point
       // for the freshly created VM so stage 26 `restore-vm-from-recovery`
-      // has something to roll back to. Best-effort — failure is logged
+      // has something to roll back to. Best-effort: failure is logged
       // but doesn't block the act (recovery-points endpoint may be
       // unavailable on minimal HPoCs).
       try {
@@ -461,7 +447,7 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
   // Project ownership: stage prompt asks the player to use Manage Ownership
   // in Prism. v4 doesn't expose project on VMs, so PUT v3 with the
   // project_reference patched in. GET-modify-PUT the full entity (v3
-  // enforces spec_version concurrency). Idempotent — runs on every act
+  // enforces spec_version concurrency). Idempotent: runs on every act
   // call so a previously-failed assignment can be retried, and skips when
   // the project is already correct. Best-effort: unavailable v3 → log +
   // continue (CheckVM also defaults to pass when v3 is unreachable).
@@ -494,7 +480,7 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
   // Power on the VM. CheckVM / CheckRestoreVM both require powerState
   // === 'ON' so this act CAN'T return until that's stably true. Loop
   // for up to 240 s, retrying power-on whenever we observe an OFF
-  // state — earlier `try once + then poll` failed live: power-on POST
+  // state. Earlier `try once + then poll` failed live: power-on POST
   // returns 4xx when the VM is still in v4 PROVISIONING (just-created)
   // and the silent-warn-then-poll path never recovers (auto-play
   // submitted Ok 3× on a still-OFF VM, operator had to power-on
@@ -528,7 +514,7 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
     }
     // Re-fire power-on every poll iteration until we see ON. If
     // current.extId isn't known yet (vmCreate task still in flight),
-    // skip this iteration — list will eventually return the entity.
+    // skip this iteration: list will eventually return the entity.
     // We deliberately re-POST even after a previous success: AHV may
     // silently drop the request mid-creation, and the next
     // iteration-after-OFF will retry; an idempotent power-on on an
@@ -556,7 +542,7 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
     }
     if (i === POLL_CAP - 1) {
       ctx.logger.warn(
-        `actCreateVm: VM ${name} still not ON after ${POLL_CAP * POLL_MS / 1000}s — last powerState=${current?.powerState ?? 'unknown'}`,
+        `actCreateVm: VM ${name} still not ON after ${POLL_CAP * POLL_MS / 1000}s, last powerState=${current?.powerState ?? 'unknown'}`,
       );
       break;
     }
@@ -565,13 +551,13 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
 }
 
 /**
- * Stage 14 live-migrate-vm — ensures VM is powered on (so it has a host),
+ * Stage 14 live-migrate-vm: ensures VM is powered on (so it has a host),
  * captures current host, migrates to a different host. CheckLiveMigration
  * then compares the VM's current host against the captured `HostUUID`.
  *
  * If the VM is powered off (CheckVM allows that), we power it on + wait
  * for host assignment, then migrate. If the cluster has only one AHV host,
- * migration is impossible and we log + return — the check will fail as
+ * migration is impossible and we log + return: the check will fail as
  * expected on a single-host cluster.
  */
 async function actLiveMigrateVm(ctx: ActContext): Promise<void> {
@@ -586,7 +572,7 @@ async function actLiveMigrateVm(ctx: ActContext): Promise<void> {
   // baseline `HostUUID` is captured on the first call. Re-migrating on the
   // second call would toggle the VM back to the original host and the
   // check would fail. So: if `HostUUID` is set AND the VM is no longer on
-  // it, the migration succeeded — return early. If the VM is still on
+  // it, the migration succeeded: return early. If the VM is still on
   // HostUUID (a prior call's POST didn't settle), fall through and
   // re-fire the migration.
   if (ctx.vars.has('HostUUID')) {
@@ -596,9 +582,9 @@ async function actLiveMigrateVm(ctx: ActContext): Promise<void> {
       ctx.logger.info('actLiveMigrateVm: already migrated, host differs from baseline');
       return;
     }
-    ctx.logger.info('actLiveMigrateVm: HostUUID set but VM still on baseline — retry migrate');
+    ctx.logger.info('actLiveMigrateVm: HostUUID set but VM still on baseline, retry migrate');
   }
-  // Power on if needed — migration requires a running VM with a placed host.
+  // Power on if needed: migration requires a running VM with a placed host.
   if (vm.powerState !== 'ON') {
     try {
       // VM actions live on v4.2 + require If-Match ETag from a prior GET.
@@ -606,7 +592,7 @@ async function actLiveMigrateVm(ctx: ActContext): Promise<void> {
         ctx,
         `/api/vmm/v4.2/ahv/config/vms/${vm.extId}`,
         '$actions/power-on',
-        // No body on power-on — v4 rejects `{}` ("No request body is
+        // No body on power-on: v4 rejects `{}` ("No request body is
         // expected but one was found").
       );
       ctx.logger.info('actLiveMigrateVm: powered on VM', { vmName });
@@ -624,11 +610,11 @@ async function actLiveMigrateVm(ctx: ActContext): Promise<void> {
   }
   const hostUuid = vm?.host?.extId as string | undefined;
   if (!hostUuid) {
-    ctx.logger.warn(`actLiveMigrateVm: VM has no host after power-on — aborting migrate`);
+    ctx.logger.warn(`actLiveMigrateVm: VM has no host after power-on, aborting migrate`);
     return;
   }
   // Capture pre-migration host so CheckLiveMigration has a baseline. Only
-  // on the *first* run — a retry has the original baseline already and we
+  // on the *first* run: a retry has the original baseline already and we
   // don't want to overwrite it with the post-migration host.
   if (!ctx.vars.has('HostUUID')) {
     ctx.vars.set('HostUUID', hostUuid, 'live-migrate-vm');
@@ -644,7 +630,7 @@ async function actLiveMigrateVm(ctx: ActContext): Promise<void> {
   }
   try {
     // v4.2 action is `migrate-to-host` (within-cluster migration).
-    // `migrate-vm` was a wrong guess — 404. `migrate` exists but is for
+    // `migrate-vm` was a wrong guess: 404. `migrate` exists but is for
     // cross-cluster migrations.
     await postV4Action(
       ctx,
@@ -686,7 +672,7 @@ async function actLiveMigrateVm(ctx: ActContext): Promise<void> {
   }
 }
 
-/** Stage 15 create-category — creates `{Trigram}-cat:Critical` and `{Trigram}-cat:Test`. */
+/** Stage 15 create-category: creates `{Trigram}-cat:Critical` and `{Trigram}-cat:Test`. */
 async function actCreateCategory(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
@@ -703,11 +689,11 @@ async function actCreateCategory(ctx: ActContext): Promise<void> {
 }
 
 /**
- * Stage 16 apply-category-to-vm — tags `{Trigram}-vm` with `{Trigram}-cat:
+ * Stage 16 apply-category-to-vm: tags `{Trigram}-vm` with `{Trigram}-cat:
  * Critical`. v4 `associate-categories` action uses `categories: [{extId}]`;
  * the resulting association shows up on GET `/vms/{extId}/categories` (a
  * sub-resource), NOT on the list response's top-level `categories` field.
- * Need to fetch categories via the sub-endpoint to verify — but the check
+ * Need to fetch categories via the sub-endpoint to verify, but the check
  * (`CheckCatVM`) does that already. Seed just fires the action and trusts
  * the check to validate.
  */
@@ -759,7 +745,7 @@ async function actApplyCategoryToVm(ctx: ActContext): Promise<void> {
   ctx.logger.warn('actApplyCategoryToVm: category binding did not surface within 30 s');
 }
 
-/** Stage 17 create-storage-policy — creates `{Trigram}-sto-policy` with encryption enabled. */
+/** Stage 17 create-storage-policy: creates `{Trigram}-sto-policy` with encryption enabled. */
 async function actCreateStoragePolicy(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
@@ -785,7 +771,7 @@ async function actCreateStoragePolicy(ctx: ActContext): Promise<void> {
   });
 }
 
-/** Stage 18 create-microseg-policy — creates `{Trigram}-mseg-policy` in ENFORCE mode. */
+/** Stage 18 create-microseg-policy: creates `{Trigram}-mseg-policy` in ENFORCE mode. */
 async function actCreateMicrosegPolicy(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
@@ -797,7 +783,7 @@ async function actCreateMicrosegPolicy(ctx: ActContext): Promise<void> {
   const cats = await listAllSdk<AnyRec>(($p) => sdk(ctx).prism.categories.listCategories($p));
   const critical = cats.find((c) => c.key === `${trigram}-cat` && c.value === 'Critical');
   if (!critical?.extId) {
-    ctx.logger.warn(`actCreateMicrosegPolicy: {trigram}-cat:Critical missing — run create-category first`);
+    ctx.logger.warn(`actCreateMicrosegPolicy: {trigram}-cat:Critical missing, run create-category first`);
     return;
   }
   await ensure<AnyRec>({
@@ -845,7 +831,7 @@ async function actCreateMicrosegPolicy(ctx: ActContext): Promise<void> {
   // is task-tracked: the policy lands in the list immediately but the
   // GET-by-id (which CheckSecurityPolicy uses to read rules) lags a few
   // seconds. Without this poll, auto-play submits Ok too early and the
-  // check fails on the first attempt — operator sees `[✗] try again` then
+  // check fails on the first attempt: operator sees `[✗] try again` then
   // `[✓]` on the second submit when state has finally caught up.
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
@@ -868,7 +854,7 @@ async function actCreateMicrosegPolicy(ctx: ActContext): Promise<void> {
   ctx.logger.warn('actCreateMicrosegPolicy: policy not ENFORCE-visible within 20 s');
 }
 
-/** Stage 19 allow-ssh-in-microseg — adds inbound-SSH rule to the existing microseg policy. */
+/** Stage 19 allow-ssh-in-microseg: adds inbound-SSH rule to the existing microseg policy. */
 async function actAllowSshInMicroseg(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
@@ -876,7 +862,7 @@ async function actAllowSshInMicroseg(ctx: ActContext): Promise<void> {
   const policies = await listAllSdk<AnyRec>(($p) => sdk(ctx).microseg.policies.listNetworkSecurityPolicies($p));
   const found = policies.find((p) => p.name === name);
   if (!found?.extId) {
-    ctx.logger.warn(`actAllowSshInMicroseg: policy ${name} missing — run create-microseg-policy first`);
+    ctx.logger.warn(`actAllowSshInMicroseg: policy ${name} missing, run create-microseg-policy first`);
     return;
   }
   // Fetch the full policy (list shape omits rules) so we can extend the rule set.
@@ -894,7 +880,7 @@ async function actAllowSshInMicroseg(ctx: ActContext): Promise<void> {
   const coversSsh = (s: AnyRec) =>
     (s.tcpServices ?? []).some((t: AnyRec) => (t.startPort ?? 0) <= 22 && (t.endPort ?? 0) >= 22);
   // A correctly-restricted inbound SSH rule: covers tcp/22, scoped to a source
-  // subnet, and NOT open to all sources — matches CheckSecurityPolicy2.
+  // subnet, and NOT open to all sources: matches CheckSecurityPolicy2.
   const hasSsh = rules.some((r) => {
     const s = r.spec;
     if (!s || s.destAllowSpec) return false;
@@ -908,7 +894,7 @@ async function actAllowSshInMicroseg(ctx: ActContext): Promise<void> {
   const critical = (rules[0]?.spec?.securedGroupCategoryReferences?.[0] as string) ?? '';
   if (!hasSsh) {
     // Inbound SSH locked to the frontend host only (the /ssh console's source
-    // IP) — scoped to tcp/22 via `tcpServices` + a /32 `srcSubnet`.
+    // IP): scoped to tcp/22 via `tcpServices` + a /32 `srcSubnet`.
     rules.push({
       description: 'allow inbound SSH (22/tcp) from frontend host',
       type: 'APPLICATION',
@@ -924,7 +910,7 @@ async function actAllowSshInMicroseg(ctx: ActContext): Promise<void> {
   if (!hasIcmp) {
     // Mirrors the original game's stage-19 prompt: "ICMP (Type: 8 - Code: 0)
     // from anywhere". Encoded as an inbound rule with a single icmpServices
-    // entry — the tightened CheckSecurityPolicy2 fails without it.
+    // entry: the tightened CheckSecurityPolicy2 fails without it.
     rules.push({
       description: 'allow inbound ICMP (echo)',
       type: 'APPLICATION',
@@ -949,7 +935,7 @@ async function actAllowSshInMicroseg(ctx: ActContext): Promise<void> {
   }
 }
 
-/** Stage 20 create-protection-policy — creates `{Trigram}-prot-policy` with
+/** Stage 20 create-protection-policy: creates `{Trigram}-prot-policy` with
  * RPO=3600s, DAILY auto-rollup retention, scoped to `{Trigram}-cat:Critical`
  * (the tier the prompt names; CheckProtectionPolicy now requires `Critical`,
  * diverging from the Python check which rejected it). */
@@ -972,12 +958,12 @@ async function actCreateProtectionPolicy(ctx: ActContext): Promise<void> {
     ctx.logger.warn('actCreateProtectionPolicy: no domain-manager found');
     return;
   }
-  // Bind the policy to the player's `{trigram}-cat:Critical` category — the
+  // Bind the policy to the player's `{trigram}-cat:Critical` category, the
   // tier the prompt names, and what CheckProtectionPolicy now requires.
   const cats = await listAllSdk<AnyRec>(($p) => sdk(ctx).prism.categories.listCategories($p));
   const criticalCat = cats.find((c) => c.key === `${trigram}-cat` && c.value === 'Critical');
   if (!criticalCat?.extId) {
-    ctx.logger.warn(`actCreateProtectionPolicy: ${trigram}-cat:Critical missing — run create-category first`);
+    ctx.logger.warn(`actCreateProtectionPolicy: ${trigram}-cat:Critical missing, run create-category first`);
     return;
   }
   await ensure<AnyRec>({
@@ -1015,7 +1001,7 @@ async function actCreateProtectionPolicy(ctx: ActContext): Promise<void> {
               },
             },
           ],
-          // Cluster v4 stores the binding as `categoryIds: [extId]` —
+          // Cluster v4 stores the binding as `categoryIds: [extId]`,
           // confirmed against an existing live `cur-prot-policy`. Sending
           // `categories: [{extId}]` is silently dropped.
           categoryIds: [criticalCat.extId],
@@ -1025,24 +1011,24 @@ async function actCreateProtectionPolicy(ctx: ActContext): Promise<void> {
 }
 
 /**
- * Stage 21 create-approval-policy — ensure the cluster-wide
+ * Stage 21 create-approval-policy: ensure the cluster-wide
  * `master-appr-policy` exists and is linked to the player's protection
  * policy. Two-phase :
  *
  *   1. Ensure the approval policy exists. Stage prose explicitly notes
  *      "this policy may already exist and only one approval policy is
- *      allowed" — so we list first and reuse, only create when missing.
+ *      allowed", so we list first and reuse, only create when missing.
  *      Created with `charlie`/`thom`/`william` as approvers (from the
  *      ntnx-infiltration-game stock users). **Each approver must be the
  *      FULL `iam.v4.authn.User` object** (extId + idpId + displayName +
  *      firstName + lastName + status + emailId), not the minimal
- *      `{userType, username}` we initially tried — backend rejects the
+ *      `{userType, username}` we initially tried: backend rejects the
  *      latter as "duplicate user details" because three users with only
  *      `{LOCAL, name}` and otherwise-default fields are indistinguishable
  *      to its dedup validator.
  *
  *   2. Link the player's protection policy via the
- *      `$actions/associate-policies` action — the `securedPolicies` field
+ *      `$actions/associate-policies` action: the `securedPolicies` field
  *      is read-only on the entity itself, so direct PUT can't set it.
  *      Idempotent: skip if already linked.
  */
@@ -1054,11 +1040,11 @@ async function actCreateApprovalPolicy(ctx: ActContext): Promise<void> {
   const myProt = protections.find((p) => p.name === `${trigram}-prot-policy`);
   if (!myProt?.extId) {
     ctx.logger.warn(
-      `actCreateApprovalPolicy: protection-policy ${trigram}-prot-policy missing — run create-protection-policy first`,
+      `actCreateApprovalPolicy: protection-policy ${trigram}-prot-policy missing, run create-protection-policy first`,
     );
     return;
   }
-  // Phase 1 — ensure approval policy exists
+  // Phase 1: ensure approval policy exists
   const existing = await listAllSdk<AnyRec>(($p) => sdk(ctx).security.approvals.listApprovalPolicies($p));
   let policy = existing.find((p) => p.name === name);
   if (!policy) {
@@ -1070,11 +1056,11 @@ async function actCreateApprovalPolicy(ctx: ActContext): Promise<void> {
       .filter(Boolean) as AnyRec[];
     if (approvers.length < 3) {
       ctx.logger.warn(
-        `actCreateApprovalPolicy: stock approvers (charlie/thom/william) missing on this PC — found ${approvers.length}/3, skipping`,
+        `actCreateApprovalPolicy: stock approvers (charlie/thom/william) missing on this PC: found ${approvers.length}/3, skipping`,
       );
       return;
     }
-    // Echo back every field the User schema exposes — backend validator
+    // Echo back every field the User schema exposes: backend validator
     // dedups on the union of (extId, idpId, username, displayName, names,
     // emailId) and rejects bodies that look like clones of each other.
     const approverFull = approvers.map((u) => ({
@@ -1097,7 +1083,7 @@ async function actCreateApprovalPolicy(ctx: ActContext): Promise<void> {
         approverGroups: [{ name: 'tank-appr-set', approvers: approverFull, expiryHours: 24 }],
       },
     );
-    // Create returns a task ref — re-list to pick up the freshly-minted
+    // Create returns a task ref: re-list to pick up the freshly-minted
     // policy's extId. v4 task is async but typically settles in <2 s.
     await new Promise((r) => setTimeout(r, 2000));
     const refreshed = await listAllSdk<AnyRec>(($p) => sdk(ctx).security.approvals.listApprovalPolicies($p));
@@ -1110,7 +1096,7 @@ async function actCreateApprovalPolicy(ctx: ActContext): Promise<void> {
     }
     ctx.logger.info(`act create: approval-policy ${name}`, { extId: policy.extId });
   }
-  // Phase 2 — associate the player's protection policy. Idempotent: skip
+  // Phase 2: associate the player's protection policy. Idempotent: skip
   // if already in securedPolicies.
   const alreadyLinked = (policy.securedPolicies ?? []).some(
     (sp: AnyRec) => sp.policyExtId === myProt.extId,
@@ -1142,24 +1128,13 @@ async function actCreateApprovalPolicy(ctx: ActContext): Promise<void> {
   }
 }
 
-/** Stage 23 incident-freeze — the "villains" delete the player's VM. */
-async function actIncidentFreeze(ctx: ActContext): Promise<void> {
-  const trigram = getTrigram(ctx);
-  if (!trigram) return;
-  const vms = await listAllSdk<AnyRec>(($p) => sdk(ctx).vmm.vms.listVms($p));
-  const vm = vms.find((v) => v.name === `${trigram}-vm`);
-  if (!vm?.extId) return;
-  // Use the ETag-aware REST delete — same helper the cleanups use.
-  await deleteV4Entity(ctx, '/api/vmm/v4.0/ahv/config/vms', vm.extId);
-}
-
-/** Stage 26 restore-vm-from-recovery — re-creates `{Trigram}-vm` after the incident. Minimal spec; a real replay would restore from a recovery point. */
+/** Stage 26 restore-vm-from-recovery: re-creates `{Trigram}-vm` after the incident. Minimal spec; a real replay would restore from a recovery point. */
 async function actRestoreVmFromRecovery(ctx: ActContext): Promise<void> {
-  // Delegates to the create-vm act — the check only asserts the VM exists again.
+  // Delegates to the create-vm act: the check only asserts the VM exists again.
   await actCreateVm(ctx);
 }
 
-/** Stage 27 create-report — creates `{Trigram}-report` with a DAILY
+/** Stage 27 create-report: creates `{Trigram}-report` with a DAILY
  * schedule, recipient `{Trigram}{EmailReport}`, and one VM-list widget,
  * matching what Python `CheckReport` (CheckLabs.py) asserts. Field shapes
  * confirmed against an existing live `cur-report` (`schedule`,
@@ -1204,7 +1179,7 @@ async function actCreateReport(ctx: ActContext): Promise<void> {
               },
             ],
           },
-          // One VM-list widget — Python check walks `template_rows` looking
+          // One VM-list widget: Python check walks `template_rows` looking
           // for `widget_config.entity_type == 'vm'`. v4 calls the field
           // `entityType` on `widgetInfo`. Minimal column set; the player's
           // UI flow lets them tweak fields later.
@@ -1218,7 +1193,7 @@ async function actCreateReport(ctx: ActContext): Promise<void> {
                   widgets: [
                     {
                       // `$widgetInfoItemDiscriminator` is server-generated
-                      // on GET but rejected on POST as "unsupported" — only
+                      // on GET but rejected on POST as "unsupported": only
                       // `$objectType` on the inner widgetInfo is needed for
                       // the discriminator resolution at create time.
                       '$objectType': 'opsmgmt.v4.config.Widget',
@@ -1252,7 +1227,7 @@ async function actCreateReport(ctx: ActContext): Promise<void> {
   });
 }
 
-/** Stage 33 create-ncm-playbook — creates `{Trigram}-playbook` (v3 action_rule, XPLAY). */
+/** Stage 33 create-ncm-playbook: creates `{Trigram}-playbook` (v3 action_rule, XPLAY). */
 async function actCreateNcmPlaybook(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
@@ -1268,7 +1243,7 @@ async function actCreateNcmPlaybook(ctx: ActContext): Promise<void> {
   // v3 action_rules: `spec` must contain only `resources` (no top-level
   // `name`/`description`). action_type / action_trigger_type UUIDs differ
   // across PC versions (the previously-hardcoded PC 2024.3 values broke
-  // silently on PC 7.5 — POST 2xx-accepts but the rule never indexes,
+  // silently on PC 7.5: POST 2xx-accepts but the rule never indexes,
   // /list comes back empty), so look them up by name from the registry.
   const triggerTypes = await ctx.nutanix.rest.request<{ entities?: AnyRec[] }>(
     'POST',
@@ -1288,13 +1263,13 @@ async function actCreateNcmPlaybook(ctx: ActContext): Promise<void> {
   )?.metadata?.uuid;
   if (!eventTriggerUuid || !emailActionUuid) {
     throw new Error(
-      `actCreateNcmPlaybook: PC registry missing types — event_trigger=${eventTriggerUuid ?? '?'} email_action=${emailActionUuid ?? '?'}`,
+      `actCreateNcmPlaybook: PC registry missing types: event_trigger=${eventTriggerUuid ?? '?'} email_action=${emailActionUuid ?? '?'}`,
     );
   }
   ctx.logger.info(`act create: playbook ${name}`);
   await ctx.nutanix.rest.request('POST', '/api/nutanix/v3/action_rules', {
     spec: {
-      // v3 action_rules' `spec` only carries `resources` — no top-level
+      // v3 action_rules' `spec` only carries `resources`: no top-level
       // name/description (those live in `metadata` and in resources).
       resources: {
         name,
@@ -1302,8 +1277,8 @@ async function actCreateNcmPlaybook(ctx: ActContext): Promise<void> {
         is_enabled: true,
         rule_type: 'XPLAY',
         // Stage 33 prose: "email-on-VM-power-cycle rule". Trigger type is
-        // `event_trigger` with `input_parameter_values.type = 'VmPowerCycleAudit'`
-        // — the original Python CheckPlaybook validates exactly this.
+        // `event_trigger` with `input_parameter_values.type = 'VmPowerCycleAudit'`.
+        // The original Python CheckPlaybook validates exactly this.
         trigger_list: [
           {
             instance_uuid: crypto.randomUUID(),
@@ -1337,7 +1312,7 @@ async function actCreateNcmPlaybook(ctx: ActContext): Promise<void> {
     metadata: { kind: 'action_rule', name },
     api_version: '3.1',
   });
-  // v3 POSTs are task-tracked — the playbook shows up in /list a few
+  // v3 POSTs are task-tracked: the playbook shows up in /list a few
   // seconds after the create succeeds. Poll up to 60 s so the very next
   // CheckPlaybook doesn't race against the indexing lag.
   const deadline = Date.now() + 60_000;
@@ -1356,7 +1331,7 @@ async function actCreateNcmPlaybook(ctx: ActContext): Promise<void> {
   throw new Error(`actCreateNcmPlaybook: playbook ${name} did not appear within 60 s after POST`);
 }
 
-/** Stage 35 clone-app-blueprint — launches `CloneProd` blueprint as `{Trigram}-app`. */
+/** Stage 35 clone-app-blueprint: launches `CloneProd` blueprint as `{Trigram}-app`. */
 async function actCloneAppBlueprint(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
@@ -1399,10 +1374,10 @@ async function actCloneAppBlueprint(ctx: ActContext): Promise<void> {
     return;
   }
   // v3 has TWO launch endpoints with different schemas :
-  //   - `/launch`        — accepts `application_name` only, REJECTS
+  //   - `/launch`        : accepts `application_name` only, REJECTS
   //                       `runtime_editables` (422 "Additional properties
   //                       not allowed").
-  //   - `/simple_launch` — bare `{spec:{...}}` envelope (no api_version /
+  //   - `/simple_launch` : bare `{spec:{...}}` envelope (no api_version /
   //                       metadata), accepts `app_name` + `app_profile_
   //                       reference` + `runtime_editables.variable_list`.
   // We need runtime variables (the blueprint takes 5: vpcName /
@@ -1420,7 +1395,7 @@ async function actCloneAppBlueprint(ctx: ActContext): Promise<void> {
   // Stage 35 prose has the player update the blueprint's `pcUser` credential
   // BEFORE launching. The bake-in default on the source CloneProd
   // blueprint has `username: "admin2"` (a placeholder that doesn't exist on
-  // any HPoC) — runbook tasks then auth as admin2 and fail with
+  // any HPoC): runbook tasks then auth as admin2 and fail with
   // `401 Invalid Credentials` on the very first SDK call (e.g. list_subnets
   // when creating the VPC). We MUST patch both `username` and `secret` to
   // match the operator's `PCUser`/`PCPassword` env. Without this, the
@@ -1457,7 +1432,7 @@ async function actCloneAppBlueprint(ctx: ActContext): Promise<void> {
       }
     }
   }
-  // Calm rejects minimal `{name, value}` runtime variable entries — the
+  // Calm rejects minimal `{name, value}` runtime variable entries: the
   // launch sticks in `state: running` with `milestone: null` forever
   // (validator can't match a variable by `name` alone). Pull the FULL
   // variable definitions (uuid + type + context) from the
@@ -1495,12 +1470,12 @@ async function actCloneAppBlueprint(ctx: ActContext): Promise<void> {
       },
     },
   );
-  // Calm launch is the slowest act — the runbook spins up a VPC, runs
+  // Calm launch is the slowest act: the runbook spins up a VPC, runs
   // tasks, etc. The check requires BOTH the app entry AND the runtime-
   // created `{Trigram}-vpc` to exist. App appears in /list ~5–30 s after
   // launch; VPC only materializes after the runbook completes (~2–5 min).
   // Cap the wait below Bun's idleTimeout (255 s max) so the response
-  // writes back before the connection closes — operator can re-fire if
+  // writes back before the connection closes: operator can re-fire if
   // Calm needs more than this budget.
   const expectedVpc = `${trigram}-vpc`;
   const deadline = Date.now() + 220_000;
@@ -1530,10 +1505,10 @@ async function actCloneAppBlueprint(ctx: ActContext): Promise<void> {
 }
 
 /**
- * Stage 36 schedule-day2-action — schedules a daily run on the player's
+ * Stage 36 schedule-day2-action: schedules a daily run on the player's
  * `{Trigram}-app`. Calm v3 models scheduled actions as `job` entities at
  * `POST /api/nutanix/v3/jobs` (NOT `/api/nutanix/v3/app_scheduler` which
- * 404s — that was an early wrong guess). Original Python `CheckSchedDay2`
+ * 404s: that was an early wrong guess). Original Python `CheckSchedDay2`
  * confirms via `entities[?(metadata.name=='{trigram}-sched')].resources`
  * with `executable.entity.uuid == AppUUID`.
  *
@@ -1543,11 +1518,11 @@ async function actCloneAppBlueprint(ctx: ActContext): Promise<void> {
  *     { schedule } (recurring cron). Both → 422 "valid under each schema".
  *     We use `schedule: '0 3 * * *'` for daily-3am.
  *   - resources.executable.entity.uuid: the launched app's UUID
- *   - resources.executable.action: `{}` is accepted — the check only
+ *   - resources.executable.action: `{}` is accepted, the check only
  *     validates entity match, the action details (per-app runbook UUID
  *     for "Refresh VM") aren't part of the live check assertion.
  *
- * Idempotent — skips when {trigram}-sched already exists.
+ * Idempotent: skips when {trigram}-sched already exists.
  */
 async function actScheduleDay2Action(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
@@ -1574,7 +1549,7 @@ async function actScheduleDay2Action(ctx: ActContext): Promise<void> {
   const app = apps.entities?.find((a) => a.status?.name === `${trigram}-app`);
   if (!app?.metadata?.uuid) {
     ctx.logger.warn(
-      'actScheduleDay2Action: player app not found — run clone-app-blueprint first',
+      'actScheduleDay2Action: player app not found, run clone-app-blueprint first',
     );
     return;
   }
@@ -1602,7 +1577,7 @@ async function actScheduleDay2Action(ctx: ActContext): Promise<void> {
 }
 
 /**
- * Stage 37 modify-blueprint — adds a `foo` task to `bp-blankvm-prd{Vlanid}`'s
+ * Stage 37 modify-blueprint: adds a `foo` task to `bp-blankvm-prd{Vlanid}`'s
  * NewVM `action_create` action. The blueprint isn't pre-deployed on every
  * HPoC; the original Python's `DeployBP` action (`actions.py` in
  * `r0w/ntnx-escape-game`) clones a `*-source` blueprint to create it on
@@ -1610,7 +1585,7 @@ async function actScheduleDay2Action(ctx: ActContext): Promise<void> {
  * stage works on any cluster that has the source blueprint installed
  * (BlankVM-source on a vanilla HPoC).
  *
- * Internal action key is `action_create` (not the GUI label "Create" —
+ * Internal action key is `action_create` (not the GUI label "Create",
  * confirmed by inspecting the cloned blueprint live). The act appends
  * the `foo` task in-line; the GUI player would type a Shell snippet but
  * we just need a task with the right name so the check passes.
@@ -1626,14 +1601,14 @@ async function actModifyBlueprint(ctx: ActContext): Promise<void> {
   let bp = bps.entities?.find(
     (b) => b.status?.name === bpName || b.metadata?.name === bpName,
   );
-  // Phase 1: deploy if missing — clone the `*-source` blueprint.
+  // Phase 1: deploy if missing, clone the `*-source` blueprint.
   if (!bp?.metadata?.uuid) {
     const source = bps.entities?.find((b) =>
       /source$/.test(b.metadata?.name ?? b.status?.name ?? ''),
     );
     if (!source?.metadata?.uuid) {
       ctx.logger.warn(
-        `actModifyBlueprint: no '*-source' blueprint to clone — pack-installable blueprint missing on this HPoC`,
+        `actModifyBlueprint: no '*-source' blueprint to clone: pack-installable blueprint missing on this HPoC`,
       );
       return;
     }
@@ -1667,7 +1642,7 @@ async function actModifyBlueprint(ctx: ActContext): Promise<void> {
     `/api/nutanix/v3/blueprints/${bp.metadata.uuid}`,
   );
   // Spec key may live under `spec.resources` or `status.resources` depending
-  // on whether we just cloned (status reflects truth) — use spec for the PUT
+  // on whether we just cloned (status reflects truth): use spec for the PUT
   // round-trip, status for read-only lookup.
   const services = full.spec?.resources?.service_definition_list ?? [];
   const newVm = services.find((s: AnyRec) => s.name === 'NewVM');
@@ -1677,7 +1652,7 @@ async function actModifyBlueprint(ctx: ActContext): Promise<void> {
   }
   // Internal slug is `action_create` (Python `CheckLabs.CheckUpdateBP`
   // confirms via jsonpath `[?(@.name=='action_create')]`). The GUI label
-  // is "Create" — different namespace.
+  // is "Create": different namespace.
   const createAction = (newVm.action_list ?? []).find(
     (a: AnyRec) => a.name === 'action_create',
   );
@@ -1714,7 +1689,7 @@ async function actModifyBlueprint(ctx: ActContext): Promise<void> {
   });
   // Insert the new task into the DAG wrapper's child list so the runbook
   // executes it. The DAG is the task with type='DAG' and name ending in
-  // `___create___dag` — append a reference to `foo`.
+  // `___create___dag`: append a reference to `foo`.
   const dag = tasks.find((t: AnyRec) => t.type === 'DAG');
   if (dag) {
     const children = dag.child_tasks_local_reference_list ?? [];
@@ -1731,7 +1706,7 @@ async function actModifyBlueprint(ctx: ActContext): Promise<void> {
 }
 
 // ───────────────────────────────────────────────────────────────────────
-//  Cleanups — delete resources by name. Idempotent (404 counts as success).
+//  Cleanups: delete resources by name. Idempotent (404 counts as success).
 // ───────────────────────────────────────────────────────────────────────
 
 /**
@@ -1760,7 +1735,7 @@ async function cleanupCreateAdminUser(ctx: ActContext): Promise<void> {
   const usernameLc = `${trigram}-adm`.toLowerCase();
   const users = await listAllSdk<AnyRec>(($p) => sdk(ctx).iam.users.listUsers($p));
   // IAM v4 users match on `username`, and the SDK doesn't expose a delete
-  // method — DELETE requires `If-Match` with the hash-only suffix of the
+  // method: DELETE requires `If-Match` with the hash-only suffix of the
   // GET response's `etag:<prefix>:<hash>` header. Use the REST helper.
   // Compare lowercase: v4 IAM stores usernames lowercased.
   for (const u of users) {
@@ -1776,7 +1751,7 @@ async function cleanupCreateAuthPolicy(ctx: ActContext): Promise<void> {
   const nameLc = `${trigram}-auth`.toLowerCase();
   const policies = await listAllSdk<AnyRec>(($p) => sdk(ctx).iam.authzPolicies.listAuthorizationPolicies($p));
   // authz policies expose the identifier on `displayName`, not `name`.
-  // v4 IAM lowercases on store — match case-insensitive.
+  // v4 IAM lowercases on store: match case-insensitive.
   for (const p of policies) {
     if ((p.displayName ?? '').toLowerCase() === nameLc && p.extId) {
       await deleteV4Entity(ctx, '/api/iam/v4.0/authz/authorization-policies', p.extId);
@@ -1829,7 +1804,7 @@ async function cleanupCreateCategory(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
   // Categories are keyed on (key, value) pairs rather than a top-level name
-  // so the generic `deleteByName` doesn't fit — handle the pair scan inline.
+  // so the generic `deleteByName` doesn't fit: handle the pair scan inline.
   const cats = await listAllSdk<AnyRec>(($p) => sdk(ctx).prism.categories.listCategories($p));
   for (const c of cats) {
     if (c.key === `${trigram}-cat` && c.extId) {
@@ -1876,9 +1851,9 @@ async function cleanupCreateProtectionPolicy(ctx: ActContext): Promise<void> {
 
 async function cleanupCreateApprovalPolicy(ctx: ActContext): Promise<void> {
   // Approval policy is cluster-wide (`master-appr-policy`) and shared by all
-  // players — don't delete during per-trigram cleanup. Bulk-cleanup operator
+  // players: don't delete during per-trigram cleanup. Bulk-cleanup operator
   // can `DELETE /api/security/v4.1/management/approval-policies/{extId}` by hand.
-  ctx.logger.info('cleanupCreateApprovalPolicy: shared policy — not deleted');
+  ctx.logger.info('cleanupCreateApprovalPolicy: shared policy: not deleted');
 }
 
 async function cleanupCreateReport(ctx: ActContext): Promise<void> {
@@ -1976,7 +1951,7 @@ async function cleanupModifyBlueprint(ctx: ActContext): Promise<void> {
     if (
       (b.metadata?.name === target || b.status?.name === target) &&
       b.metadata?.uuid &&
-      // Only delete if it was player-cloned — the source itself is named
+      // Only delete if it was player-cloned: the source itself is named
       // with `-source` suffix and stays untouched.
       !/source$/.test(b.metadata?.name ?? '')
     ) {
@@ -1993,7 +1968,7 @@ async function cleanupModifyBlueprint(ctx: ActContext): Promise<void> {
 }
 
 // ───────────────────────────────────────────────────────────────────────
-//  Registry exports — keys MUST match stage names in pack.json
+//  Registry exports: keys MUST match stage names in pack.json
 // ───────────────────────────────────────────────────────────────────────
 
 export const acts = {
@@ -2011,7 +1986,6 @@ export const acts = {
   'allow-ssh-in-microseg': actAllowSshInMicroseg,
   'create-protection-policy': actCreateProtectionPolicy,
   'create-approval-policy': actCreateApprovalPolicy,
-  'incident-freeze': actIncidentFreeze,
   'restore-vm-from-recovery': actRestoreVmFromRecovery,
   'create-report': actCreateReport,
   'create-ncm-playbook': actCreateNcmPlaybook,
@@ -2021,34 +1995,34 @@ export const acts = {
 };
 
 // Cleanup order is dependency-driven, NOT reverse-stage order. The runner
-// iterates this dict in insertion order — phases below reflect what holds
+// iterates this dict in insertion order: phases below reflect what holds
 // references to what. Live regression 2026-05-18 on 10.38.66.7: pure
 // reverse-stage tried `create-category` (stage 15) before `create-vm`
 // (stage 12), the VM still held the category tag, DELETE 400'd and the
 // category leaked. Same shape would leak `create-subnet`/`create-project`
 // if a VM survived earlier handlers (now safe because VM goes first).
 export const cleanups = {
-  // Phase 1 — top-of-pyramid: Calm/BP layer, no FK into lower layers
+  // Phase 1, top-of-pyramid: Calm/BP layer, no FK into lower layers
   'modify-blueprint': cleanupModifyBlueprint,
   'schedule-day2-action': cleanupScheduleDay2Action,
   'clone-app-blueprint': cleanupCloneAppBlueprint,
   'create-ncm-playbook': cleanupCreateNcmPlaybook,
-  // Phase 2 — policies that target categories/VMs; clear them before the VM
+  // Phase 2: policies that target categories/VMs; clear them before the VM
   // goes so policy DELETE sees clean state
   'create-report': cleanupCreateReport,
   'create-approval-policy': cleanupCreateApprovalPolicy,
   'create-protection-policy': cleanupCreateProtectionPolicy,
   'create-microseg-policy': cleanupCreateMicrosegPolicy,
   'create-storage-policy': cleanupCreateStoragePolicy,
-  // Phase 3 — VM FIRST (releases category tags + subnet port refs),
+  // Phase 3: VM FIRST (releases category tags + subnet port refs),
   //          THEN category (now unreferenced)
   'create-vm': cleanupCreateVm,
   'create-category': cleanupCreateCategory,
-  // Phase 4 — image + network + project, leaf to root
+  // Phase 4: image + network + project, leaf to root
   'add-ubuntu-image': cleanupAddUbuntuImage,
   'create-subnet': cleanupCreateSubnet,
   'create-project': cleanupCreateProject,
-  // Phase 5 — IAM (user is referenced by the auth-policy)
+  // Phase 5: IAM (user is referenced by the auth-policy)
   'create-auth-policy': cleanupCreateAuthPolicy,
   'create-admin-user': cleanupCreateAdminUser,
 };
