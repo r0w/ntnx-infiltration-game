@@ -48,6 +48,18 @@ export const PLANNER_VAR_KEYS = [
   { key: 'old_pc_password', name: 'OldPCPassword' },
 ] as const;
 
+/**
+ * Mock-only default player identity. Pre-seeded at session create so a
+ * fixture-backed session can jump to any stage without first playing the
+ * login (see `create()`). Overridden the moment the player types real
+ * values in the login stages. Never applied in `test` / `live`.
+ */
+export const MOCK_IDENTITY: Record<string, string> = {
+  Trigram: 'dev',
+  PIN: '0000',
+  Username: 'dev-agent',
+};
+
 export interface SessionServiceDeps {
   db: Database;
   runner: StageRunner;
@@ -337,6 +349,18 @@ export class SessionService {
     if (envVlanId === undefined || envVlanId === '' || envVlanId === null) {
       const randVlan = String(Math.floor(Math.random() * 250));
       this.variables.upsert(id, 'Vlanid', randVlan, 'session-init');
+    }
+    // Mock-only: pre-seed the player identity (Trigram / PIN / Username) so
+    // fresh sessions can DevPanel-jump straight to any stage without first
+    // playing the login. Without these captured, stages that interpolate
+    // `{Trigram}` are flagged missing-upstream and silently skipped on a
+    // cold jump (confusing during translation/UX review). Real player
+    // capture still overrides them when the login stages are played; in
+    // `test`/`live` identity stays strictly manual.
+    if (this.nutanix.mode === 'mock') {
+      for (const [name, value] of Object.entries(MOCK_IDENTITY)) {
+        this.variables.upsert(id, name, value, 'session-init');
+      }
     }
     return record;
   }
