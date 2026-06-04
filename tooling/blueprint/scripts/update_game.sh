@@ -9,13 +9,6 @@ set -euo pipefail
 CONTAINER="ntnx-infiltration-game"
 IMAGE="@@{IMAGE_REPO}@@:@@{IMAGE_TAG}@@"
 
-# Re-login in case the token rotated since install.
-TOKEN="@@{GHCR_TOKEN}@@"
-USERNAME="@@{GHCR_USERNAME}@@"
-if [[ -n "$TOKEN" ]]; then
-    echo "$TOKEN" | sudo docker login ghcr.io -u "${USERNAME:-x-access-token}" --password-stdin
-fi
-
 # Source IP the player whitelists for SSH in stage 19 — pinned via the
 # GAME_FRONTEND_HOST runtime var, else derived from this host's primary egress
 # IPv4 (read on the VM, not in the container, since traffic is NAT'd to the host).

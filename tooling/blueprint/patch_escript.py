@@ -351,8 +351,8 @@ def normalize_secrets_for_import(blueprint: dict) -> int:
 
     See site-packages/calm/dsl/api/util.py:223-234 + 539-549.
 
-    Operator fills the genuinely-secret values (PC_PASSWORD, GHCR_TOKEN,
-    ADMIN_PASSWORD) at Activate via Prism UI; PC encrypts them with the
+    Operator fills the genuinely-secret values (PC_PASSWORD,
+    GAME_OLD_PC_PASSWORD) at Activate via Prism UI; PC encrypts them with the
     session key at that point. launch.py path is unaffected — its own
     strip_secrets() produces the same shape.
 

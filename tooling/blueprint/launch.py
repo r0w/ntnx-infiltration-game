@@ -17,7 +17,6 @@ Env (required unless marked default):
   PROJECT_NAME             lab                          (default)
   BP_NAME                  ntnx-infiltration-game       (default)
   APP_NAME                 = BP_NAME                    (default)
-  GHCR_TOKEN               <github PAT, read:packages>  (optional - only for private images)
   IMAGE_TAG                latest                        (default — set to e.g. `develop` for dev builds)
   IMAGE_REPO               ghcr.io/r0w/ntnx-infiltration-game  (default — leave unset for the canonical repo)
   GAME_VLAN_ID             ""                            (default — random 0-249)
@@ -65,7 +64,6 @@ SECRETS_AND_VARS = {
     "PC_IP": PC.split("://", 1)[1].split(":")[0],
     "PC_USERNAME": PC_USER,
     "PC_PASSWORD": PC_PWD,
-    "GHCR_TOKEN": os.environ.get("GHCR_TOKEN", ""),
     "ADMIN_PASSWORD": os.environ.get("ADMIN_PASSWORD", "nutanix/4u"),
     "CLUSTER_PROFILE": os.environ.get("CLUSTER_PROFILE", "hpoc"),
     "MODE": os.environ.get("MODE", "live"),

@@ -1,20 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
-# Pull the released image from ghcr.io and run it as a long-lived container.
-# Idempotent: stops + removes any prior container before re-running, so the
-# day-2 UpdateGame action can re-fire this same script to roll a new tag.
+# Pull the released image from ghcr.io (public repo, no auth) and run it as
+# a long-lived container. Idempotent: stops + removes any prior container
+# before re-running, so the day-2 UpdateGame action can re-fire this same
+# script to roll a new tag.
 
 IMAGE="@@{IMAGE_REPO}@@:@@{IMAGE_TAG}@@"
 CONTAINER="ntnx-infiltration-game"
-
-# docker login when the image is in a private repo (default while ours is
-# private). Public repo → leave GHCR_TOKEN blank, login is skipped.
-TOKEN="@@{GHCR_TOKEN}@@"
-USERNAME="@@{GHCR_USERNAME}@@"
-if [[ -n "$TOKEN" ]]; then
-    echo "$TOKEN" | sudo docker login ghcr.io -u "${USERNAME:-x-access-token}" --password-stdin
-fi
 
 # Source IP the player whitelists for SSH in stage 19. Operator can pin it via
 # the GAME_FRONTEND_HOST runtime var; left blank, derive this host's primary
