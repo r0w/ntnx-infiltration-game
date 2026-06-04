@@ -34,8 +34,10 @@ sudo tee "$APPDIR/docker-compose.yml" >/dev/null <<'COMPOSEEOF'
 __COMPOSE_YML__
 COMPOSEEOF
 
-# .env — Calm substitutes @@{..}@@ to literal values before this script runs;
-# the quoted heredoc then keeps any $ / backtick inside a secret intact.
+# .env — Calm substitutes the runtime-variable macros to their literal values
+# before this runs; the quoted heredoc then keeps any $ / backtick in a secret intact.
+# (Do NOT write a literal at-at-brace macro token in a comment: Calm scans the
+#  whole script body and an invalid var name there fails BP validation.)
 sudo tee "$APPDIR/.env" >/dev/null <<'ENVEOF'
 IMAGE_REPO=@@{IMAGE_REPO}@@
 IMAGE_TAG=@@{IMAGE_TAG}@@
