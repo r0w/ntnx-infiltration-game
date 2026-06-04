@@ -453,7 +453,7 @@ class DefaultProfile(Profile):
     )
     GAME_OLD_PC_PASSWORD = CalmVariable.Simple.Secret(
         Profile_GAME_OLD_PC_PASSWORD, label="Planner PC password",
-        description="For IOps on external cluster",
+        description="For IOps on external cluster, ask game team",
         is_mandatory=False, runtime=True,
     )
     PC_PASSWORD = CalmVariable.Simple.Secret(
