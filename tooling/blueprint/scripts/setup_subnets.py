@@ -3,7 +3,8 @@
 """
 Idempotent subnet prep — 1:1 port of three legacy install tasks:
 
-  1. RenameNetworkifNeeded.sh      — if no `secondary` subnet, rename `aux-1` → `secondary`
+  1. RenameNetworkifNeeded.sh      — if no `secondary` / `secondary-<cluster>`
+                                     subnet, rename `aux-1` → `secondary`
   2. MigrateSecondarysubnettoadvanced.sh — make `secondary` advanced-networking
                                           (required for the 2-NIC VM in stage 12)
   3. CreateSubnetTestNetwork.sh    — create the `TestNetwork` subnet stage 35
@@ -64,11 +65,19 @@ def get_subnet_by_id(ext_id):
     return r.json(), r.headers.get('etag') or r.headers.get('ETag')
 
 
+def _is_secondary(name):
+    """Match the secondary subnet across naming conventions: some clusters
+    name it bare `secondary`, others `secondary-<clusterName>`. Same
+    tolerant pattern as setup_production_project.get_subnet_uuid."""
+    return name == 'secondary' or (name or '').startswith('secondary-')
+
+
 def rename_aux1_to_secondary(subnets):
-    """Step 1: ensure there's a subnet named `secondary`."""
-    if any(s.get('name') == 'secondary' for s in subnets):
-        print("[skip] subnet 'secondary' already present — no rename")
-        return next(s for s in subnets if s.get('name') == 'secondary')
+    """Step 1: ensure there's a `secondary` (or `secondary-<cluster>`) subnet."""
+    existing = next((s for s in subnets if _is_secondary(s.get('name'))), None)
+    if existing:
+        print("[skip] subnet %r already present — no rename" % existing.get('name'))
+        return existing
 
     aux1 = next((s for s in subnets if s.get('name') == 'aux-1'), None)
     if not aux1:
@@ -176,7 +185,7 @@ def main():
 
     # Re-list since the rename mutated the snapshot.
     subnets = list_subnets()
-    secondary = next((s for s in subnets if s.get('name') == 'secondary'), None)
+    secondary = next((s for s in subnets if _is_secondary(s.get('name'))), None)
     if not secondary:
         print("[FAIL] 'secondary' missing after rename — bailing")
         return 1
