@@ -1,7 +1,7 @@
 # Blueprint - calm-dsl source + post-compile patcher
 
 The single shipping blueprint, self-contained in this directory.
-Authored in calm-dsl 4.3.1 (`blueprint.py`); a 6-pass post-compile
+Authored in calm-dsl 4.2.1 (`blueprint.py`); a 6-pass post-compile
 patcher (`patch_escript.py`) adapts the JSON to PC 7.5's quirks.
 
 For the operator-facing "host the game in 2 clicks" guide, see
@@ -36,7 +36,7 @@ same GitHub Release (as `nig-00-runbook-prerequisites.json` + `nig-01-blueprint.
 PATCH=1 ./compile.sh blueprint.py     # → blueprint.json + blueprint.patched.json
 ```
 
-The first run bootstraps `.venv` (calm-dsl 4.3.1) if missing. Re-runs
+The first run bootstraps `.venv` (calm-dsl 4.2.1) if missing. Re-runs
 are fast.
 
 ## Launch (headless)
@@ -65,7 +65,7 @@ walk-through.
 
 ## Why a patcher
 
-calm-dsl 4.3.1 emits JSON that PC 7.5 mostly accepts - but a few
+calm-dsl 4.2.1 emits JSON that PC 7.5 mostly accepts - but a few
 structural choices need correcting before the BP imports clean and
 launches without `Found cycles in tasks`:
 

@@ -7,7 +7,7 @@ status:ok + 39 stages.
 
 Differences vs v2's manual JSON assembler (build_blueprint.py):
 
-  - Authored natively in calm-dsl 4.3.1 — `calm compile bp` produces
+  - Authored natively in calm-dsl 4.2.1 — `calm compile bp` produces
     the JSON. The v2 patcher (`patch_escript.py`) runs post-compile to:
       1. Apply v2's `_patch_for_calm_escript` to every escript task
          (banned-import rewrites + UUID request-id helper + sleep-via-

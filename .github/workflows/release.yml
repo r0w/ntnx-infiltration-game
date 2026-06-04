@@ -120,13 +120,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set up Python 3.9 (calm-dsl 4.3.1 needs 3.9)
+      - name: Set up Python 3.9 (calm-dsl 4.2.1 needs 3.9)
         uses: actions/setup-python@v6
         with:
           python-version: '3.9'
 
       - name: Install ntnx-ncm-dsl
-        run: pip install ntnx-ncm-dsl==4.3.1
+        run: pip install ntnx-ncm-dsl==4.2.1
 
       - name: Write ~/.calm config files directly (bypass calm init dsl)
         # `calm init dsl` always probes the PC twice — once for NCM

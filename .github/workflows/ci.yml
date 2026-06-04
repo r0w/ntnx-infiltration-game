@@ -61,12 +61,12 @@ jobs:
 
       - name: Install pytest + ntnx-ncm-dsl
         run: |
-          pip install pytest ntnx-ncm-dsl==4.3.1 --quiet
+          pip install pytest ntnx-ncm-dsl==4.2.1 --quiet
 
       - name: Patch calm-dsl unreachable-PC bug
         # Same in-place patch the release.yml workflow applies — without
         # it `calm init dsl` errors on `is_ncm_enabled(client)` when
-        # there's no PC reachable. Bug in calm-dsl 4.3.1 upstream.
+        # there's no PC reachable. Bug present in calm-dsl 4.2.x/4.3.x upstream.
         run: |
           python3 - <<'PY'
           import calm.dsl.api.util as m, pathlib

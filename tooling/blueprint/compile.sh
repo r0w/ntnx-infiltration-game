@@ -19,7 +19,7 @@ if [[ ! -d "$VENV" ]]; then
   echo "venv missing — bootstrapping..."
   /usr/bin/python3 -m venv "$VENV"
   "$VENV/bin/pip" install --upgrade pip --quiet
-  "$VENV/bin/pip" install ntnx-ncm-dsl==4.3.1 --quiet
+  "$VENV/bin/pip" install ntnx-ncm-dsl==4.2.1 --quiet
 fi
 
 if [[ ! -f "$HOME/.calm/dsl.db" ]]; then
