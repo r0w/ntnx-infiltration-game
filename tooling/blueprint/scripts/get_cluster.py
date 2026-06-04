@@ -33,11 +33,18 @@ if 'data' not in response_data:
     print("[FAIL] unexpected clusters response (no 'data' key): %s" % response.text[:300])
     sys.exit(1)
 
+# NOTE: the success path must use break, NOT an exit-zero call. The sandbox's
+# exit helper is a NO-OP on code 0 (it only raises on a non-zero code), so an
+# early exit-0 would fall through to the FAIL branch below. Only the not-found
+# and error paths exit (non-zero -> real failure).
+found = False
 for cluster in response_data['data']:
     if "AOS" in cluster['config']['clusterFunction']:
         print("CLUSTERNAME=" + cluster['name'])
         print("CLUSTERUUID=" + cluster['extId'])
-        sys.exit(0)
+        found = True
+        break
 
-print("[FAIL] no AOS cluster found in the clusters response on %s." % pc_ip)
-sys.exit(1)
+if not found:
+    print("[FAIL] no AOS cluster found in the clusters response on %s." % pc_ip)
+    sys.exit(1)
