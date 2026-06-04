@@ -160,6 +160,28 @@ export function FauxTerminal({
     scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
   }, [gatedAt, activeIdx, items.length]);
 
+  // A validation is a system signal the player must see — same rationale as
+  // the gate banner. The pin hook parks on user scroll-up, so once the
+  // player has scrolled back to re-read, the "verifying…" spinner, the
+  // verdict, and the stage that follows all happen below the fold with no
+  // scroll (reproduced: parked at top, a check ran 500+px down, view never
+  // moved). Force a scroll-to-bottom both when the check fires
+  // (`checkPending`) and when the verdict lands (a `check-result` becomes
+  // the last item). The scroll event this emits also lands within the pin
+  // hook's "at bottom" band, which un-parks it so subsequent content follows
+  // normally. No-op for short stages that already fit (scrollHeight ≤
+  // clientHeight ⇒ scrollTop stays 0).
+  const lastItem = items[items.length - 1];
+  const lastCheckResultId =
+    lastItem?.kind === 'check-result' ? lastItem.id : null;
+  useEffect(() => {
+    if (!checkPending && !lastCheckResultId) return;
+    if (activeIdx < items.length) return;
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
+  }, [checkPending, lastCheckResultId, activeIdx, items.length]);
+
   useEffect(() => {
     if (!awaitingVariable && !busy && !finished && activeIdx >= items.length && items.length > 0) {
       // Hold longer when the last item is a successful check-result so the
