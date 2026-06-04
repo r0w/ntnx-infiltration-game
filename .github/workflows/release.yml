@@ -220,13 +220,12 @@ jobs:
         # the real entities at launch via Prism UI.
         run: python3 tooling/blueprint/seed_ci_cache.py
 
-      - name: Generate push_prereq_bps.sh from template + .tgz blobs
-        # blueprint.py's `Push prereq BPs` install task references
-        # scripts/push_prereq_bps.sh — assembled at compile time from
-        # the template + base64-inlined CloneProd.tgz + NewblankVM.tgz
-        # (per memory project_bundle_inline_b64). The output is gitignored
-        # since the blobs change. compile.sh does this locally; replicate
-        # it inline here so `calm compile bp` finds the file.
+      - name: Generate sh task scripts from templates + bundled assets
+        # blueprint.py's install tasks reference scripts/push_prereq_bps.sh
+        # (CloneProd.tgz + NewblankVM.tgz base64-inlined) and
+        # scripts/run_container.sh (specs/docker-compose.yml inlined). Both
+        # are assembled at compile time and gitignored. compile.sh does this
+        # locally; replicate it inline so `calm compile bp` finds the files.
         run: |
           python3 - <<'PY'
           import base64, pathlib
@@ -237,6 +236,12 @@ jobs:
           out = template.replace('__CLONEPROD_TGZ_B64__', cp).replace('__BLANKVM_TGZ_B64__', bv)
           (root / 'scripts' / 'push_prereq_bps.sh').write_text(out)
           print(f'wrote push_prereq_bps.sh ({len(out)} chars)')
+
+          compose = (root / 'specs' / 'docker-compose.yml').read_text()
+          rc = (root / 'scripts' / 'run_container.sh.template').read_text()
+          rc = rc.replace('__COMPOSE_YML__', compose.rstrip('\n'))
+          (root / 'scripts' / 'run_container.sh').write_text(rc)
+          print(f'wrote run_container.sh ({len(rc)} chars)')
           PY
 
       - name: Build blueprint.json (calm-dsl native + post-compile patcher)

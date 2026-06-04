@@ -41,6 +41,14 @@ bv = base64.b64encode((HERE / 'prereqs' / 'NewblankVM.tgz').read_bytes()).decode
 out = template.replace('__CLONEPROD_TGZ_B64__', cp).replace('__BLANKVM_TGZ_B64__', bv)
 (HERE / 'scripts' / 'push_prereq_bps.sh').write_text(out)
 print(f'  generated push_prereq_bps.sh ({len(out)} chars)')
+
+# Bundle specs/docker-compose.yml into run_container.sh (single source of
+# truth for the compose shape; the install task references run_container.sh).
+compose = (HERE / 'specs' / 'docker-compose.yml').read_text()
+rc = (HERE / 'scripts' / 'run_container.sh.template').read_text()
+rc = rc.replace('__COMPOSE_YML__', compose.rstrip(chr(10)))
+(HERE / 'scripts' / 'run_container.sh').write_text(rc)
+print(f'  generated run_container.sh ({len(rc)} chars)')
 "
 
 src="${1:-blueprint.py}"
