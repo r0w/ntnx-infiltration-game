@@ -429,31 +429,13 @@ class DefaultProfile(Profile):
         "", is_mandatory=False, is_hidden=True, runtime=False,
     )
 
-    # Runtime-visible vars — order here drives Prism UI launch-screen order.
-    # 1. container image repo
-    IMAGE_REPO = CalmVariable.Simple(
-        "ghcr.io/r0w/ntnx-infiltration-game",
-        label="Container image repository",
-        is_mandatory=True, runtime=True,
-    )
-    # 2. image tag
-    IMAGE_TAG = CalmVariable.Simple(
-        "latest", label="Image tag",
-        is_mandatory=True, runtime=True,
-    )
-    # 3. cluster profile
-    CLUSTER_PROFILE = CalmVariable.WithOptions(
-        ["hpoc", "other"], label="Cluster profile",
-        description="hpoc = remove 1 node if applicable; enable policy engine",
-        default="hpoc", is_mandatory=True, runtime=True,
-    )
-    # 4. run mode — `mock` intentionally omitted from the launch screen
-    # (nobody launches the BP in mock); the SwitchMode day-2 can still set it.
-    MODE = CalmVariable.WithOptions(
-        ["test", "live"], label="Run mode",
-        default="live", is_mandatory=True, runtime=True,
-    )
-    # 5. time zone
+    # Runtime-visible vars. ⚠ Prism renders this list BOTTOM-TO-TOP on the
+    # launch screen: the LAST var defined here shows up FIRST on screen. So
+    # these are defined in REVERSE of the desired on-screen order.
+    # Desired on-screen order (top→bottom):
+    #   Container image repository, Image tag, Cluster profile, Run mode,
+    #   Prism Central IP, Prism Central username, Prism Central password,
+    #   Planner PC password, Time zone.
     TIMEZONE = CalmVariable.WithOptions(
         [
             "UTC",
@@ -469,24 +451,40 @@ class DefaultProfile(Profile):
         label="Time zone", default="UTC",
         is_mandatory=True, runtime=True,
     )
-    # 6. prism central ip
-    PC_IP = CalmVariable.Simple(
-        "", label="Prism Central IP", is_mandatory=True, runtime=True,
-    )
-    # 7. prism central username
-    PC_USERNAME = CalmVariable.Simple(
-        "admin", label="Prism Central username", is_mandatory=True, runtime=True,
-    )
-    # 8. prism central password
-    PC_PASSWORD = CalmVariable.Simple.Secret(
-        Profile_PC_PASSWORD, label="Prism Central password",
-        is_mandatory=True, runtime=True,
-    )
-    # 9. planner pc password
     GAME_OLD_PC_PASSWORD = CalmVariable.Simple.Secret(
         Profile_GAME_OLD_PC_PASSWORD, label="Planner PC password",
         description="For IOps on external cluster",
         is_mandatory=False, runtime=True,
+    )
+    PC_PASSWORD = CalmVariable.Simple.Secret(
+        Profile_PC_PASSWORD, label="Prism Central password",
+        is_mandatory=True, runtime=True,
+    )
+    PC_USERNAME = CalmVariable.Simple(
+        "admin", label="Prism Central username", is_mandatory=True, runtime=True,
+    )
+    PC_IP = CalmVariable.Simple(
+        "", label="Prism Central IP", is_mandatory=True, runtime=True,
+    )
+    # `mock` intentionally omitted from the launch screen (nobody launches
+    # the BP in mock); the SwitchMode day-2 can still set it.
+    MODE = CalmVariable.WithOptions(
+        ["test", "live"], label="Run mode",
+        default="live", is_mandatory=True, runtime=True,
+    )
+    CLUSTER_PROFILE = CalmVariable.WithOptions(
+        ["hpoc", "other"], label="Cluster profile",
+        description="hpoc = remove 1 node if applicable; enable policy engine",
+        default="hpoc", is_mandatory=True, runtime=True,
+    )
+    IMAGE_TAG = CalmVariable.Simple(
+        "latest", label="Image tag",
+        is_mandatory=True, runtime=True,
+    )
+    IMAGE_REPO = CalmVariable.Simple(
+        "ghcr.io/r0w/ntnx-infiltration-game",
+        label="Container image repository",
+        is_mandatory=True, runtime=True,
     )
 
     # Hidden / non-runtime vars below — invisible on launch screen.
