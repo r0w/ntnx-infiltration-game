@@ -33,12 +33,10 @@ export interface DevPanelProps {
   /** Toggles skip-pauses. */
   onSkipPausesChange?: (v: boolean) => void;
   /**
-   * Server mode (`mock` | `test`). Surfaced in the toggle label so the
-   * operator knows at a glance which adapter the session is hitting —
-   * mistaking `mock` for `test` was the failure mode that made auto-play
-   * look broken (mock has no POST fixtures, so seeds can't really fire).
-   * `live` mode hides the panel entirely so the prop is intentionally
-   * narrowed.
+   * Server mode (`mock` | `test`), shown in the toggle label so the operator
+   * knows which adapter the session hits. Mistaking `mock` for `test` made
+   * auto-play look broken (mock has no POST fixtures). `live` hides the panel,
+   * so the prop is narrowed to the two dev modes.
    */
   mode?: 'mock' | 'test';
   onGoto: (stageName: string) => void;
@@ -63,9 +61,6 @@ export function DevPanel({
   onGoto,
 }: DevPanelProps) {
   const [pack, setPack] = useState<PackInfo | null>(null);
-  const [actions, setActions] = useState<string[]>([]);
-  const [actionBusy, setActionBusy] = useState<string | null>(null);
-  const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Furthest stage actually reached this session. The server forgets it
@@ -89,62 +84,20 @@ export function DevPanel({
     };
   }, []);
 
-  // Pack-registered actions are a property of the pack, but the endpoint
-  // lives under /session/:id/actions for URL symmetry — only fetch when we
-  // actually have a session id to pass. Skip in non-mock modes since the
-  // action UI is hidden there anyway (real cluster, no mock overlay to
-  // simulate against).
-  useEffect(() => {
-    if (!sessionId || mode !== 'mock') return;
-    let cancelled = false;
-    void api
-      .listActions(sessionId)
-      .then((r) => {
-        if (!cancelled) setActions(r.names);
-      })
-      .catch(() => {
-        /* silent — dev-only, skip surfacing in the UI */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionId, mode]);
-
-  const handleFire = async (name: string) => {
-    if (!sessionId || actionBusy) return;
-    setActionBusy(name);
-    setActionMsg(null);
-    try {
-      await api.fireAction(sessionId, name);
-      setActionMsg(`fired ${name}`);
-    } catch (err) {
-      setActionMsg(`${name} failed: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setActionBusy(null);
-    }
-  };
-
-  // Active/playing stage name = the one immediately after `currentStage` in
-  // the pack order. Pack stages are already in play order from the server.
-  // Pre-game (currentStage === null) → the first stage is the one about to
-  // play; otherwise → the stage right after the last completed one.
-  const activeStageName: string | null = pack
-    ? (currentStage === null
-        ? pack.stages[0]?.name ?? null
-        : pack.stages[
-            Math.min(
-              pack.stages.findIndex((s) => s.name === currentStage) + 1,
-              pack.stages.length - 1,
-            )
-          ]?.name ?? null)
-    : null;
-
-  const activeIdx = activeStageName && pack
-    ? Math.max(0, pack.stages.findIndex((s) => s.name === activeStageName))
-    : 0;
+  // Index of the stage about to play: first stage pre-game, else the one
+  // right after the last completed stage (clamped to the last). Pack order
+  // is play order, so we can index straight in.
+  const activeIdx =
+    !pack || currentStage === null
+      ? 0
+      : Math.min(
+          pack.stages.findIndex((s) => s.name === currentStage) + 1,
+          pack.stages.length - 1,
+        );
+  const activeStageName = pack?.stages[activeIdx]?.name ?? null;
   // A session hand-off (switch-identity / recovery switchTo) swaps sessionId
-  // without unmounting the panel — reset the high-water so the new session
-  // can't inherit the old one's reach.
+  // without unmounting the panel, so reset the high-water: the new session
+  // must not inherit the old one's reach.
   if (sessionId !== prevSessionId) {
     setPrevSessionId(sessionId);
     setHighWaterIdx(activeIdx);
@@ -209,7 +162,7 @@ export function DevPanel({
           );
         })()}
         {onToggleAutoPlay && (
-          // Always rendered so the bar layout never shifts — just disabled
+          // Always rendered so the bar layout never shifts; just disabled
           // until the player reaches a playable stage (post-login).
           <button
             type="button"
@@ -256,39 +209,12 @@ export function DevPanel({
           {pack && (
             <>
               <div className="devpanel-legend">
-                <strong>{pack.name}</strong> · click a stage to <em>jump</em> there.
+                Click a stage to <em>jump</em> there.
                 {' '}{mode === 'mock'
-                  ? 'Any stage — mock has no real cluster deps.'
-                  : 'Forward only up to the furthest stage you reached (test cluster has no state beyond it).'}
-                {' '}Captured variables &amp; UUIDs are kept.
+                  ? 'Any stage in mock.'
+                  : 'Forward only, up to the furthest stage reached.'}
+                {' '}Variables and UUIDs are kept.
               </div>
-              {/* Actions only make sense in mock mode — they simulate a
-                  cluster side-effect via the mock overlay. In `test` the
-                  cluster is real, so use the auto-play seeds (which run
-                  the actual cluster mutation) instead of these buttons. */}
-              {mode === 'mock' && actions.length > 0 && (
-                <div className="devpanel-actions">
-                  <div className="devpanel-legend">
-                    <strong>Actions</strong> · fire a registered mock-mode action (simulates
-                    a cluster side-effect — e.g. <code>restoreVM</code> unblocks stage 26
-                    after <code>deleteVM</code> fired on stage 23).
-                  </div>
-                  <div className="devpanel-action-list">
-                    {actions.map((name) => (
-                      <button
-                        key={name}
-                        type="button"
-                        className="devpanel-action"
-                        onClick={() => void handleFire(name)}
-                        disabled={!sessionId || actionBusy !== null}
-                      >
-                        {actionBusy === name ? '…' : '▶'} {name}
-                      </button>
-                    ))}
-                  </div>
-                  {actionMsg && <div className="devpanel-action-msg c-dim">{actionMsg}</div>}
-                </div>
-              )}
               <div className="devpanel-stages">
                 {pack.stages.map((s, idx) => {
                     // Highlight the stage that's about to play (== the one
