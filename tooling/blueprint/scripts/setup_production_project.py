@@ -146,13 +146,34 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
             },
         },
     }
-    r = requests.post(
-        "%s/api/nutanix/v3/projects" % BASE,
-        auth=AUTH, headers=HEADERS, verify=False, timeout=30,
-        data=json.dumps(body),
-    )
-    if r.status_code >= 400:
-        raise Exception("create project failed: %d %s" % (r.status_code, r.text[:300]))
+    # Retry on a transient ENTITY_NOT_FOUND: `Setup subnets` may have just
+    # migrated `secondary` to advanced-networking, and the v3 projects API can
+    # lag several seconds before it resolves the (unchanged-uuid) subnet for
+    # whitelisting — observed live on a cluster whose secondary needed the
+    # migration (the subnet exists, the projects API just can't see it yet).
+    # Iteration-based wall-clock (sandbox sleep is unreliable): each failed
+    # POST + subnets GET is ~1-1.5 s, so ~25 polls ≈ 30 s.
+    CREATE_POLLS = 25
+    last = ""
+    r = None
+    for attempt in range(CREATE_POLLS):
+        r = requests.post(
+            "%s/api/nutanix/v3/projects" % BASE,
+            auth=AUTH, headers=HEADERS, verify=False, timeout=30,
+            data=json.dumps(body),
+        )
+        if r.status_code < 400:
+            break
+        last = "%d %s" % (r.status_code, r.text[:300])
+        if r.status_code == 404 and "ENTITY_NOT_FOUND" in r.text:
+            print("  [warn] subnet not yet resolvable by projects API "
+                  "(attempt %d/%d) — waiting" % (attempt + 1, CREATE_POLLS))
+            requests.get("%s/api/nutanix/v3/subnets/list" % BASE,
+                         auth=AUTH, headers=HEADERS, verify=False, timeout=20)
+            continue
+        raise Exception("create project failed: %s" % last)
+    if r is None or r.status_code >= 400:
+        raise Exception("create project failed after %d retries: %s" % (CREATE_POLLS, last))
     task_uuid = r.json()["status"]["execution_context"]["task_uuid"]
 
     # Iteration-based, NOT wall-clock-based. The sandbox rewrites time.time()
