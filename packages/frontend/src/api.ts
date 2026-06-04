@@ -318,9 +318,6 @@ export const api = {
     ),
   switchIdentity: (id: string) =>
     post<{ currentStage: string | null }>(`/session/${id}/switch-identity`),
-  fireAction: (id: string, name: string) =>
-    post<{ fired: string }>(`/session/${id}/action/${name}`),
-  listActions: (id: string) => get<{ names: string[] }>(`/session/${id}/actions`),
   /**
    * Auto-play helper: fires the registered **act** handler for whatever stage
    * the session is currently awaiting on. Server-side gated to `test` mode
