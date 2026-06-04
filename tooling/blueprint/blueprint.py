@@ -551,6 +551,21 @@ class DefaultProfile(Profile):
             target=ref(Game),
         )
 
+    @action
+    def SwitchMode(name="Switch Mode"):
+        """Flip the running game between mock / test / live without a re-launch:
+        rewrite MODE in the deployed .env and recreate the container via compose."""
+        TARGET_MODE = CalmVariable.WithOptions(  # noqa: F841 — action input var
+            ["mock", "test", "live"], label="Target mode",
+            default="test", is_mandatory=True, runtime=True,
+        )
+        CalmTask.Exec.ssh(
+            name="rewrite MODE and recreate container",
+            filename=os.path.join("scripts", "switch_mode.sh"),
+            cred=ref(BP_CRED_NUTANIX),
+            target=ref(Game),
+        )
+
 
 class NtnxInfiltrationGame(Blueprint):
     """Nutanix Infiltration Game :
