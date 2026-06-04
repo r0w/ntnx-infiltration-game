@@ -15,7 +15,7 @@ function readStoredMaxWidth(): MaxWidth {
     const v = localStorage.getItem(MAX_WIDTH_KEY);
     if (v && (MAX_WIDTH_OPTIONS as string[]).includes(v)) return v as MaxWidth;
   } catch { /* localStorage blocked — fall through to default */ }
-  return 'none';
+  return '120ch';
 }
 
 // Dev override for the typewriter speed (ms/char). null = use the server's

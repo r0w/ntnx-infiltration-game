@@ -438,7 +438,7 @@ class DefaultProfile(Profile):
     )
     # 2. run mode
     MODE = CalmVariable.WithOptions(
-        ["live", "test"], label="Run mode",
+        ["live", "test", "mock"], label="Run mode",
         default="live", is_mandatory=True, runtime=True,
     )
     # 3. time zone

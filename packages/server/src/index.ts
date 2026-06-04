@@ -29,16 +29,18 @@ async function main() {
 
   // Cluster profile gates `impact: destructive` stages on shared clusters.
   // In mock mode there is no cluster — fixtures are immutable JSON — so the
-  // destructive guard is a no-op risk-wise. Force `hpoc` so all stages
+  // destructive guard is a no-op risk-wise. Default `hpoc` so all stages
   // (expand-cluster, create-approval-policy, …) play through; otherwise a
   // mock session that didn't set CLUSTER_PROFILE in env would silently skip
   // them and the player would see 37/39 at the end with no explanation.
+  // But honor an *explicit* CLUSTER_PROFILE — an operator who deliberately
+  // sets `other` wants to preview the shared-cluster (filtered) stage set.
   let clusterProfile: 'hpoc' | 'other';
   if (transportMode === 'mock') {
-    clusterProfile = 'hpoc';
-    consoleLogger.info('cluster profile forced (mock mode)', {
-      profile: 'hpoc',
-      reason: 'fixtures-not-a-real-cluster',
+    clusterProfile = cfg.clusterProfile ?? 'hpoc';
+    consoleLogger.info('cluster profile (mock mode)', {
+      profile: clusterProfile,
+      reason: cfg.clusterProfile ? 'explicit-env' : 'default-fixtures-not-a-real-cluster',
     });
   } else {
     clusterProfile = resolveClusterProfile({
