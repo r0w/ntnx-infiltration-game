@@ -986,11 +986,13 @@ async function CheckSecurityPolicy2(ctx: CheckContext): Promise<CheckResult> {
     }
     // …and at least one SSH rule must be scoped to the expected source IP.
     const restricted = sshRules.some((r) => {
-      const v = r.spec?.srcSubnet?.value;
-      if (!v) return false;
-      // No frontendHost to pin against (offline/misconfigured) — at least demand
-      // a single-host /32 so a broad range like 0.0.0.0/0 can't sneak through.
-      return frontendHost ? v === frontendHost : r.spec?.srcSubnet?.prefixLength === 32;
+      const sub = r.spec?.srcSubnet;
+      if (!sub) return false;
+      // No frontendHost to pin against (offline/misconfigured, or mock with no
+      // GAME_FRONTEND_HOST so the fixture's `{frontendHost}` resolves to '') —
+      // at least demand a single-host /32 so a broad range like 0.0.0.0/0 can't
+      // sneak through.
+      return frontendHost ? sub.value === frontendHost : sub.prefixLength === 32;
     });
     if (!restricted) {
       const want = frontendHost ? ` to ${frontendHost}` : ' to a specific source IP';
