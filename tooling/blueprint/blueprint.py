@@ -7,7 +7,7 @@ status:ok + 39 stages.
 
 Differences vs v2's manual JSON assembler (build_blueprint.py):
 
-  - Authored natively in calm-dsl 4.3.1 — `calm compile bp` produces
+  - Authored natively in calm-dsl 4.2.1 — `calm compile bp` produces
     the JSON. The v2 patcher (`patch_escript.py`) runs post-compile to:
       1. Apply v2's `_patch_for_calm_escript` to every escript task
          (banned-import rewrites + UUID request-id helper + sleep-via-
@@ -51,7 +51,7 @@ Compile + patch:
     PATCH=1 ./compile.sh blueprint.py
 
 Launch (headless):
-    GHCR_TOKEN=<github_pat> ./.venv/bin/python launch.py
+    ./.venv/bin/python launch.py
 """
 
 import os
@@ -75,7 +75,6 @@ Profile_PC_PASSWORD = read_local_file("Profile_Default_variable_PC_PASSWORD")
 Profile_ADMIN_PASSWORD = read_local_file("Profile_Default_variable_ADMIN_PASSWORD")
 Profile_GAME_PROD_PASSWORD = read_local_file("Profile_Default_variable_GAME_PROD_PASSWORD")
 Profile_GAME_OLD_PC_PASSWORD = read_local_file("Profile_Default_variable_GAME_OLD_PC_PASSWORD")
-Profile_GHCR_TOKEN = read_local_file("Profile_Default_variable_GIT_TOKEN")
 
 
 # ── Cred (nutanix user, created by cloud_init_data.yaml) ──────────────
@@ -430,18 +429,13 @@ class DefaultProfile(Profile):
         "", is_mandatory=False, is_hidden=True, runtime=False,
     )
 
-    # Runtime-visible vars — order here drives Prism UI launch-screen order.
-    # 1. cluster profile
-    CLUSTER_PROFILE = CalmVariable.WithOptions(
-        ["hpoc", "other"], label="Cluster profile",
-        default="hpoc", is_mandatory=True, runtime=True,
-    )
-    # 2. run mode
-    MODE = CalmVariable.WithOptions(
-        ["live", "test", "mock"], label="Run mode",
-        default="live", is_mandatory=True, runtime=True,
-    )
-    # 3. time zone
+    # Runtime-visible vars. ⚠ Prism renders this list BOTTOM-TO-TOP on the
+    # launch screen: the LAST var defined here shows up FIRST on screen. So
+    # these are defined in REVERSE of the desired on-screen order.
+    # Desired on-screen order (top→bottom):
+    #   Container image repository, Image tag, Cluster profile, Run mode,
+    #   Prism Central IP, Prism Central username, Prism Central password,
+    #   Planner PC password, Time zone.
     TIMEZONE = CalmVariable.WithOptions(
         [
             "UTC",
@@ -457,35 +451,36 @@ class DefaultProfile(Profile):
         label="Time zone", default="UTC",
         is_mandatory=True, runtime=True,
     )
-    # 4. prism central ip
-    PC_IP = CalmVariable.Simple(
-        "", label="Prism Central IP", is_mandatory=True, runtime=True,
+    GAME_OLD_PC_PASSWORD = CalmVariable.Simple.Secret(
+        Profile_GAME_OLD_PC_PASSWORD, label="Planner PC password",
+        description="For IOps on external cluster, ask game team",
+        is_mandatory=False, runtime=True,
     )
-    # 5. prism central username
-    PC_USERNAME = CalmVariable.Simple(
-        "admin", label="Prism Central username", is_mandatory=True, runtime=True,
-    )
-    # 6. prism central password
     PC_PASSWORD = CalmVariable.Simple.Secret(
         Profile_PC_PASSWORD, label="Prism Central password",
         is_mandatory=True, runtime=True,
     )
-    # 7. planner pc password
-    GAME_OLD_PC_PASSWORD = CalmVariable.Simple.Secret(
-        Profile_GAME_OLD_PC_PASSWORD, label="Planner PC password",
-        is_mandatory=False, runtime=True,
+    PC_USERNAME = CalmVariable.Simple(
+        "admin", label="Prism Central username", is_mandatory=True, runtime=True,
     )
-    # 8. ghcr.io token
-    GHCR_TOKEN = CalmVariable.Simple.Secret(
-        Profile_GHCR_TOKEN, label="ghcr.io token",
-        is_mandatory=False, runtime=True,
+    PC_IP = CalmVariable.Simple(
+        "", label="Prism Central IP", is_mandatory=True, runtime=True,
     )
-    # 9. image tag
+    # `mock` intentionally omitted from the launch screen (nobody launches
+    # the BP in mock); the SwitchMode day-2 can still set it.
+    MODE = CalmVariable.WithOptions(
+        ["test", "live"], label="Run mode",
+        default="live", is_mandatory=True, runtime=True,
+    )
+    CLUSTER_PROFILE = CalmVariable.WithOptions(
+        ["hpoc", "other"], label="Cluster profile",
+        description="hpoc = remove 1 node if applicable; enable policy engine",
+        default="hpoc", is_mandatory=True, runtime=True,
+    )
     IMAGE_TAG = CalmVariable.Simple(
         "latest", label="Image tag",
         is_mandatory=True, runtime=True,
     )
-    # 10. container image repo
     IMAGE_REPO = CalmVariable.Simple(
         "ghcr.io/r0w/ntnx-infiltration-game",
         label="Container image repository",
@@ -535,9 +530,6 @@ class DefaultProfile(Profile):
     GAME_FRONTEND_HOST = CalmVariable.Simple(
         "", is_mandatory=False, runtime=False, is_hidden=True,
     )
-    GHCR_USERNAME = CalmVariable.Simple(
-        "x-access-token", is_mandatory=False, runtime=False, is_hidden=True,
-    )
 
     # Day-2 actions (Phase 2.7)
     @action
@@ -556,6 +548,21 @@ class DefaultProfile(Profile):
         CalmTask.Exec.escript.py3(
             name="Verify final state",
             filename=os.path.join("scripts", "verify_state.py"),
+            target=ref(Game),
+        )
+
+    @action
+    def SwitchMode(name="Switch Mode"):
+        """Flip the running game between mock / test / live without a re-launch:
+        rewrite MODE in the deployed .env and recreate the container via compose."""
+        TARGET_MODE = CalmVariable.WithOptions(  # noqa: F841 — action input var
+            ["mock", "test", "live"], label="Target mode",
+            default="test", is_mandatory=True, runtime=True,
+        )
+        CalmTask.Exec.ssh(
+            name="rewrite MODE and recreate container",
+            filename=os.path.join("scripts", "switch_mode.sh"),
+            cred=ref(BP_CRED_NUTANIX),
             target=ref(Game),
         )
 

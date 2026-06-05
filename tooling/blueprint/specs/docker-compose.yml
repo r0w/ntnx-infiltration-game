@@ -1,0 +1,20 @@
+# Deployment compose for the game container. run_container.sh writes this
+# (bundled at build from here) + a sibling .env into
+# /opt/ntnx-infiltration-game/ at install, then `docker compose up -d`.
+#
+# - image ref is interpolated from .env (IMAGE_REPO / IMAGE_TAG)
+# - all container env comes from .env via `env_file`, which passes values
+#   LITERALLY (no compose `$` interpolation) so secrets containing $ / ! / etc.
+#   are forwarded untouched.
+# - the sqlite DB lives in ./data so a container roll keeps session history.
+services:
+  game:
+    image: ${IMAGE_REPO}:${IMAGE_TAG}
+    container_name: ntnx-infiltration-game
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/data
+    env_file:
+      - .env
