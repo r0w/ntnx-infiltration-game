@@ -69,6 +69,59 @@ export async function listAllSdk<T>(
 }
 
 /**
+ * Walk every page of a v3 `.../list` endpoint. v3 lists take `length`+`offset`
+ * and report `metadata.total_matches`; a flat `{ length: 250 }` silently drops
+ * entity 251+ on a cluster that has piled up apps/blueprints/jobs across many
+ * sessions, so a cleanup filtering client-side would miss (leak) its target.
+ * Loop until we've pulled total_matches or a page comes back short.
+ */
+export async function listAllV3<T = unknown>(
+  ctx: ActContext,
+  path: string,
+  body: Record<string, unknown> = {},
+): Promise<T[]> {
+  const PAGE = 250;
+  const all: T[] = [];
+  for (let offset = 0; offset < 20000; offset += PAGE) {
+    const res = await ctx.nutanix.rest.request<{
+      entities?: T[];
+      metadata?: { total_matches?: number };
+    }>('POST', path, { ...body, length: PAGE, offset });
+    const chunk = res.entities ?? [];
+    all.push(...chunk);
+    const total = res.metadata?.total_matches;
+    if (chunk.length < PAGE) break;
+    if (typeof total === 'number' && all.length >= total) break;
+  }
+  return all;
+}
+
+/**
+ * Walk every page of a v4 `.../list`-style GET reached via `rest.request` (for
+ * domains with no SDK client, e.g. dataprotection). v4 lists cap `$limit` at
+ * 100 and default to 50, so a bare GET silently drops entities past the first
+ * page: a cleanup filtering client-side would miss (leak) its target on a
+ * cluster that piles entities up across sessions. Returns the flat `data` array.
+ */
+export async function listAllV4Rest<T = unknown>(ctx: ActContext, path: string): Promise<T[]> {
+  const PAGE = 100;
+  const all: T[] = [];
+  for (let page = 0; page < 200; page++) {
+    const sep = path.includes('?') ? '&' : '?';
+    const res = await ctx.nutanix.rest.request<{
+      data?: T[];
+      metadata?: { totalAvailableResults?: number };
+    }>('GET', `${path}${sep}$page=${page}&$limit=${PAGE}`);
+    const chunk = res.data ?? [];
+    all.push(...chunk);
+    const total = res.metadata?.totalAvailableResults;
+    if (chunk.length < PAGE) break;
+    if (typeof total === 'number' && all.length >= total) break;
+  }
+  return all;
+}
+
+/**
  * Pulls the `status: SUCCEEDED|FAILED` from a v4 task-tracked response. Many
  * v4 mutating endpoints return a task ref instead of the final entity; we
  * poll `/api/prism/v4.2/config/tasks/:extId` until terminal. Not used by
@@ -84,6 +137,9 @@ export async function waitForTask(
   while (Date.now() - start < timeoutMs) {
     const res = await ctx.nutanix.rest.request<{
       data?: { status?: string; errorMessages?: unknown[] };
+      // Pass the task extId raw: PC matches the literal `<base64>:<uuid>`
+      // segment, as discover-nodes.ts and checks/helpers.ts poll it. Percent-
+      // encoding the `:`/`=` would 404 the lookup on this route.
     }>('GET', `/api/prism/v4.2/config/tasks/${taskExtId}`);
     const status = res?.data?.status;
     if (status && /SUCCEED|SUCCESS|COMPLETE/i.test(status)) return res.data ?? {};
@@ -401,8 +457,35 @@ export async function deleteV4Entity(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     delRes = await fetch(url, mkInit(hashOnly) as any);
   }
-  if (delRes.ok || delRes.status === 204) return true;
   if (delRes.status === 404) return true;
+  if (delRes.ok) {
+    // A 202 means the delete is still running: v4 hands back a task and the
+    // entity isn't gone yet. Returning now lets the next cleanup race it: the
+    // VM delete 202s, the subnet delete fires while the VM still holds its
+    // NICs, and the subnet leaks (looks like an ordering bug, isn't one). Wait
+    // the task out so the serial chain is actually serial. 200/204 have no task.
+    if (delRes.status === 202) {
+      const taskExtId = await delRes
+        .json()
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .then((b: any) => b?.data?.extId as string | undefined)
+        .catch(() => undefined);
+      // Best-effort: the DELETE is already accepted (202). We poll only to
+      // serialize the next dependent cleanup (subnet after VM). A slow, failed,
+      // or unconfirmable task must not flip an accepted delete into an error.
+      if (taskExtId) {
+        try {
+          await waitForTask(ctx, taskExtId);
+        } catch (err) {
+          ctx.logger.warn('deleteV4Entity: delete task did not confirm', {
+            path,
+            err: String(err).slice(0, 150),
+          });
+        }
+      }
+    }
+    return true;
+  }
   const body = await delRes.text().catch(() => '');
   // Throw so the per-stage `try/catch` in `/cleanup-all/:trigram` surfaces
   // this as `ok:false` in the results — previously we returned false and

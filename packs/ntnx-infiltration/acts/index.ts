@@ -22,6 +22,8 @@ import {
   getV4WithEtag,
   getVarString,
   listAllSdk,
+  listAllV3,
+  listAllV4Rest,
   postV4,
   postV4Action,
   putV4,
@@ -1763,12 +1765,8 @@ async function cleanupCreateProject(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
   const name = `${trigram}-proj`;
-  const list = await ctx.nutanix.rest.request<{ entities?: AnyRec[] }>(
-    'POST',
-    '/api/nutanix/v3/projects/list',
-    { length: 250 },
-  );
-  for (const p of list.entities ?? []) {
+  const entities = await listAllV3<AnyRec>(ctx, '/api/nutanix/v3/projects/list');
+  for (const p of entities) {
     if (p.status?.name === name || p.metadata?.name === name) {
       try {
         await ctx.nutanix.rest.request('DELETE', `/api/nutanix/v3/projects/${p.metadata?.uuid}`);
@@ -1797,6 +1795,31 @@ async function cleanupCreateVm(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
   const vms = await listAllSdk<AnyRec>(($p) => sdk(ctx).vmm.vms.listVms($p));
+  // actCreateVm snapshots the VM into a recovery point so stage 26 has
+  // something to restore. On Nutanix an RP deliberately outlives its VM, so
+  // deleting the VM leaves the RP behind to pile up across sessions. Sweep the
+  // RPs tied to this VM first, while we still have the extId to match on. Best-
+  // effort and paginated: dataprotection may be absent on a minimal HPoC, and a
+  // missing/erroring RP list must never block the VM delete below.
+  const vm = vms.find((v) => v.name === `${trigram}-vm`);
+  if (vm?.extId && ctx.nutanix.mode !== 'mock') {
+    try {
+      const rps = await listAllV4Rest<AnyRec>(
+        ctx,
+        '/api/dataprotection/v4.0/config/recovery-points',
+      );
+      for (const rp of rps) {
+        const refs = (rp.vmRecoveryPoints ?? []) as AnyRec[];
+        if (rp.extId && refs.some((r) => r.vmExtId === vm.extId)) {
+          await deleteV4Entity(ctx, '/api/dataprotection/v4.0/config/recovery-points', rp.extId);
+        }
+      }
+    } catch (err) {
+      ctx.logger.warn('cleanupCreateVm: recovery-point sweep failed', {
+        err: String(err).slice(0, 150),
+      });
+    }
+  }
   await deleteByName(ctx, vms, `${trigram}-vm`, '/api/vmm/v4.0/ahv/config/vms');
 }
 
@@ -1872,12 +1895,8 @@ async function cleanupCreateNcmPlaybook(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
   const name = `${trigram}-playbook`;
-  const list = await ctx.nutanix.rest.request<{ entities?: AnyRec[] }>(
-    'POST',
-    '/api/nutanix/v3/action_rules/list',
-    { length: 250 },
-  );
-  for (const p of list.entities ?? []) {
+  const entities = await listAllV3<AnyRec>(ctx, '/api/nutanix/v3/action_rules/list');
+  for (const p of entities) {
     const n = p.status?.name ?? p.status?.resources?.name;
     if (n === name && p.metadata?.uuid) {
       try {
@@ -1896,12 +1915,8 @@ async function cleanupCloneAppBlueprint(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
   const name = `${trigram}-app`;
-  const apps = await ctx.nutanix.rest.request<{ entities?: AnyRec[] }>(
-    'POST',
-    '/api/nutanix/v3/apps/list',
-    { length: 250 },
-  );
-  for (const a of apps.entities ?? []) {
+  const apps = await listAllV3<AnyRec>(ctx, '/api/nutanix/v3/apps/list');
+  for (const a of apps) {
     if ((a.status?.name === name || a.metadata?.name === name) && a.metadata?.uuid) {
       try {
         await ctx.nutanix.rest.request('DELETE', `/api/nutanix/v3/apps/${a.metadata.uuid}`);
@@ -1916,12 +1931,8 @@ async function cleanupScheduleDay2Action(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
   const name = `${trigram}-sched`;
-  const list = await ctx.nutanix.rest.request<{ entities?: AnyRec[] }>(
-    'POST',
-    '/api/nutanix/v3/jobs/list',
-    { length: 250 },
-  );
-  for (const s of list.entities ?? []) {
+  const entities = await listAllV3<AnyRec>(ctx, '/api/nutanix/v3/jobs/list');
+  for (const s of entities) {
     if ((s.status?.name === name || s.metadata?.name === name) && s.metadata?.uuid) {
       try {
         await ctx.nutanix.rest.request(
@@ -1942,12 +1953,10 @@ async function cleanupModifyBlueprint(ctx: ActContext): Promise<void> {
   // source blueprint alone (shared across all players + pack-installable).
   const vlan = getVarString(ctx, 'Vlanid');
   const target = `bp-blankvm-prd${vlan ?? ''}`;
-  const list = await ctx.nutanix.rest.request<{ entities?: AnyRec[] }>(
-    'POST',
-    '/api/nutanix/v3/blueprints/list',
-    { kind: 'blueprint', length: 250 },
-  );
-  for (const b of list.entities ?? []) {
+  const entities = await listAllV3<AnyRec>(ctx, '/api/nutanix/v3/blueprints/list', {
+    kind: 'blueprint',
+  });
+  for (const b of entities) {
     if (
       (b.metadata?.name === target || b.status?.name === target) &&
       b.metadata?.uuid &&
