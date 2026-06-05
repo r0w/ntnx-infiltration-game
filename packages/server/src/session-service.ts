@@ -60,6 +60,10 @@ export const MOCK_IDENTITY: Record<string, string> = {
   Username: 'dev-agent',
 };
 
+// Vlanid lives in [0, VLAN_RANGE). 250 matches the Python predecessor and fits
+// the `192.168.{Vlanid}.0/24` octet the subnet act carves.
+const VLAN_RANGE = 250;
+
 export interface SessionServiceDeps {
   db: Database;
   runner: StageRunner;
@@ -305,7 +309,7 @@ export class SessionService {
    * session id so the legacy NOT NULL + unique constraints stay satisfied.
    * Resume is now strictly sessionId-based (localStorage on the client side).
    */
-  create(input: CreateSessionInput): SessionRecord {
+  async create(input: CreateSessionInput): Promise<SessionRecord> {
     const id = crypto.randomUUID();
     // Merge boot-probed caps (input.capabilities) with config-driven
     // ones that can flip at runtime via /admin (currently only
@@ -339,16 +343,14 @@ export class SessionService {
         this.variables.upsert(id, name, v, 'session-init');
       }
     }
-    // Per-session randomized Vlanid — mirrors the original Python game's
-    // `main.py` (`Vlanid: str(random.randrange(250))`). Without this two
-    // concurrent players collide on the same VLAN ID and AHV refuses the
-    // second `{trigram}-subnet`. Operator can pin a fixed VLAN by setting
-    // `GAME_VLAN_ID` in env (the global initial overrides this only when
-    // empty / unset).
+    // Per-session Vlanid. A blind random roll (as the single-player Python CLI
+    // did) lets two concurrent players pick the same VLAN, and AHV rejects the
+    // second subnet on it. allocateVlanId picks a free one instead. GAME_VLAN_ID
+    // still pins a fixed VLAN (the global initial wins when set).
     const envVlanId = this.initialVariables.Vlanid;
     if (envVlanId === undefined || envVlanId === '' || envVlanId === null) {
-      const randVlan = String(Math.floor(Math.random() * 250));
-      this.variables.upsert(id, 'Vlanid', randVlan, 'session-init');
+      const vlan = await this.allocateVlanId();
+      this.variables.upsert(id, 'Vlanid', String(vlan), 'session-init');
     }
     // Mock-only: pre-seed the player identity (Trigram / PIN / Username) so
     // fresh sessions can DevPanel-jump straight to any stage without first
@@ -363,6 +365,66 @@ export class SessionService {
       }
     }
     return record;
+  }
+
+  /**
+   * Pick a collision-free Vlanid in [0, VLAN_RANGE), excluding VLANs live on the
+   * cluster plus those held by active peers. The cluster fetch is the only await:
+   * the DB read, pick, and caller's upsert all run synchronously after it, so two
+   * interleaved create() calls can't land on the same free VLAN. Falls back to a
+   * random roll in mock mode, on cluster error, or if the pool is exhausted.
+   */
+  private async allocateVlanId(): Promise<number> {
+    const randomVlan = () => Math.floor(Math.random() * VLAN_RANGE);
+    // Mock mode never builds real subnets, so a collision is harmless.
+    if (this.nutanix.mode === 'mock') return randomVlan();
+
+    const used = new Set<number>(await this.clusterVlanIds());
+    for (const v of this.variables.activeVlanIds()) used.add(v);
+
+    const free: number[] = [];
+    for (let v = 0; v < VLAN_RANGE; v += 1) {
+      if (!used.has(v)) free.push(v);
+    }
+    if (free.length === 0) {
+      this.logger.warn('vlan alloc: all VLANs in use, reusing a random one', {
+        range: VLAN_RANGE,
+      });
+      return randomVlan();
+    }
+    return free[Math.floor(Math.random() * free.length)];
+  }
+
+  /**
+   * VLAN IDs of VLAN-type subnets live on the cluster. Returns [] on error so
+   * allocation degrades to DB-only rather than blocking. Paginates v4 subnets.
+   */
+  private async clusterVlanIds(): Promise<number[]> {
+    try {
+      const used: number[] = [];
+      const limit = 100;
+      for (let page = 0; ; page += 1) {
+        const resp = await this.nutanix.rest.request<{
+          data?: Array<{ subnetType?: string; networkId?: number }>;
+        }>(
+          'GET',
+          `/api/networking/v4.0/config/subnets?$page=${page}&$limit=${limit}`,
+        );
+        const data = resp.data ?? [];
+        for (const s of data) {
+          if (s.subnetType === 'VLAN' && typeof s.networkId === 'number') {
+            used.push(s.networkId);
+          }
+        }
+        if (data.length < limit) break;
+      }
+      return used;
+    } catch (err) {
+      this.logger.warn('vlan alloc: cluster subnet list failed, falling back', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return [];
+    }
   }
 
   /**
@@ -384,32 +446,17 @@ export class SessionService {
   }
 
   /**
-   * How many stages will a fresh session on this cluster *actually* play?
+   * Stages a fresh session on this cluster will actually play: the score
+   * denominator for /admin users and /scoreboard. Dividing by the raw pack
+   * length instead would cap a player below 100% for stages filtered out by
+   * cluster reasons they could never reach.
    *
-   * Used as the score denominator in `/admin → users` (cell "Progress")
-   * and `/scoreboard` (percentage). Without this, both views divided by
-   * the raw pack length (39), so a player on a cluster where 3 stages
-   * are filtered for cluster reasons (e.g. no Policy Engine + no spare
-   * chassis slot) would top out at 36/39 ≈ 92% even after legitimately
-   * passing everything they could.
-   *
-   * The pre-existing per-session `stagesDisabled` counter only grows
-   * when the engine actually walks past a gated stage during `advance()`
-   * — for in-progress sessions, all FUTURE disabled stages still count
-   * against the player. This method shortcuts that by simulating the
-   * gate against current cluster state for every pack stage:
-   *
-   *   - excludes `active: false` (operator overlay or pack-default off)
-   *   - excludes `requires` not in caps (always)
-   *   - excludes `requiresOnOther` not in caps when profile=other
-   *   - excludes `impact: hpoc-only` when profile=other
-   *   - INCLUDES `adminGate: true` (operator can unlock; counts as
-   *     reachable)
-   *   - INCLUDES `needs`-broken (dynamic per-session; not a cluster fact)
-   *
-   * Merging boot-probed caps with `computeDynamicCapabilities()` here
-   * mirrors `create()` exactly, so admin edits via /admin → cluster
-   * propagate to the denominator on the next render.
+   * Simulates the advance() gate against current cluster state: skips inactive
+   * stages and unmet `requires` (plus `requiresOnOther` / `hpoc-only` when
+   * profile=other), but keeps adminGate stages (operator can unlock) and
+   * `needs`-broken ones (per-session, not a cluster fact). Merges boot caps
+   * with computeDynamicCapabilities() like create() so admin cluster edits
+   * reach the denominator on the next render.
    */
   effectivePlayableCount(
     bootCaps: readonly CapabilityFlag[],
@@ -436,20 +483,13 @@ export class SessionService {
   }
 
   /**
-   * Fire the registered **act** handler for the stage the session is currently
-   * awaiting on, reusing the session's live `vars` + cluster cache + nutanix
-   * client. Used by the auto-play UI in `test` mode: the operator's "Ok"
-   * shortcut needs the cluster-side resource to exist before the check runs,
-   * so we run the equivalent of the player's GUI step automatically.
-   *
-   * Captured vars (UUIDs, names) write through `variablesForSession` to the
-   * DB, so subsequent stages that `needs` them see them. Idempotency is the
-   * act handler's responsibility (existing handlers use an `ensure()`
-   * pattern: list → match-by-name → early return).
-   *
-   * Throws 409 when not awaiting, 404 when no act is registered for the
-   * awaiting stage. Mode gating (live vs mock/test) is the route's job —
-   * this method has no opinion on which modes should expose it.
+   * Fire the registered act handler for the stage the session is awaiting on,
+   * reusing its live vars + cluster cache + nutanix client. Powers the auto-play
+   * "Ok" shortcut: the cluster resource must exist before the check runs, so we
+   * run the player's GUI step for them. Captured vars write through to the DB so
+   * later `needs` stages see them; idempotency is the handler's job (the
+   * `ensure()` list-then-match pattern). Throws 409 when not awaiting, 404 when
+   * no act is registered. Mode gating is the route's call, not this method's.
    */
   async runActForAwaitingStage(
     sessionId: string,

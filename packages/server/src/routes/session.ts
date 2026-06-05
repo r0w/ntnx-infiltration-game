@@ -20,7 +20,7 @@ export function buildSessionRoutes(deps: SessionRoutesDeps): Hono {
     const requested = typeof body.locale === 'string' ? body.locale : undefined;
     const locale: Locale =
       requested && deps.supportedLocales.includes(requested) ? requested : deps.defaultLocale;
-    const session = deps.service.create({
+    const session = await deps.service.create({
       locale,
       clusterEndpoint: deps.clusterEndpoint,
       clusterProfile: deps.clusterProfile,

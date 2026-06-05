@@ -41,7 +41,7 @@ const NAMED: Record<string, string> = { Trigram: 'xy9', PIN: '4242', Username: '
 describe('e2e — mock press-Enter to continue', () => {
   test('empty submit to a $continue prompt advances (no waitForInputValue gate)', async () => {
     const { service } = await boot();
-    const session = service.create({
+    const session = await service.create({
       locale: 'en', clusterEndpoint: '', clusterProfile: 'hpoc',
       capabilities: ['CalmDSL', 'NodeRemove', 'MultiNode', 'ApprovalPolicy'],
     });

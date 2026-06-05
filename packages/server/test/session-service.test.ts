@@ -76,7 +76,10 @@ const bundle: LocaleBundle = makeBundle('en', {
   },
 });
 
-function makeService(clusterProfile: 'hpoc' | 'other') {
+async function makeService(
+  clusterProfile: 'hpoc' | 'other',
+  nutanix: NutanixClient = noopNutanix,
+) {
   const db = new Database(':memory:');
   db.exec(SCHEMA);
 
@@ -91,12 +94,12 @@ function makeService(clusterProfile: 'hpoc' | 'other') {
   const service = new SessionService({
     db,
     runner,
-    nutanix: noopNutanix,
+    nutanix,
     logger: silentLogger,
     packId: 'test-pack',
     bundle,
   });
-  const session = service.create({
+  const session = await service.create({
     locale: 'en',
     clusterEndpoint: '10.1.2.3',
     clusterProfile,
@@ -105,9 +108,37 @@ function makeService(clusterProfile: 'hpoc' | 'other') {
   return { service, session, db };
 }
 
+/**
+ * Live-mode Nutanix stub whose subnet list reports the given VLAN IDs as
+ * already in use. Paginates ($page/$limit) exactly like a real cluster so the
+ * allocator's loop terminates. Only the subnets GET is wired — anything else
+ * throws to surface an unexpected call.
+ */
+function liveNutanixWithVlans(usedVlans: number[]): NutanixClient {
+  const subnets = usedVlans.map((v) => ({ subnetType: 'VLAN', networkId: v }));
+  return {
+    mode: 'live',
+    async request() {
+      throw new Error('legacy request shim — unused by the allocator');
+    },
+    sdk: undefined as never,
+    rest: {
+      async request<T>(method: string, path: string): Promise<T> {
+        if (method === 'GET' && path.includes('/networking/v4.0/config/subnets')) {
+          const m = path.match(/\$page=(\d+)&\$limit=(\d+)/);
+          const page = m ? Number(m[1]) : 0;
+          const limit = m ? Number(m[2]) : 50;
+          return { data: subnets.slice(page * limit, page * limit + limit) } as T;
+        }
+        throw new Error(`unexpected ${method} ${path}`);
+      },
+    },
+  };
+}
+
 describe('SessionService', () => {
-  test('creates anonymous session with placeholder trigram and empty pinHash', () => {
-    const { session } = makeService('hpoc');
+  test('creates anonymous session with placeholder trigram and empty pinHash', async () => {
+    const { session } = await makeService('hpoc');
     expect(session.trigram).toBe(session.id);
     expect(session.pinHash).toBe('');
     // `null` = "nothing played yet". Replaces the pre-phase-11 `-1` sentinel;
@@ -116,9 +147,9 @@ describe('SessionService', () => {
     expect(session.currentStage).toBe(null);
   });
 
-  test('each create() returns a distinct session (no trigram-based dedup)', () => {
-    const { service, session } = makeService('hpoc');
-    const other = service.create({
+  test('each create() returns a distinct session (no trigram-based dedup)', async () => {
+    const { service, session } = await makeService('hpoc');
+    const other = await service.create({
       locale: 'en',
       clusterEndpoint: '10.1.2.3',
       clusterProfile: 'hpoc',
@@ -127,9 +158,9 @@ describe('SessionService', () => {
     expect(other.id).not.toBe(session.id);
   });
 
-  test('locale defaults to en when not provided', () => {
-    const { service } = makeService('hpoc');
-    const anon = service.create({
+  test('locale defaults to en when not provided', async () => {
+    const { service } = await makeService('hpoc');
+    const anon = await service.create({
       clusterEndpoint: '10.1.2.3',
       clusterProfile: 'hpoc',
       capabilities: [],
@@ -137,8 +168,32 @@ describe('SessionService', () => {
     expect(anon.locale).toBe('en');
   });
 
+  test('Vlanid allocation skips VLANs already live on the cluster', async () => {
+    // Cluster reports every VLAN but 249 in use → that's the only free slot.
+    const used = Array.from({ length: 249 }, (_, i) => i);
+    const { service, session } = await makeService('hpoc', liveNutanixWithVlans(used));
+    expect(service.variables.all(session.id).Vlanid).toBe('249');
+  });
+
+  test('Vlanid allocation excludes VLANs held by active peers, not just the cluster', async () => {
+    // Cluster leaves exactly two slots free (248, 249). The first session
+    // grabs one; the second must get the other even though no subnet exists
+    // on the cluster yet (DB exclusion closes the create()-to-stage-10 gap).
+    const used = Array.from({ length: 248 }, (_, i) => i);
+    const { service, session } = await makeService('hpoc', liveNutanixWithVlans(used));
+    const first = service.variables.all(session.id).Vlanid as string;
+    const second = await service.create({
+      locale: 'en',
+      clusterEndpoint: '10.1.2.3',
+      clusterProfile: 'hpoc',
+      capabilities: [],
+    });
+    const secondVlan = service.variables.all(second.id).Vlanid as string;
+    expect(new Set([first, secondVlan])).toEqual(new Set(['248', '249']));
+  });
+
   test('advance: first stage has no input, check-less → current_stage advances', async () => {
-    const { service, session } = makeService('hpoc');
+    const { service, session } = await makeService('hpoc');
     const r = await service.advance(session.id);
     expect(r.kind).toBe('units');
     expect(r.stageName).toBe('s1');
@@ -151,7 +206,7 @@ describe('SessionService', () => {
   });
 
   test('advance: stage with #>I: pauses and sets awaiting', async () => {
-    const { service, session } = makeService('hpoc');
+    const { service, session } = await makeService('hpoc');
     await service.advance(session.id); // stage 1
     const r = await service.advance(session.id); // stage 2 with input
     expect(r.kind).toBe('awaiting-input');
@@ -162,14 +217,14 @@ describe('SessionService', () => {
   });
 
   test('advance while awaiting throws 409', async () => {
-    const { service, session } = makeService('hpoc');
+    const { service, session } = await makeService('hpoc');
     await service.advance(session.id);
     await service.advance(session.id);
     await expect(service.advance(session.id)).rejects.toThrow(/awaiting/);
   });
 
   test('submitInput captures var and advances', async () => {
-    const { service, session } = makeService('hpoc');
+    const { service, session } = await makeService('hpoc');
     await service.advance(session.id);
     await service.advance(session.id);
     const r = await service.submitInput(session.id, 'Trigram', 'ZZZ');
@@ -180,14 +235,14 @@ describe('SessionService', () => {
   });
 
   test('submitInput with wrong variable rejects', async () => {
-    const { service, session } = makeService('hpoc');
+    const { service, session } = await makeService('hpoc');
     await service.advance(session.id);
     await service.advance(session.id);
     await expect(service.submitInput(session.id, 'Wrong', 'x')).rejects.toThrow(/Expected input/);
   });
 
   test('stage 3 substitutes the captured variable', async () => {
-    const { service, session } = makeService('hpoc');
+    const { service, session } = await makeService('hpoc');
     await service.advance(session.id); // stage 1
     await service.advance(session.id); // stage 2 awaiting
     await service.submitInput(session.id, 'Trigram', 'NEO'); // completes stage 2
@@ -198,7 +253,7 @@ describe('SessionService', () => {
   });
 
   test('destructive stage is disabled on shared cluster and recorded in history', async () => {
-    const { service, session } = makeService('other');
+    const { service, session } = await makeService('other');
     await service.advance(session.id); // stage 1
     await service.advance(session.id); // stage 2 awaiting
     await service.submitInput(session.id, 'Trigram', 'NEO'); // completes 2
@@ -211,7 +266,7 @@ describe('SessionService', () => {
   });
 
   test('check captures merge into variables', async () => {
-    const { service, session } = makeService('other');
+    const { service, session } = await makeService('other');
     await service.advance(session.id); // 1
     await service.advance(session.id); // 2 await
     await service.submitInput(session.id, 'Trigram', 'NEO');
@@ -222,7 +277,7 @@ describe('SessionService', () => {
   });
 
   test('skipTo jumps to stage, runs rehydrate, records history', async () => {
-    const { service, session } = makeService('hpoc');
+    const { service, session } = await makeService('hpoc');
     await service.advance(session.id); // stage 1 done
     const r = await service.skipTo(session.id, 's5');
     expect(r.finalStage).toBe('s5');
@@ -234,7 +289,7 @@ describe('SessionService', () => {
   });
 
   test('finishes session when no more stages', async () => {
-    const { service, session } = makeService('hpoc');
+    const { service, session } = await makeService('hpoc');
     await service.skipTo(session.id, 's5');
     const r = await service.advance(session.id);
     expect(r.kind).toBe('finished');
@@ -261,7 +316,7 @@ describe('SessionService', () => {
       packId: 'test-pack',
       bundle: bundleWithCheers,
     });
-    const session = service.create({
+    const session = await service.create({
       locale: 'en',
       clusterEndpoint: '10.1.2.3',
       clusterProfile: 'hpoc',
@@ -276,7 +331,7 @@ describe('SessionService', () => {
   });
 
   test('check response omits cheer when pack ships no sentences.ok-* keys', async () => {
-    const { service, session } = makeService('hpoc');
+    const { service, session } = await makeService('hpoc');
     await service.advance(session.id);
     await service.advance(session.id);
     await service.submitInput(session.id, 'Trigram', 'NEO');
@@ -311,7 +366,7 @@ describe('SessionService', () => {
       packId: 'test-pack',
       bundle: bundleWithKo,
     });
-    const session = service.create({
+    const session = await service.create({
       locale: 'en',
       clusterEndpoint: '10.1.2.3',
       clusterProfile: 'hpoc',
@@ -347,7 +402,7 @@ describe('SessionService', () => {
       packId: 'test-pack',
       bundle: bundleWithRetry,
     });
-    const session = service.create({
+    const session = await service.create({
       locale: 'en',
       clusterEndpoint: '10.1.2.3',
       clusterProfile: 'hpoc',
@@ -379,7 +434,7 @@ describe('SessionService', () => {
       packId: 'test-pack',
       bundle: noRetryBundle,
     });
-    const session = service.create({
+    const session = await service.create({
       locale: 'en',
       clusterEndpoint: '10.1.2.3',
       clusterProfile: 'hpoc',
@@ -420,7 +475,7 @@ describe('SessionService', () => {
       packId: 'test-pack',
       bundle: withActionBundle,
     });
-    const session = service.create({
+    const session = await service.create({
       locale: 'en',
       clusterEndpoint: '10.1.2.3',
       clusterProfile: 'hpoc',
@@ -453,7 +508,7 @@ describe('SessionService', () => {
       packId: 'test-pack',
       bundle: b,
     });
-    const session = service.create({
+    const session = await service.create({
       locale: 'en',
       clusterEndpoint: '10.1.2.3',
       clusterProfile: 'hpoc',
@@ -485,7 +540,7 @@ describe('SessionService', () => {
       packId: 'test-pack',
       bundle,
     });
-    const session = service.create({
+    const session = await service.create({
       locale: 'en',
       clusterEndpoint: '10.1.2.3',
       clusterProfile: 'hpoc',
@@ -498,7 +553,7 @@ describe('SessionService', () => {
   });
 
   test('fireAction on an unregistered name throws 404', async () => {
-    const { service, session } = makeService('hpoc');
+    const { service, session } = await makeService('hpoc');
     await expect(service.fireAction(session.id, 'nope')).rejects.toThrow(/not registered/);
   });
 
@@ -539,7 +594,7 @@ describe('SessionService', () => {
       packId: 'test-pack',
       bundle: loginBundle,
     });
-    const session = service.create({
+    const session = await service.create({
       locale: 'en',
       clusterEndpoint: '10.1.2.3',
       clusterProfile: 'hpoc',
@@ -599,7 +654,7 @@ describe('SessionService', () => {
       logger: silentLogger, packId: 'test-pack', bundle: greetBundle,
     });
     // First player — no collision → newKey
-    const p1 = service.create({
+    const p1 = await service.create({
       locale: 'en', clusterEndpoint: '', clusterProfile: 'hpoc', capabilities: [],
     });
     await service.advance(p1.id); // renders → awaits Trigram
@@ -610,7 +665,7 @@ describe('SessionService', () => {
     expect(pinPromptP1).not.toContain('Welcome back');
 
     // Second player, same trigram, P1 still active → returningKey
-    const p2 = service.create({
+    const p2 = await service.create({
       locale: 'en', clusterEndpoint: '', clusterProfile: 'hpoc', capabilities: [],
     });
     await service.advance(p2.id);
@@ -646,7 +701,7 @@ describe('SessionService', () => {
       db, runner, nutanix: noopNutanix,
       logger: silentLogger, packId: 'test-pack', bundle: handoffBundle,
     });
-    const session = service.create({
+    const session = await service.create({
       locale: 'en', clusterEndpoint: '', clusterProfile: 'hpoc', capabilities: [],
     });
     await service.advance(session.id); // awaits Hi
@@ -659,8 +714,8 @@ describe('SessionService', () => {
     expect(row.n).toBe(0);
   });
 
-  test('switchIdentity rewinds to pre-stage-1 and drops identity vars, keeps locale', () => {
-    const { service, session } = makeService('hpoc');
+  test('switchIdentity rewinds to pre-stage-1 and drops identity vars, keeps locale', async () => {
+    const { service, session } = await makeService('hpoc');
     service.variables.upsert(session.id, 'Trigram', 'rbo', 's1');
     service.variables.upsert(session.id, 'PIN', '1234', 's1');
     service.variables.upsert(session.id, 'Username', 'Rowien', 's3');
@@ -741,7 +796,7 @@ describe('SessionService', () => {
       packId: 'test-pack',
       bundle,
     });
-    const session = service.create({
+    const session = await service.create({
       locale: 'en',
       clusterEndpoint: '10.1.2.3',
       clusterProfile: 'hpoc',
@@ -772,7 +827,7 @@ describe('SessionService — adminGate', () => {
    * starts at currentStage=null; first advance picks stage 1 (renders),
    * second advance hits the gate.
    */
-  function makeGatedService() {
+  async function makeGatedService() {
     const db = new Database(':memory:');
     db.exec(SCHEMA);
     const gatedStages: StageDefinition[] = [
@@ -792,7 +847,7 @@ describe('SessionService — adminGate', () => {
       packId: 'test-pack',
       bundle: localBundle,
     });
-    const session = service.create({
+    const session = await service.create({
       locale: 'en',
       clusterEndpoint: '',
       clusterProfile: 'hpoc',
@@ -802,7 +857,7 @@ describe('SessionService — adminGate', () => {
   }
 
   test('advance returns kind=gated with stage info; currentStage stays put', async () => {
-    const { service, session } = makeGatedService();
+    const { service, session } = await makeGatedService();
     // stage 1 (no gate, narrative) → advances naturally.
     await service.advance(session.id);
     await service.advance(session.id); // commits stage 1
@@ -814,7 +869,7 @@ describe('SessionService — adminGate', () => {
   });
 
   test('unlocking the gate lets a subsequent advance flow into the stage', async () => {
-    const { service, session } = makeGatedService();
+    const { service, session } = await makeGatedService();
     await service.advance(session.id);
     await service.advance(session.id);
     let r = await service.advance(session.id);
@@ -828,7 +883,7 @@ describe('SessionService — adminGate', () => {
   });
 
   test('re-locking restores the gate for sessions that have not crossed yet', async () => {
-    const { service, session } = makeGatedService();
+    const { service, session } = await makeGatedService();
     await service.advance(session.id);
     await service.advance(session.id);
     expect((await service.advance(session.id)).kind).toBe('gated');
@@ -837,7 +892,7 @@ describe('SessionService — adminGate', () => {
     // Without rewinding the session, re-locking has no retroactive effect on
     // sessions that already crossed — but a fresh session would block.
     service.setGateUnlock('pause', false);
-    const fresh = service.create({
+    const fresh = await service.create({
       locale: 'en',
       clusterEndpoint: '',
       clusterProfile: 'hpoc',
@@ -848,8 +903,8 @@ describe('SessionService — adminGate', () => {
     expect((await service.advance(fresh.id)).kind).toBe('gated');
   });
 
-  test('listUnlockedGates reflects setGateUnlock + persists across service rebuild', () => {
-    const { service } = makeGatedService();
+  test('listUnlockedGates reflects setGateUnlock + persists across service rebuild', async () => {
+    const { service } = await makeGatedService();
     expect(service.listUnlockedGates()).toEqual([]);
     service.setGateUnlock('pause', true);
     expect(service.listUnlockedGates()).toEqual(['pause']);
@@ -859,7 +914,7 @@ describe('SessionService — adminGate', () => {
 });
 
 describe('SessionService — applyEffectiveStages (pack overlay)', () => {
-  function makeOverlayService() {
+  async function makeOverlayService() {
     const db = new Database(':memory:');
     db.exec(SCHEMA);
     const baseStages: StageDefinition[] = [
@@ -878,7 +933,7 @@ describe('SessionService — applyEffectiveStages (pack overlay)', () => {
       packId: 'test-pack',
       bundle: localBundle,
     });
-    const session = service.create({
+    const session = await service.create({
       locale: 'en',
       clusterEndpoint: '',
       clusterProfile: 'hpoc',
@@ -888,7 +943,7 @@ describe('SessionService — applyEffectiveStages (pack overlay)', () => {
   }
 
   test('overlay-disabled stage is silently skipped on advance (gate verdict = inactive)', async () => {
-    const { service, session } = makeOverlayService();
+    const { service, session } = await makeOverlayService();
     // Disable stage 'middle' via overlay → effective active=false → silent skip.
     service.packOverlay.setField('test-pack', 'middle', 'active', false);
     service.applyEffectiveStages();
@@ -900,7 +955,7 @@ describe('SessionService — applyEffectiveStages (pack overlay)', () => {
   });
 
   test('overlay-enabled adminGate parks the session (kind=gated) on the next advance', async () => {
-    const { service, session } = makeOverlayService();
+    const { service, session } = await makeOverlayService();
     service.packOverlay.setField('test-pack', 'middle', 'adminGate', true);
     service.applyEffectiveStages();
     await service.advance(session.id);
@@ -910,8 +965,8 @@ describe('SessionService — applyEffectiveStages (pack overlay)', () => {
     expect(r.stageName).toBe('middle');
   });
 
-  test('clearing the overlay (setField → null) restores the JSON default', () => {
-    const { service } = makeOverlayService();
+  test('clearing the overlay (setField → null) restores the JSON default', async () => {
+    const { service } = await makeOverlayService();
     service.packOverlay.setField('test-pack', 'middle', 'active', false);
     service.applyEffectiveStages();
     expect(service.listEffectiveStages().find((s) => s.name === 'middle')?.active).toBe(false);
@@ -925,7 +980,7 @@ describe('SessionService — applyEffectiveStages (pack overlay)', () => {
 
 describe('SessionService — global pause (lunch lock)', () => {
   test('advance returns kind=gated reason=global when isGloballyPaused; clearing lets it through', async () => {
-    const { service, session } = makeService('hpoc');
+    const { service, session } = await makeService('hpoc');
     // First advance is unblocked → renders stage 1.
     expect((await service.advance(session.id)).kind).not.toBe('gated');
 
@@ -942,8 +997,8 @@ describe('SessionService — global pause (lunch lock)', () => {
     expect(r2.kind).not.toBe('gated');
   });
 
-  test('global pause persists across SessionService rebuild (DB-backed)', () => {
-    const { service, db } = makeService('hpoc');
+  test('global pause persists across SessionService rebuild (DB-backed)', async () => {
+    const { service, db } = await makeService('hpoc');
     service.setGlobalPause(true);
     // Spin a fresh service against the same DB — it should pick up the row.
     const runner2 = new StageRunner(stages, new CheckRegistry());

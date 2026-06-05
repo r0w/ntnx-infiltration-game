@@ -361,6 +361,24 @@ export class VariableQueries {
       .prepare('DELETE FROM session_variables WHERE session_id = $sid AND name = $name')
       .run({ $sid: sessionId, $name: name });
   }
+
+  /**
+   * VLAN IDs held by active (not-finished) sessions. Lets allocation see peers
+   * whose subnet isn't on the cluster yet (it's built at stage 10), closing the
+   * gap between create() and that subnet appearing.
+   */
+  activeVlanIds(): number[] {
+    const rows = this.db
+      .prepare(
+        `SELECT sv.value FROM session_variables sv
+         JOIN sessions s ON s.id = sv.session_id
+         WHERE sv.name = 'Vlanid' AND s.finished_at IS NULL`,
+      )
+      .all() as Array<{ value: string }>;
+    return rows
+      .map((r) => Number.parseInt(parseJsonString(r.value) ?? '', 10))
+      .filter((n) => Number.isFinite(n));
+  }
 }
 
 export class MockOverlayQueries {

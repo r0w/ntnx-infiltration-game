@@ -48,7 +48,7 @@ const INPUTS: Record<string, string> = { Trigram: 'xy9', PIN: '4242', Username: 
 describe('e2e — mock forward goto', () => {
   test('forward gotoStage lands cleanly — no missing-upstream disables', async () => {
     const { service } = await boot();
-    const session = service.create({
+    const session = await service.create({
       locale: 'en',
       clusterEndpoint: '',
       clusterProfile: 'hpoc',
@@ -84,7 +84,7 @@ describe('e2e — mock forward goto', () => {
 
   test('backward gotoStage to the first stage (lore) resets to the pre-game state and re-prompts identity', async () => {
     const { service } = await boot();
-    const session = service.create({
+    const session = await service.create({
       locale: 'en',
       clusterEndpoint: '',
       clusterProfile: 'hpoc',
