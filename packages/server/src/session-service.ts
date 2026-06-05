@@ -971,12 +971,14 @@ export class SessionService {
     const session = this.getSession(sessionId);
     const targetIdx = this.stageIndex(stageName);
     if (targetIdx < 0) throw new HttpError(404, `Stage '${stageName}' not in pack`);
-    if (targetIdx < 1) throw new HttpError(400, `Stage '${stageName}' is not a valid goto target`);
     const names = this.stageNames();
     this.history.deleteFrom(session.id, stageName, names);
     this.sessions.setAwaiting(session.id, null);
     this.sessions.clearFinished(session.id);
-    const prevName = names[targetIdx - 1]!;
+    // Land on the stage just BEFORE the target so the next advance() picks the
+    // target up. Jumping to the very first stage (idx 0) lands on the pre-game
+    // NULL state a fresh session starts in.
+    const prevName = targetIdx > 0 ? names[targetIdx - 1]! : null;
     this.sessions.updateCurrentStage(session.id, prevName);
     return { currentStage: prevName };
   }
