@@ -66,7 +66,6 @@
   "stage-012.line-07": " - <white>UEFI</white>-Modus\n",
   "stage-012.line-08": " - <white>2 NICs</white> in den Subnetzen <white>secondary</white> und <white>{Trigram}-subnet</white>\n\n",
   "stage-012.line-09": "Sie können dieses <white>cloud-init</white> verwenden, um ein paar Benutzer in dieser VM anzulegen:\n<pause sec='1'/>",
-  "stage-012.line-10": "<code lang='yaml'>\n#cloud-config\nusers:\n  - name: nutanix\n    shell: /bin/bash\n    sudo: ['ALL=(ALL) NOPASSWD:ALL']\n  - name: admin\n    shell: /bin/bash\n    sudo: ['ALL=(ALL) NOPASSWD:ALL']\n    primary_group: users\n    groups: [sudo]\n    no_user_group: true\nchpasswd:\n  list: |\n    nutanix:MyPassword\n    admin:MyPassword\n  expire: false\nssh_pwauth: true\n</code>\n",
   "stage-012.line-11": "Verschieben Sie danach Ihre VM mit der Aktion <white>Manage Ownership</white> im Kontextmenü der VM in Ihr Projekt.\n\n",
   "stage-012.line-12": "Wenn das erledigt ist, starten Sie die VM und drücken Sie <white>Enter</white>, wenn Sie fertig sind: <input/>",
   "stage-013.line-01": "<action name='createRecoveryPoint'/><pagebreak/>",

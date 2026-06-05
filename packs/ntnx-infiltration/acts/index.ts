@@ -295,7 +295,17 @@ async function actAddUbuntuImage(ctx: ActContext): Promise<void> {
 
 /** Cloud-init userData mirroring stage-012 prompt: users `nutanix` + `admin`
  * with sudo NOPASSWD and password `MyPassword`. v4 expects the value
- * base64-encoded under `guestCustomization.config.cloudInitScript.value`. */
+ * base64-encoded under `guestCustomization.config.cloudInitScript.value`.
+ *
+ * The `write_files`/`runcmd` netplan block makes NIC order irrelevant: the VM
+ * has 2 NICs (`{Trigram}-subnet` isolated VLAN + `secondary` routable network)
+ * and the Ubuntu image only DHCPs the first interface by default. If the
+ * isolated subnet lands on eth0 the VM is unreachable from the SSH console.
+ * Matching `e*` and DHCPing every interface brings `secondary` up regardless
+ * of order, so the connected /24 route lets the console reach the VM. Single
+ * file (overwrites 50-cloud-init.yaml) to avoid netplan's "interface matched
+ * by multiple definitions" error. Keep this YAML in sync with the
+ * stage-012.line-10 code block the player is told to paste (en/fr/de). */
 const STAGE12_CLOUD_INIT_YAML = `#cloud-config
 users:
   - name: nutanix
@@ -313,6 +323,19 @@ chpasswd:
     admin:MyPassword
   expire: false
 ssh_pwauth: true
+write_files:
+  - path: /etc/netplan/50-cloud-init.yaml
+    permissions: '0600'
+    content: |
+      network:
+        version: 2
+        ethernets:
+          all-eths:
+            match:
+              name: "e*"
+            dhcp4: true
+runcmd:
+  - netplan apply
 `;
 
 /** Stage 12 create-vm: creates `{Trigram}-vm` matching the prompt: 2 vCPU,
