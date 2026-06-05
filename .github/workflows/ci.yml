@@ -151,7 +151,11 @@ jobs:
           done
           python3 tooling/blueprint/seed_ci_cache.py
 
-      - name: Generate push_prereq_bps.sh from template + .tgz blobs
+      - name: Generate sh task scripts from templates + bundled assets
+        # Same as compile.sh / release.yml: scripts/push_prereq_bps.sh (tgz
+        # blobs) and scripts/run_container.sh (docker-compose.yml) are
+        # assembled at compile time and gitignored, so `calm compile bp`
+        # below needs them generated first.
         run: |
           python3 - <<'PY'
           import base64, pathlib
@@ -161,6 +165,11 @@ jobs:
           bv = base64.b64encode((root / 'prereqs' / 'NewblankVM.tgz').read_bytes()).decode('ascii')
           out = template.replace('__CLONEPROD_TGZ_B64__', cp).replace('__BLANKVM_TGZ_B64__', bv)
           (root / 'scripts' / 'push_prereq_bps.sh').write_text(out)
+
+          compose = (root / 'specs' / 'docker-compose.yml').read_text()
+          rc = (root / 'scripts' / 'run_container.sh.template').read_text()
+          rc = rc.replace('__COMPOSE_YML__', compose.rstrip('\n'))
+          (root / 'scripts' / 'run_container.sh').write_text(rc)
           PY
 
       - name: Compile + patch the blueprint
