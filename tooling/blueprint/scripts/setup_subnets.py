@@ -67,9 +67,10 @@ def get_subnet_by_id(ext_id):
 
 def _is_secondary(name):
     """Match the secondary subnet across naming conventions: some clusters
-    name it bare `secondary`, others `secondary-<clusterName>`. Same
-    tolerant pattern as setup_production_project.get_subnet_uuid."""
-    return name == 'secondary' or (name or '').startswith('secondary-')
+    name it bare `secondary`, others `secondary-<clusterName>`, and casing
+    can vary. Same tolerant pattern as setup_production_project.get_subnet_uuid."""
+    n = (name or '').lower()
+    return n == 'secondary' or n.startswith('secondary-')
 
 
 def rename_aux1_to_secondary(subnets):

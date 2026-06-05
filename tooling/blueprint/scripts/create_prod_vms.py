@@ -72,13 +72,14 @@ def get_subnet_uuid(name):
     )
     r.raise_for_status()
     subs = r.json().get('data') or []
+    name_lc = (name or '').lower()
     for s in subs:
-        if s.get('name') == name:
+        if (s.get('name') or '').lower() == name_lc:
             return s['extId']
-    # Tolerate cluster-prefixed names (e.g. `secondary-<cluster>`); same
-    # pattern as setup_production_project.get_subnet_uuid.
+    # Tolerate cluster-prefixed names (e.g. `secondary-<cluster>`), casing
+    # included; same pattern as setup_production_project.get_subnet_uuid.
     for s in subs:
-        if (s.get('name') or '').startswith(name + '-'):
+        if (s.get('name') or '').lower().startswith(name_lc + '-'):
             return s['extId']
     return None
 

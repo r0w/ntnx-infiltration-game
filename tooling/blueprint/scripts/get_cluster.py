@@ -28,7 +28,11 @@ if not response.ok:
     print("[FAIL] GET clusters returned HTTP %d: %s" % (response.status_code, response.text[:300]))
     sys.exit(1)
 
-response_data = response.json()
+try:
+    response_data = response.json()
+except Exception as e:
+    print("[FAIL] clusters response is not valid JSON (%s): %s" % (e, response.text[:300]))
+    sys.exit(1)
 if 'data' not in response_data:
     print("[FAIL] unexpected clusters response (no 'data' key): %s" % response.text[:300])
     sys.exit(1)

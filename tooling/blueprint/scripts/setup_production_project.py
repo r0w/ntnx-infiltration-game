@@ -115,11 +115,12 @@ def get_subnet_uuid(name):
         )
         r.raise_for_status()
         entities = r.json().get('entities') or []
+        name_lc = name.lower()
         for e in entities:
-            if e['status'].get('name') == name:
+            if (e['status'].get('name') or '').lower() == name_lc:
                 return e['metadata']['uuid']
         for e in entities:
-            if e['status'].get('name', '').startswith(name + '-'):
+            if (e['status'].get('name') or '').lower().startswith(name_lc + '-'):
                 return e['metadata']['uuid']
         if attempt < 5:
             print("  [warn] subnet '%s' not yet visible (attempt %d/6) — waiting 5 s" %
