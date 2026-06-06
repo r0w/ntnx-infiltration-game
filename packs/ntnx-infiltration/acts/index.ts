@@ -224,7 +224,7 @@ async function actCreateSubnet(ctx: ActContext): Promise<void> {
     // found" check failure. Bailing loud lets the UI banner point at the
     // real cause.
     throw new Error(
-      'actCreateSubnet: Vlanid missing: set GAME_VLAN_ID in .env (e.g. 20)',
+      "actCreateSubnet: Vlanid missing on session — allocateVlanId() didn't seed it at session create; check server logs.",
     );
   }
   const clusters = await ctx.nutanix.rest.request<{ data?: Array<{ extId?: string }> }>(
@@ -2018,11 +2018,11 @@ async function cleanupCloneAppBlueprint(ctx: ActContext): Promise<void> {
   const vpcName = `${trigram}-vpc`;
   let vpc: AnyRec | undefined;
   try {
-    const vpcs = await ctx.nutanix.rest.request<{ data?: AnyRec[] }>(
-      'GET',
-      '/api/networking/v4.0/config/vpcs?%24limit=100',
-    );
-    vpc = (vpcs.data ?? []).find((v) => v.name === vpcName);
+    // Paginate: a bare $limit=100 GET would miss {trigram}-vpc once the
+    // cluster piles up >100 VPCs across sessions — the exact leak this
+    // teardown exists to recover from.
+    const vpcs = await listAllV4Rest<AnyRec>(ctx, '/api/networking/v4.0/config/vpcs');
+    vpc = vpcs.find((v) => v.name === vpcName);
   } catch {
     return; // networking absent on this PC — nothing to tear down
   }

@@ -965,9 +965,13 @@ export class SessionService {
     if (!stage) throw new HttpError(500, 'Pending-check stage disappeared from pack');
 
     const ctx = this.buildCheckContext(session);
-    this.sessions.setPendingCheck(session.id, null);
-    // No narrative units — those streamed in phase 1.
+    // No narrative units — those streamed in phase 1. Run the check BEFORE
+    // clearing pendingCheck: if it throws (transient cluster/network blip), the
+    // parked state survives so the client's "still parked, retryable" assumption
+    // holds and advance() keeps 409ing instead of replaying the stage.
     const result = await this.runStageCheck(session, stage, ctx, [], [], [], undefined);
+    if (result.kind === 'switch-session') return result; // session already deleted
+    this.sessions.setPendingCheck(session.id, null);
 
     // On fail, re-park an input so the player can retry (switchTo /
     // silentOnSuccess paths have no `check` and fall straight through).
