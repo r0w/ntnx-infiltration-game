@@ -136,6 +136,13 @@ function liveNutanixWithVlans(usedVlans: number[]): NutanixClient {
   };
 }
 
+// Two-phase aware advance: a check stage now defers, so resolve it inline and
+// return the verdict. Narrative/no-check stages pass straight through.
+async function advanceResolved(service: SessionService, id: string) {
+  const r = await service.advance(id);
+  return r.checkPending ? service.resolvePendingCheck(id) : r;
+}
+
 describe('SessionService', () => {
   test('creates anonymous session with placeholder trigram and empty pinHash', async () => {
     const { session } = await makeService('hpoc');
@@ -246,10 +253,11 @@ describe('SessionService', () => {
     await service.advance(session.id); // stage 1
     await service.advance(session.id); // stage 2 awaiting
     await service.submitInput(session.id, 'Trigram', 'NEO'); // completes stage 2
-    const r = await service.advance(session.id); // stage 3 substitutes #>V:Trigram#
+    const r = await service.advance(session.id); // stage 3 renders, defers its check
     expect(r.kind).toBe('units');
     expect(r.units.find((u) => u.kind === 'text' && u.text.includes('NEO'))).toBeDefined();
-    expect(r.check?.pass).toBe(true);
+    const rc = await service.resolvePendingCheck(session.id);
+    expect(rc.check?.pass).toBe(true);
   });
 
   test('destructive stage is disabled on shared cluster and recorded in history', async () => {
@@ -259,7 +267,7 @@ describe('SessionService', () => {
     await service.advance(session.id); // stage 1
     await service.advance(session.id); // stage 2 awaiting
     await service.submitInput(session.id, 'Trigram', 'NEO'); // completes 2
-    await service.advance(session.id); // stage 3
+    await advanceResolved(service, session.id); // stage 3
     const r = await service.advance(session.id); // would be stage 4 (destructive) but gated → jumps to 5
     expect(r.stageName).toBe('s5');
     const history = service.history.listForSession(session.id);
@@ -273,8 +281,8 @@ describe('SessionService', () => {
     await service.advance(session.id); // 1
     await service.advance(session.id); // 2 await
     await service.submitInput(session.id, 'Trigram', 'NEO');
-    await service.advance(session.id); // 3
-    await service.advance(session.id); // 5 (destructive 4 skipped)
+    await advanceResolved(service, session.id); // 3
+    await advanceResolved(service, session.id); // 5 (destructive 4 skipped) — captures
     const vars = service.variables.all(session.id);
     expect(vars.ProjectUUID).toBe('abc-123');
   });
@@ -328,7 +336,7 @@ describe('SessionService', () => {
     await service.advance(session.id); // 1
     await service.advance(session.id); // 2 awaiting
     await service.submitInput(session.id, 'Trigram', 'NEO');
-    const r = await service.advance(session.id); // 3 runs alwaysPass
+    const r = await advanceResolved(service, session.id); // 3 runs alwaysPass
     expect(r.check?.pass).toBe(true);
     expect(['Nice!', 'Great work.']).toContain(r.check?.cheer);
   });
@@ -338,7 +346,7 @@ describe('SessionService', () => {
     await service.advance(session.id);
     await service.advance(session.id);
     await service.submitInput(session.id, 'Trigram', 'NEO');
-    const r = await service.advance(session.id);
+    const r = await advanceResolved(service, session.id);
     expect(r.check?.pass).toBe(true);
     expect(r.check?.cheer).toBeUndefined();
   });
@@ -378,7 +386,7 @@ describe('SessionService', () => {
     await service.advance(session.id); // 1
     await service.advance(session.id); // 2 awaiting
     await service.submitInput(session.id, 'Trigram', 'NEO');
-    const r = await service.advance(session.id); // 3 runs alwaysFail
+    const r = await advanceResolved(service, session.id); // 3 runs alwaysFail
     expect(r.check?.pass).toBe(false);
     expect(['Oops!', 'Try again!']).toContain(r.check?.cheer);
   });
@@ -605,7 +613,8 @@ describe('SessionService', () => {
     });
     await service.advance(session.id); // stage 1 renders, awaits Trigram
     await service.submitInput(session.id, 'Trigram', 'rbo'); // captures, awaits PIN
-    const r = await service.submitInput(session.id, 'PIN', '1234'); // runs check, fails
+    await service.submitInput(session.id, 'PIN', '1234'); // phase 1: parks the check
+    const r = await service.resolvePendingCheck(session.id); // phase 2: runs check, fails
 
     expect(r.kind).toBe('awaiting-input');
     expect(r.awaitingVariable).toBe('Trigram');
@@ -620,6 +629,48 @@ describe('SessionService', () => {
     const vars = service.variables.all(session.id);
     expect(vars.Trigram).toBeUndefined();
     expect(vars.PIN).toBeUndefined();
+  });
+
+  test('two-phase check: submitInput defers the check, resolvePendingCheck runs it', async () => {
+    const db = new Database(':memory:');
+    db.exec(SCHEMA);
+    const checks = new CheckRegistry();
+    let ran = 0;
+    checks.register('countingPass', async () => {
+      ran += 1;
+      return { pass: true, detail: 'ok' };
+    });
+    const stage: StageDefinition = {
+      id: 0, name: 's1', active: true, messages: ['s1.m1'],
+      saveScore: true, check: { fn: 'countingPass' },
+    };
+    const runner = new StageRunner([stage], checks);
+    const b = makeBundle('en', { en: { 's1.m1': "Press Enter: <input/>" } });
+    const service = new SessionService({
+      db, runner, nutanix: noopNutanix, logger: silentLogger, packId: 'test-pack', bundle: b,
+    });
+    const session = await service.create({
+      locale: 'en', clusterEndpoint: '', clusterProfile: 'hpoc', capabilities: [],
+    });
+    await service.advance(session.id); // renders, awaits the $continue input
+
+    // Phase 1: the check is deferred — narrative back, no verdict yet.
+    const p1 = await service.submitInput(session.id, '$continue', '');
+    expect(p1.checkPending).toBe(true);
+    expect(p1.check).toBeUndefined();
+    expect(ran).toBe(0);
+    expect(service.getSession(session.id).pendingCheck?.stageName).toBe('s1');
+    // Can't advance with a check parked.
+    await expect(service.advance(session.id)).rejects.toThrow(/pending check/);
+
+    // Phase 2: the check runs and the stage advances.
+    const p2 = await service.resolvePendingCheck(session.id);
+    expect(ran).toBe(1);
+    expect(p2.check?.pass).toBe(true);
+    expect(p2.units).toEqual([]);
+    const after = service.getSession(session.id);
+    expect(after.pendingCheck).toBeNull();
+    expect(after.currentStage).toBe('s1');
   });
 
   test('computeGreeting picks newKey when no colliding session, returningKey when one exists', async () => {
@@ -708,7 +759,8 @@ describe('SessionService', () => {
       locale: 'en', clusterEndpoint: '', clusterProfile: 'hpoc', capabilities: [],
     });
     await service.advance(session.id); // awaits Hi
-    const r = await service.submitInput(session.id, 'Hi', 'yo');
+    await service.submitInput(session.id, 'Hi', 'yo'); // phase 1: parks the check
+    const r = await service.resolvePendingCheck(session.id); // phase 2: switchTo
 
     expect(r.kind).toBe('switch-session');
     expect(r.switchSessionId).toBe('target-session-xyz');
@@ -808,17 +860,16 @@ describe('SessionService', () => {
     await service.advance(session.id); // 1
     await service.advance(session.id); // 2 awaiting
     await service.submitInput(session.id, 'Trigram', 'NEO');
-    await service.advance(session.id); // 3
-    await service.advance(session.id); // 5 (destructive 4 skipped implicitly? no, dedicated → 4 passes)
-    // On dedicated the destructive stage 4 runs before 5 — play forward until
-    // ProjectUUID is captured.
+    await advanceResolved(service, session.id); // 3
+    await advanceResolved(service, session.id); // 4 (dedicated → runs)
+    // Play forward until ProjectUUID is captured (stage 5).
     let vars = service.variables.all(session.id);
     while (!vars.ProjectUUID) {
-      await service.advance(session.id);
+      await advanceResolved(service, session.id);
       vars = service.variables.all(session.id);
     }
     expect(vars.ProjectUUID).toBe('abc-123');
-    await service.advance(session.id); // stage 6 narrative — invalidates
+    await advanceResolved(service, session.id); // stage 6 narrative — invalidates
     const after = service.variables.all(session.id);
     expect(after.ProjectUUID).toBeUndefined();
   });

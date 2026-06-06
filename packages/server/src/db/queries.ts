@@ -23,6 +23,9 @@ export interface SessionRow {
   awaiting_variable: string | null;
   awaiting_stage: string | null;
   awaiting_render_offset: number | null;
+  pending_check_stage: string | null;
+  pending_check_retry_variable: string | null;
+  pending_check_retry_offset: number | null;
 }
 
 export interface SessionRecord {
@@ -40,6 +43,9 @@ export interface SessionRecord {
   clusterProfile: ClusterProfile;
   capabilities: CapabilityFlag[];
   awaiting: { variable: string; stageName: string; renderOffset: number } | null;
+  /** Deferred check awaiting /resolve-check: stage owing it + the input to
+   *  rewind to on failure. `null` = nothing pending. */
+  pendingCheck: { stageName: string; retryVariable: string; retryOffset: number } | null;
 }
 
 function rowToSession(row: SessionRow): SessionRecord {
@@ -62,6 +68,14 @@ function rowToSession(row: SessionRow): SessionRecord {
             variable: row.awaiting_variable,
             stageName: row.awaiting_stage,
             renderOffset: row.awaiting_render_offset ?? 0,
+          }
+        : null,
+    pendingCheck:
+      row.pending_check_stage !== null
+        ? {
+            stageName: row.pending_check_stage,
+            retryVariable: row.pending_check_retry_variable ?? '',
+            retryOffset: row.pending_check_retry_offset ?? 0,
           }
         : null,
   };
@@ -139,6 +153,22 @@ export class SessionQueries {
         $var: awaiting?.variable ?? null,
         $stage: awaiting?.stageName ?? null,
         $offset: awaiting?.renderOffset ?? null,
+      });
+  }
+
+  setPendingCheck(
+    id: string,
+    pending: { stageName: string; retryVariable: string; retryOffset: number } | null,
+  ): void {
+    this.db
+      .prepare(
+        'UPDATE sessions SET pending_check_stage = $stage, pending_check_retry_variable = $var, pending_check_retry_offset = $offset WHERE id = $id',
+      )
+      .run({
+        $id: id,
+        $stage: pending?.stageName ?? null,
+        $var: pending?.retryVariable ?? null,
+        $offset: pending?.retryOffset ?? null,
       });
   }
 

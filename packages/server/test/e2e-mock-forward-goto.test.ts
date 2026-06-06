@@ -60,7 +60,9 @@ describe('e2e — mock forward goto', () => {
     for (let i = 0; i < 30; i++) {
       const s: any = service.getSession(id);
       if (s.currentStage === 'intro-mission') break;
-      if (s.awaiting && s.awaiting.variable) {
+      if (s.pendingCheck) {
+        await service.resolvePendingCheck(id);
+      } else if (s.awaiting && s.awaiting.variable) {
         await service.submitInput(id, s.awaiting.variable, INPUTS[s.awaiting.variable] ?? 'Ok');
       } else {
         await service.advance(id);
@@ -96,7 +98,9 @@ describe('e2e — mock forward goto', () => {
     for (let i = 0; i < 30; i++) {
       const s: any = service.getSession(id);
       if (s.currentStage === 'intro-mission') break;
-      if (s.awaiting && s.awaiting.variable) {
+      if (s.pendingCheck) {
+        await service.resolvePendingCheck(id);
+      } else if (s.awaiting && s.awaiting.variable) {
         await service.submitInput(id, s.awaiting.variable, INPUTS[s.awaiting.variable] ?? 'Ok');
       } else {
         await service.advance(id);
@@ -120,7 +124,9 @@ describe('e2e — mock forward goto', () => {
     const reprompted: string[] = [];
     let s: any = service.getSession(id);
     for (let i = 0; i < 40 && s.currentStage !== 'intro-mission'; i++) {
-      if (s.awaiting && s.awaiting.variable) {
+      if (s.pendingCheck) {
+        await service.resolvePendingCheck(id);
+      } else if (s.awaiting && s.awaiting.variable) {
         if (s.awaiting.variable !== '$continue') reprompted.push(s.awaiting.variable);
         await service.submitInput(id, s.awaiting.variable, INPUTS[s.awaiting.variable] ?? 'Ok');
       } else {

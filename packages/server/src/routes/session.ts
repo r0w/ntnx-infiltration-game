@@ -46,6 +46,9 @@ export function buildSessionRoutes(deps: SessionRoutesDeps): Hono {
       clusterProfile: session.clusterProfile,
       capabilities: session.capabilities,
       awaiting: session.awaiting,
+      // Surface only the stage name — the client re-runs /resolve-check to
+      // finish a check it was parked on when it reloaded.
+      pendingCheck: session.pendingCheck ? { stageName: session.pendingCheck.stageName } : null,
       locale: session.locale,
       finishedAt: session.finishedAt,
       replay,

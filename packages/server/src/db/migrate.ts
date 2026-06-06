@@ -67,6 +67,12 @@ function columnType(db: Database, table: string, column: string): string | null 
   return col?.type ?? null;
 }
 
+/** Idempotent `ALTER TABLE ADD COLUMN` — no-op if the column already exists. */
+function addColumnIfMissing(db: Database, table: string, name: string, ddl: string): void {
+  if (columnType(db, table, name) !== null) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${ddl}`);
+}
+
 function mapId(id: number | null): string | null {
   if (id === null || id === undefined) return null;
   if (id < 0) return null; // old -1 sentinel = pre-game
@@ -74,16 +80,16 @@ function mapId(id: number | null): string | null {
 }
 
 export function migrate(db: Database): void {
-  // Phase 10: add `session_mode` column if missing (auto-play support). Done
-  // unconditionally early so it lands on both old-schema and new-schema DBs
-  // before the next schema.sql pass. `ALTER TABLE ADD COLUMN` errors on dup;
-  // swallow the specific "duplicate column" error and rethrow anything else.
-  const hasSessionModeColumn = columnType(db, 'sessions', 'session_mode') !== null;
+  // Additive columns, applied before schema.sql's CREATE IF NOT EXISTS pass so
+  // they land on both old- and new-schema DBs.
   const hasSessionsTable = columnType(db, 'sessions', 'id') !== null;
-  if (hasSessionsTable && !hasSessionModeColumn) {
-    db.exec(
-      `ALTER TABLE sessions ADD COLUMN session_mode TEXT NOT NULL DEFAULT 'manual'`,
-    );
+  if (hasSessionsTable) {
+    // Phase 10: auto-play session mode.
+    addColumnIfMissing(db, 'sessions', 'session_mode', `TEXT NOT NULL DEFAULT 'manual'`);
+    // Two-phase themed check (2026-06-06): deferred-check state, all nullable.
+    addColumnIfMissing(db, 'sessions', 'pending_check_stage', 'TEXT');
+    addColumnIfMissing(db, 'sessions', 'pending_check_retry_variable', 'TEXT');
+    addColumnIfMissing(db, 'sessions', 'pending_check_retry_offset', 'INTEGER');
   }
 
   // 2026-04-27: cluster_profile values renamed for clarity.

@@ -52,7 +52,9 @@ describe('e2e — mock press-Enter to continue', () => {
     for (let i = 0; i < 40; i++) {
       const s: any = service.getSession(id);
       if (s.currentStage === 'create-auth-policy') break; // == past create-admin-user
-      if (s.awaiting && s.awaiting.variable) {
+      if (s.pendingCheck) {
+        await service.resolvePendingCheck(id); // phase 2 of the two-phase check
+      } else if (s.awaiting && s.awaiting.variable) {
         const v: any = s.awaiting.variable;
         // Named identity inputs need real values; every other prompt is a
         // $continue — press Enter (empty string).

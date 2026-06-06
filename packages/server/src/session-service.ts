@@ -97,6 +97,9 @@ export interface AdvanceResult {
    */
   switchSessionId?: string;
   actions: string[];
+  /** Phase-1 flag: narrative rendered, check deferred to /resolve-check.
+   *  The client plays the "verifying…" beat then fetches the verdict. */
+  checkPending?: boolean;
   check?: {
     pass: boolean;
     detail?: string;
@@ -711,6 +714,9 @@ export class SessionService {
     if (session.awaiting) {
       throw new HttpError(409, 'Session awaiting input; submit input before advancing');
     }
+    if (session.pendingCheck) {
+      throw new HttpError(409, 'Session has a pending check; resolve it before advancing');
+    }
     // Pack-wide pause (lunch lock, etc.) — checked BEFORE the runner so a
     // single DB row gates the whole room without rebuilding the runner.
     // submitInput intentionally bypasses this check: a player who's typing
@@ -928,7 +934,11 @@ export class SessionService {
 
     const prevAwaiting = session.awaiting;
     this.sessions.setAwaiting(session.id, null);
-    const result = await this.finalizeStage(
+
+    // finalizeStage defers a check (streams the "wait…" narrative, parks
+    // pendingCheck) or finalizes a no-check stage inline. The retry context
+    // lets a deferred check rewind to this input on failure.
+    return await this.finalizeStage(
       session,
       stage,
       ctx,
@@ -936,20 +946,45 @@ export class SessionService {
       rendered.actions,
       [],
       rendered.typingSpeedMs,
+      { variable, offset: prevAwaiting.renderOffset },
     );
-    // On check-fail, put the player back at the same input so they can retry
-    // without the whole stage re-rendering. Otherwise awaiting stays null,
-    // auto-advance fires, and the gate re-picks this stage (currentStage
-    // didn't move) — the full prompt prints again on top of the failure line.
-    if (prevAwaiting && result.check && !result.check.pass) {
-      // Rewind path: the check named an earlier `<input/>` as the root
-      // cause (e.g. CheckTrigram fails on PIN submission but the collision
-      // is on Trigram). Move awaiting back to that input and clear every
-      // captured variable at or after it so the player re-enters them.
+  }
+
+  /**
+   * Phase 2 of the two-phase check: run the deferred check. The narrative
+   * already streamed in phase 1, so this returns only the verdict (empty
+   * `units` + `check`) — advancing on pass, rewinding awaiting on fail.
+   */
+  async resolvePendingCheck(sessionId: string): Promise<AdvanceResult> {
+    const session = this.getSession(sessionId);
+    if (session.finishedAt) throw new HttpError(409, 'Session already finished');
+    const pending = session.pendingCheck;
+    if (!pending) throw new HttpError(409, 'Session has no pending check');
+    const stage = this.runner.stageByName(pending.stageName);
+    if (!stage) throw new HttpError(500, 'Pending-check stage disappeared from pack');
+
+    const ctx = this.buildCheckContext(session);
+    this.sessions.setPendingCheck(session.id, null);
+    // No narrative units — those streamed in phase 1.
+    const result = await this.runStageCheck(session, stage, ctx, [], [], [], undefined);
+
+    // On fail, re-park an input so the player can retry (switchTo /
+    // silentOnSuccess paths have no `check` and fall straight through).
+    if (result.check && !result.check.pass) {
+      // Re-render only here (the pass path doesn't need it) to locate the
+      // inputs. The check may blame an earlier one (e.g. a PIN submit failing
+      // on a Trigram collision) — rewind there and clear the captures past it.
+      const rendered = this.runner.render(
+        stage,
+        ctx.vars,
+        session.locale,
+        this.bundle,
+        this.globalTypingSpeedMs,
+      );
       const retryFrom = result.check.retryFromVariable;
       if (retryFrom) {
         const rewindIdx = this.runner.firstAwaitInputFor(rendered.units, retryFrom);
-        if (rewindIdx >= 0 && rewindIdx + 1 < prevAwaiting.renderOffset) {
+        if (rewindIdx >= 0 && rewindIdx + 1 < pending.retryOffset) {
           for (let i = rewindIdx; i < rendered.units.length; i++) {
             const u = rendered.units[i];
             if (u.kind === 'await-input') ctx.vars.delete(u.variable);
@@ -959,23 +994,16 @@ export class SessionService {
             stageName: stage.name,
             renderOffset: rewindIdx + 1,
           });
-          return {
-            ...result,
-            kind: 'awaiting-input',
-            awaitingVariable: retryFrom,
-            // Empty units: the failure chip (result.check.detail) carries
-            // the retry instruction; re-emitting the prompt text would
-            // duplicate noise the player already sees above.
-            units: [],
-          };
+          return { ...result, kind: 'awaiting-input', awaitingVariable: retryFrom, units: [] };
         }
       }
-      this.sessions.setAwaiting(session.id, prevAwaiting);
-      return {
-        ...result,
-        kind: 'awaiting-input',
-        awaitingVariable: prevAwaiting.variable,
-      };
+      // Default: re-park the input just submitted so a bare retry re-checks.
+      this.sessions.setAwaiting(session.id, {
+        variable: pending.retryVariable,
+        stageName: stage.name,
+        renderOffset: pending.retryOffset,
+      });
+      return { ...result, kind: 'awaiting-input', awaitingVariable: pending.retryVariable };
     }
     return result;
   }
@@ -998,7 +1026,7 @@ export class SessionService {
     if (names.length >= 2) {
       this.history.deleteFrom(session.id, names[1]!, names);
     }
-    this.sessions.setAwaiting(session.id, null);
+    this.clearFlowState(session.id);
     this.sessions.clearFinished(session.id);
     this.sessions.updateCurrentStage(session.id, loreName);
     for (const name of ['Trigram', 'PIN', 'Username']) {
@@ -1021,7 +1049,7 @@ export class SessionService {
     if (targetIdx < 0) throw new HttpError(404, `Stage '${stageName}' not in pack`);
     const names = this.stageNames();
     this.history.deleteFrom(session.id, stageName, names);
-    this.sessions.setAwaiting(session.id, null);
+    this.clearFlowState(session.id);
     this.sessions.clearFinished(session.id);
     // Land on the stage just BEFORE the target so the next advance() picks the
     // target up. Jumping to the very first stage (idx 0) lands on the pre-game
@@ -1063,12 +1091,68 @@ export class SessionService {
       }
       skipped.push(stage.name);
     }
-    this.sessions.setAwaiting(session.id, null);
+    this.clearFlowState(session.id);
     this.sessions.updateCurrentStage(session.id, stageName);
     return { skipped, finalStage: stageName };
   }
 
+  /** Drop both transient flow flags. Awaiting-input and a deferred check are
+   *  mutually exclusive, so every reset/jump clears whichever is set. */
+  private clearFlowState(sessionId: string): void {
+    this.sessions.setAwaiting(sessionId, null);
+    this.sessions.setPendingCheck(sessionId, null);
+  }
+
+  /**
+   * Commit a stage once its narrative has rendered. A stage with a check is
+   * NOT run here — it's deferred: park pendingCheck and return `checkPending`
+   * so the client plays the verifying beat, then calls resolvePendingCheck.
+   * Both advance() and submitInput route through here, so the two-phase beat is
+   * uniform. `pendingRetry` is the input to rewind to on a fail (submit path);
+   * absent for advance-reached checks. No-check stages finalize inline.
+   */
   private async finalizeStage(
+    session: SessionRecord,
+    stage: StageDefinition,
+    ctx: CheckContext,
+    units: MessageUnit[],
+    actions: string[],
+    disabledStages: DisabledStage[],
+    typingSpeedMs: number | undefined,
+    pendingRetry?: { variable: string; offset: number },
+  ): Promise<AdvanceResult> {
+    if (stage.check) {
+      this.sessions.setPendingCheck(session.id, {
+        stageName: stage.name,
+        retryVariable: pendingRetry?.variable ?? '',
+        retryOffset: pendingRetry?.offset ?? 0,
+      });
+      return {
+        kind: 'units',
+        stageName: stage.name,
+        units,
+        actions,
+        checkPending: true,
+        disabledStages,
+        typingSpeedMs,
+      };
+    }
+    // Narrative stage (no check) — advancement is the commit point, so
+    // invalidations fire here unconditionally.
+    if (stage.invalidates) {
+      for (const name of stage.invalidates) ctx.vars.delete(name);
+    }
+    this.history.record(session.id, stage.name, 'passed', null, null);
+    this.sessions.updateCurrentStage(session.id, stage.name);
+    return { kind: 'units', stageName: stage.name, units, actions, disabledStages, typingSpeedMs };
+  }
+
+  /**
+   * Phase 2: run a deferred stage check. Captures, invalidates, history and
+   * advancement happen here; `switchTo` short-circuits to a session handoff
+   * (drop this session, skip everything, let the client swap localStorage).
+   */
+  private async runStageCheck(
     session: SessionRecord,
     stage: StageDefinition,
     ctx: CheckContext,
@@ -1078,83 +1162,39 @@ export class SessionService {
     typingSpeedMs: number | undefined,
   ): Promise<AdvanceResult> {
     const start = Date.now();
-    let checkResult: AdvanceResult['check'] | undefined;
-    if (stage.check) {
-      const r = await this.runner.runCheck(stage, ctx);
-      // `switchTo` short-circuits the whole finalize path. The check said
-      // "don't keep going, hand off to this other sessionId" — we drop the
-      // current session (cascades child rows), skip history + captures +
-      // currentStage, and return a switch-session response so the client
-      // swaps localStorage.
-      if (r.switchTo) {
-        this.sessions.deleteById(session.id);
-        return {
-          kind: 'switch-session',
-          switchSessionId: r.switchTo,
-          units: [],
-          actions: [],
-          disabledStages: [],
-        };
-      }
-      // Stages marked silentOnSuccess omit the check row from the UI on pass —
-      // narrative beats already say their piece in-prose, no need for a
-      // synthetic `[✓] Stage validated.` cap. Failures still surface so the
-      // player knows why they're stuck.
-      if (!(r.pass && stage.silentOnSuccess)) {
-        const cheer = pickSentence(
-          this.bundle,
-          session.locale,
-          r.pass ? 'sentences.ok-' : 'sentences.ko-',
-        );
-        checkResult = {
-          pass: r.pass,
-          detail: r.detail,
-          hint: r.hint,
-          cheer,
-          retryFromVariable: r.retryFromVariable,
-        };
-      }
-      if (r.captured) {
-        for (const [name, value] of Object.entries(r.captured)) {
-          ctx.vars.set(name, value, stage.name);
-        }
-      }
-      // Invalidations run AFTER captures so a stage that both captures and
-      // invalidates the same name (edge case) lands in a well-defined state.
-      // Only fire on pass — a failing check hasn't actually destroyed anything.
-      if (r.pass && stage.invalidates) {
-        for (const name of stage.invalidates) ctx.vars.delete(name);
-      }
-      this.history.record(
-        session.id,
-        stage.name,
-        r.pass ? 'passed' : 'failed',
-        Date.now() - start,
-        r.detail ?? null,
-      );
-      // Progress on pass regardless of saveScore. saveScore is a checkpoint
-      // marker (for leaderboards / UI), not a gate on advancement — otherwise
-      // narrative stages with SaveScore:false would loop forever.
-      if (r.pass) this.sessions.updateCurrentStage(session.id, stage.name);
-    } else {
-      // Narrative stage (no check) — advancement is the commit point, so
-      // invalidations fire here unconditionally.
-      if (stage.invalidates) {
-        for (const name of stage.invalidates) ctx.vars.delete(name);
-      }
-      this.history.record(session.id, stage.name, 'passed', Date.now() - start, null);
-      this.sessions.updateCurrentStage(session.id, stage.name);
+    const r = await this.runner.runCheck(stage, ctx);
+    if (r.switchTo) {
+      this.sessions.deleteById(session.id);
+      return {
+        kind: 'switch-session',
+        switchSessionId: r.switchTo,
+        units: [],
+        actions: [],
+        disabledStages: [],
+      };
     }
-
-    return {
-      kind: 'units',
-      stageName: stage.name,
-      units,
-      actions,
-      check: checkResult,
-      disabledStages,
-      typingSpeedMs,
-    };
+    let checkResult: AdvanceResult['check'] | undefined;
+    // silentOnSuccess omits the verdict row on pass — narrative already says
+    // its piece. Failures always surface so the player knows why they're stuck.
+    if (!(r.pass && stage.silentOnSuccess)) {
+      const cheer = pickSentence(
+        this.bundle,
+        session.locale,
+        r.pass ? 'sentences.ok-' : 'sentences.ko-',
+      );
+      checkResult = { pass: r.pass, detail: r.detail, hint: r.hint, cheer, retryFromVariable: r.retryFromVariable };
+    }
+    if (r.captured) {
+      for (const [name, value] of Object.entries(r.captured)) ctx.vars.set(name, value, stage.name);
+    }
+    // Invalidations run after captures and only on pass — a failing check
+    // hasn't destroyed anything.
+    if (r.pass && stage.invalidates) {
+      for (const name of stage.invalidates) ctx.vars.delete(name);
+    }
+    this.history.record(session.id, stage.name, r.pass ? 'passed' : 'failed', Date.now() - start, r.detail ?? null);
+    if (r.pass) this.sessions.updateCurrentStage(session.id, stage.name);
+    return { kind: 'units', stageName: stage.name, units, actions, check: checkResult, disabledStages, typingSpeedMs };
   }
 }
 
