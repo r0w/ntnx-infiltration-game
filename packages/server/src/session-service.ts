@@ -999,12 +999,17 @@ export class SessionService {
         }
       }
       // Default: re-park the input just submitted so a bare retry re-checks.
-      this.sessions.setAwaiting(session.id, {
-        variable: pending.retryVariable,
-        stageName: stage.name,
-        renderOffset: pending.retryOffset,
-      });
-      return { ...result, kind: 'awaiting-input', awaitingVariable: pending.retryVariable };
+      // Only when there's an input to re-park (submit-reached check). An
+      // advance-reached check has no input (retryVariable=''), so re-parking
+      // would wedge the session on awaiting variable='' — just return the verdict.
+      if (pending.retryVariable) {
+        this.sessions.setAwaiting(session.id, {
+          variable: pending.retryVariable,
+          stageName: stage.name,
+          renderOffset: pending.retryOffset,
+        });
+        return { ...result, kind: 'awaiting-input', awaitingVariable: pending.retryVariable };
+      }
     }
     return result;
   }

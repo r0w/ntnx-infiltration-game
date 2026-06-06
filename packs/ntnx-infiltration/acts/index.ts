@@ -40,11 +40,10 @@ function sdk(ctx: ActContext): NutanixSdk {
  *  Returns undefined on miss/error — callers degrade gracefully. */
 async function findUserUuid(ctx: ActContext, name: string): Promise<string | undefined> {
   try {
-    const resp = await ctx.nutanix.rest.request<{ data?: AnyRec[] }>(
-      'GET',
-      '/api/iam/v4.0/authn/users?$limit=100',
-    );
-    const u = (resp.data ?? []).find(
+    // Paginate like every other IAM-users lookup in this file; a bare
+    // $limit=100 GET silently misses the user on PCs with >100 users.
+    const users = await listAllSdk<AnyRec>(($p) => sdk(ctx).iam.users.listUsers($p));
+    const u = users.find(
       (e) => (e?.username ?? '').toLowerCase() === name.toLowerCase(),
     );
     return u?.extId as string | undefined;
