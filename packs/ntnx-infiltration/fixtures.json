@@ -267,6 +267,7 @@
           { "backingInfo": { "dataSource": { "reference": { "imageExtId": "img-{Trigram}-ubuntu" } } } }
         ],
         "guestCustomization": { "config": { "cloudInit": {} } },
+        "project": { "extId": "proj-{Trigram}" },
         "categories": [{ "extId": "cat-{Trigram}-critical" }]
       }
     ]

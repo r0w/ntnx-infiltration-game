@@ -409,6 +409,9 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
         };
       }>;
       guestCustomization?: unknown;
+      // PC 7.x exposes the VM's project directly on the v4 payload — the
+      // reliable signal for the Manage Ownership step (v3 was flaky here).
+      project?: { extId?: string };
     }>(ctx, `/api/vmm/v4.0/ahv/config/vms?%24filter=name%20eq%20'${expected}'`);
     const found = vms.find((v) => v.name === expected);
     if (!found) {
@@ -534,10 +537,7 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
         };
       }
     }
-    // Cloud-init + project both live on the v3 VM payload — fetch ONCE
-    // and read both fields. Saves a round-trip vs the previous two-GET
-    // pattern. Failures here don't block the check (defensive: PC 7.3+
-    // hides the v3 endpoint sometimes).
+    // Resolve the player's project UUID (session var, or self-heal by name).
     const projectUuid = await recoverVar(ctx, 'ProjectUUID', 'create-vm', async () => {
       try {
         const projects = await listAllV3<{
@@ -555,31 +555,22 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
         return undefined;
       }
     });
-    let v3vm:
-      | {
-          spec?: { resources?: Record<string, unknown> };
-          metadata?: { project_reference?: { uuid?: string } };
-        }
-      | null = null;
-    if (found.extId && (!found.guestCustomization || projectUuid)) {
-      try {
-        v3vm = await ctx.nutanix.rest.request('GET', `/api/nutanix/v3/vms/${found.extId}`);
-      } catch {
-        v3vm = null;
-      }
-    }
     // Cloud-init: v4 GET stops returning `guestCustomization` on PC 7.3+
-    // (always null even when set); v3 mirror also drops the key. Mirror
-    // Python `hasVMCloudinit`: only fail when v3 explicitly returns the
-    // key with a null value; absent key OR HTTP error → assume pass.
+    // (always null even when set); the v3 mirror also drops the key. Mirror
+    // Python `hasVMCloudinit`: only fail when v3 explicitly returns the key
+    // with a null value; absent key OR HTTP error → assume pass.
     let cloudInitOk = !!found.guestCustomization;
-    if (!cloudInitOk) {
-      const resources = v3vm?.spec?.resources;
-      if (resources && 'guest_customization' in resources) {
-        cloudInitOk = resources.guest_customization != null;
-      } else {
-        // No v3 payload OR key absent → defensive pass.
-        cloudInitOk = true;
+    if (!cloudInitOk && found.extId) {
+      try {
+        const v3vm = await ctx.nutanix.rest.request<{
+          spec?: { resources?: Record<string, unknown> };
+        }>('GET', `/api/nutanix/v3/vms/${found.extId}`);
+        const resources = v3vm?.spec?.resources;
+        cloudInitOk = resources && 'guest_customization' in resources
+          ? resources.guest_customization != null
+          : true; // key absent → defensive pass
+      } catch {
+        cloudInitOk = true; // v3 unreachable → defensive pass
       }
     }
     if (!cloudInitOk) {
@@ -592,9 +583,10 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
         }),
       };
     }
-    // Project ownership comparison from the same v3 payload.
-    if (projectUuid && v3vm) {
-      const vmProj = v3vm.metadata?.project_reference?.uuid;
+    // Project ownership (the Manage Ownership step): read straight from the
+    // v4 payload's `project.extId` — reliable on PC 7.x where v3 was flaky.
+    if (projectUuid) {
+      const vmProj = found.project?.extId;
       if (!vmProj || vmProj !== projectUuid) {
         return {
           pass: false,
@@ -605,8 +597,6 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
           }),
         };
       }
-    } else if (projectUuid && !v3vm) {
-      ctx.logger.warn(`CheckVM: project verification unavailable for ${expected}`);
     }
     if (found.extId) {
       ctx.cache.set({ kind: 'vm', logicalName: expected, uuid: found.extId });

@@ -54,7 +54,7 @@
   "stage-012.line-02": "Nous sommes dans les temps et c'est bien, mais nous devons quand-même nous dépêcher. J'ai détecté une activité des autres ... ils nous cherchent. Nous devons travailler avec prudence.\n\n",
   "stage-012.line-03": "Veuillez créer une nouvelle VM nommée <white>{Trigram}-vm</white> avec la configuration suivante :\n",
   "stage-012.line-05": " - <white>4 Go</white> de RAM\n",
-  "stage-012.line-06": " - <white>20 Go</white> de disque basé sur l'image que nous venons de télécharger\n",
+  "stage-012.line-06": " - <white>20 Go</white> de disque basé sur l'image <white>{Trigram}-ubuntu</white> que nous venons de télécharger\n",
   "stage-012.line-07": " - Mode <white>UEFI</white>\n",
   "stage-012.line-08": " - <white>2 NICS</white> dans les sous-réseaux <white>secondary</white> et <white>{Trigram}-subnet</white>\n\n",
   "stage-012.line-09": "Vous pouvez utiliser ce <white>cloud-init</white> pour créer des utilisateurs dans cette VM :\n<pause sec='1'/>",
