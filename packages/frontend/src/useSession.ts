@@ -108,6 +108,17 @@ export interface SessionHandle {
 
 const STORAGE_KEY = 'ntnx-infiltration-session';
 
+/** How often the idle player pings the server to confirm the session still
+ *  exists. The action paths (advance/submit/hydrate) already drop a deleted
+ *  session, but a player parked at an input makes no requests — this catches
+ *  an operator-side delete while they sit idle. */
+const HEARTBEAT_MS = 5000;
+
+/** Shown on the login screen after the operator deletes the player's session
+ *  mid-game. Routed through the existing `error` channel (LoginForm renders it).
+ */
+const KICK_NOTICE = 'Your session was ended by the operator. Sign in to start a new one.';
+
 function appendUnits(
   prev: RenderItem[],
   units: MessageUnit[],
@@ -344,14 +355,19 @@ export function useSession(): SessionHandle {
     setSessionId(id);
   }, []);
 
-  const dropStaleSession = useCallback(() => {
+  const dropStaleSession = useCallback((notice?: string) => {
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
     finishedRef.current = false;
+    gatedRef.current = null;
     setSessionId(null);
     setItems([]);
     setAwaitingVariable(null);
     setAwaitingStageName(null);
     setFinished(false);
+    setGatedAt(null);
+    // Surface a reason on the login screen (it renders `error`). null leaves
+    // any prior error untouched — callers that want a clean drop pass nothing.
+    if (notice !== undefined) setError(notice);
   }, []);
 
   const hydrated = useRef<string | null>(null);
@@ -416,7 +432,7 @@ export function useSession(): SessionHandle {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.startsWith('404')) {
-        dropStaleSession();
+        dropStaleSession(KICK_NOTICE);
       } else {
         setError(msg);
         finishedRef.current = true;
@@ -448,8 +464,11 @@ export function useSession(): SessionHandle {
       try {
         const r = await api.advance(sessionId);
         if (!cancelled) handleResponse(r);
-      } catch {
-        /* swallow — next tick will retry */
+      } catch (err) {
+        // A 404 here means the operator deleted the session while it sat at
+        // the gate — kick to login. Anything else: swallow, next tick retries.
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!cancelled && msg.startsWith('404')) dropStaleSession(KICK_NOTICE);
       } finally {
         inFlightRef.current = false;
       }
@@ -460,7 +479,36 @@ export function useSession(): SessionHandle {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [sessionId, gatedAt, handleResponse]);
+  }, [sessionId, gatedAt, handleResponse, dropStaleSession]);
+
+  // Heartbeat: detect an operator-side session delete even while the player is
+  // idle. advance()/submitInput()/hydrate() already drop a 404'd session, but a
+  // player parked at an input (or just reading) issues no requests and would
+  // otherwise sit on a dead session forever. Poll the snapshot on a slow cadence;
+  // a 404 means the operator deleted it → kick back to login with a notice.
+  // Skipped while gated (its 1 s poll already 404-drops) and once finished.
+  useEffect(() => {
+    if (!sessionId || finished || gatedAt) return;
+    let cancelled = false;
+    const tick = async () => {
+      // Don't race a real action, and wait until the session is hydrated so we
+      // don't 404 on a localStorage id mid-hydrate (hydrate handles that path).
+      if (cancelled || inFlightRef.current || hydrated.current !== sessionId) return;
+      try {
+        await api.getSession(sessionId);
+      } catch (err) {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.startsWith('404')) dropStaleSession(KICK_NOTICE);
+        // Any other error (network blip, 5xx) — ignore; next tick retries.
+      }
+    };
+    const id = window.setInterval(tick, HEARTBEAT_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [sessionId, finished, gatedAt, dropStaleSession]);
 
   const advance = useCallback(async () => {
     if (!sessionId) return;
@@ -479,7 +527,7 @@ export function useSession(): SessionHandle {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
       if (msg.startsWith('404')) {
-        dropStaleSession();
+        dropStaleSession(KICK_NOTICE);
       } else if (msg.startsWith('409')) {
         // Server says we're awaiting input — re-hydrate to find out which.
         hydrated.current = null;
@@ -523,7 +571,7 @@ export function useSession(): SessionHandle {
         const msg = err instanceof Error ? err.message : String(err);
         setError(msg);
         if (msg.startsWith('404')) {
-          dropStaleSession();
+          dropStaleSession(KICK_NOTICE);
         } else {
           setAwaitingVariable(variable);
           awaitingRef.current = variable;
