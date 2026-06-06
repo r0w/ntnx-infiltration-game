@@ -529,9 +529,6 @@ class DefaultProfile(Profile):
         ["debug", "info", "warn", "error"], label="Server log level",
         default="info", is_mandatory=False, runtime=False, is_hidden=True,
     )
-    GAME_VLAN_ID = CalmVariable.Simple(
-        "", is_mandatory=False, runtime=False, is_hidden=True,
-    )
     GAME_PROD_USERNAME = CalmVariable.Simple(
         "thebadguy", is_mandatory=False, runtime=False, is_hidden=True,
     )

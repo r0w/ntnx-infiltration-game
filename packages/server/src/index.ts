@@ -118,9 +118,11 @@ async function main() {
   }
 
   // Seed template-facing variables from env so `{PC}` / `{PCUser}` /
-  // `{PCPassword}` / `{Vlanid}` / `{ImageURL}` render something instead of
-  // leaving a hole in the prompt. Empty strings are kept (template renders ''),
-  // which is the same behavior the player sees pre-login anyway.
+  // `{PCPassword}` / `{ImageURL}` render something instead of leaving a hole
+  // in the prompt. Empty strings are kept (template renders ''), which is the
+  // same behavior the player sees pre-login anyway. `Vlanid` is intentionally
+  // absent — it's always allocated per-session (collision-free); pinning it
+  // would break multi-player at stage 10 (two subnets on one VLAN).
   // OldPC* are NOT in this map — they're projected from cluster_config at
   // session-create instead, so admin edits via /admin → cluster apply
   // without a server restart.
@@ -128,7 +130,6 @@ async function main() {
     PC: cfg.pcEndpoint,
     PCUser: cfg.pcUser,
     PCPassword: cfg.pcPassword,
-    Vlanid: cfg.gameVlanId, // session-service randomizes per-session if empty
     ImageURL: cfg.gameImageUrl,
     EmailReport: cfg.gameEmailReport,
     ProdUsername: cfg.gameProdUsername,

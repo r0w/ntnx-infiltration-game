@@ -346,10 +346,11 @@ export class SessionService {
         this.variables.upsert(id, name, v, 'session-init');
       }
     }
-    // Per-session Vlanid. A blind random roll (as the single-player Python CLI
-    // did) lets two concurrent players pick the same VLAN, and AHV rejects the
-    // second subnet on it. allocateVlanId picks a free one instead. GAME_VLAN_ID
-    // still pins a fixed VLAN (the global initial wins when set).
+    // Per-session Vlanid, always allocated collision-free. A blind random roll
+    // (as the single-player Python CLI did) lets two concurrent players pick the
+    // same VLAN, and AHV rejects the second subnet on it; allocateVlanId picks a
+    // free one instead. Production never pre-seeds Vlanid (pinning it would break
+    // multi-player); only tests pass one via initialVariables.
     const envVlanId = this.initialVariables.Vlanid;
     if (envVlanId === undefined || envVlanId === '' || envVlanId === null) {
       const vlan = await this.allocateVlanId();
