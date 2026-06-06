@@ -463,14 +463,18 @@ export class SessionService {
     profile: ClusterProfile,
   ): number {
     const caps = new Set<CapabilityFlag>([...bootCaps, ...this.computeDynamicCapabilities()]);
+    // Mock never touches a cluster, so profile filtering doesn't apply — every
+    // stage is playable there. Mirror the gate (see nextStage) so the
+    // denominator matches what the player can actually reach.
+    const effProfile = this.nutanix.mode === 'mock' ? 'hpoc' : profile;
     let count = 0;
     for (const s of this.runner.listStages()) {
       if (!s.active) continue;
-      const required = profile === 'other'
+      const required = effProfile === 'other'
         ? [...(s.requires ?? []), ...(s.requiresOnOther ?? [])]
         : (s.requires ?? []);
       if (required.some((c) => !caps.has(c))) continue;
-      if (s.impact === 'hpoc-only' && profile === 'other') continue;
+      if (s.impact === 'hpoc-only' && effProfile === 'other') continue;
       count++;
     }
     return count;
@@ -735,7 +739,11 @@ export class SessionService {
     const next = this.runner.nextStage(
       {
         capabilities: new Set(session.capabilities),
-        clusterProfile: session.clusterProfile,
+        // clusterProfile filtering (hpoc-only / requiresOnOther) is a real-cluster
+        // concern. In mock there's no cluster, so every stage stays reachable —
+        // gate as 'hpoc' regardless of the session's profile. Checks still see
+        // the real profile (buildCheckContext is untouched).
+        clusterProfile: this.nutanix.mode === 'mock' ? 'hpoc' : session.clusterProfile,
         currentStage: currentIdx,
         gateUnlocks: this.unlockedGateIds,
       },

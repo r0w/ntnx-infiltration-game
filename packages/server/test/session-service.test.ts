@@ -253,7 +253,9 @@ describe('SessionService', () => {
   });
 
   test('destructive stage is disabled on shared cluster and recorded in history', async () => {
-    const { service, session } = await makeService('other');
+    // Live mode: profile filtering is a real-cluster concern (mock bypasses it
+    // entirely since it never touches a cluster).
+    const { service, session } = await makeService('other', liveNutanixWithVlans([]));
     await service.advance(session.id); // stage 1
     await service.advance(session.id); // stage 2 awaiting
     await service.submitInput(session.id, 'Trigram', 'NEO'); // completes 2
@@ -266,7 +268,8 @@ describe('SessionService', () => {
   });
 
   test('check captures merge into variables', async () => {
-    const { service, session } = await makeService('other');
+    // Live mode so the destructive s4 is filtered (mock would now play it).
+    const { service, session } = await makeService('other', liveNutanixWithVlans([]));
     await service.advance(session.id); // 1
     await service.advance(session.id); // 2 await
     await service.submitInput(session.id, 'Trigram', 'NEO');

@@ -279,6 +279,7 @@ export function GameApp() {
         <DevPanel
           sessionId={session.sessionId}
           currentStage={session.currentStage}
+          awaitingStageName={session.awaitingStageName}
           awaitingVariable={session.awaitingVariable}
           busy={session.busy}
           autoPlay={autoPlay}

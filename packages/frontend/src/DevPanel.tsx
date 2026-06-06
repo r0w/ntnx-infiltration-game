@@ -10,6 +10,12 @@ export interface DevPanelProps {
   sessionId: string | null;
   /** Canonical name of the last completed stage; `null` = pre-game. */
   currentStage: string | null;
+  /**
+   * Stage the session is actually parked on awaiting input. When a /goto jump
+   * lands on a stage reached by skipping a filtered one, `currentStage` (= last
+   * completed) lags behind, so this names the stage truly on screen.
+   */
+  awaitingStageName: string | null;
   awaitingVariable: string | null;
   busy: boolean;
   /** Auto-play armed? The toggle button lives in this panel. */
@@ -45,6 +51,7 @@ export interface DevPanelProps {
 export function DevPanel({
   sessionId,
   currentStage,
+  awaitingStageName,
   awaitingVariable,
   busy,
   autoPlay,
@@ -94,17 +101,28 @@ export function DevPanel({
           pack.stages.findIndex((s) => s.name === currentStage) + 1,
           pack.stages.length - 1,
         );
-  const activeStageName = pack?.stages[activeIdx]?.name ?? null;
+  // When the session is parked awaiting input, that stage is the one truly on
+  // screen — prefer it over currentStage+1, which lags after a /goto jump that
+  // skipped a filtered stage. Fall back to the computed next stage otherwise.
+  const awaitingIdx = awaitingStageName
+    ? (pack?.stages.findIndex((s) => s.name === awaitingStageName) ?? -1)
+    : -1;
+  const activeStageName =
+    awaitingIdx >= 0 ? awaitingStageName : (pack?.stages[activeIdx]?.name ?? null);
+  // Furthest position the session actually occupies — the awaiting stage when
+  // parked there (could be ahead of currentStage+1 after a skip), else the
+  // computed next stage. Drives both the high-water and the highlight.
+  const effectiveIdx = awaitingIdx >= 0 ? awaitingIdx : activeIdx;
   // A session hand-off (switch-identity / recovery switchTo) swaps sessionId
   // without unmounting the panel, so reset the high-water: the new session
   // must not inherit the old one's reach.
   if (sessionId !== prevSessionId) {
     setPrevSessionId(sessionId);
-    setHighWaterIdx(activeIdx);
+    setHighWaterIdx(effectiveIdx);
   }
   useEffect(() => {
-    setHighWaterIdx((hw) => (activeIdx > hw ? activeIdx : hw));
-  }, [activeIdx]);
+    setHighWaterIdx((hw) => (effectiveIdx > hw ? effectiveIdx : hw));
+  }, [effectiveIdx]);
 
   return (
     <div className={`devpanel ${open ? 'devpanel-open' : ''}`}>
@@ -225,12 +243,13 @@ export function DevPanel({
                     // (the cluster has no state for stages never played).
                     const isCurrent = s.name === activeStageName;
                     const blocked = mode === 'mock' ? false : idx > highWaterIdx;
-                    // Only mark hpoc-only stages red when the engine
-                    // would actually skip them (clusterProfile=other).
-                    // On hpoc those stages play normally and red is just
-                    // visual noise.
+                    // Only mark hpoc-only stages red when the engine would
+                    // actually skip them (clusterProfile=other on test/live).
+                    // Mock ignores the profile filter (every stage is reachable
+                    // against fixtures), so red would be misleading there.
                     const hpocOnlyFiltered = s.impact === 'hpoc-only'
-                      && pack.clusterProfile === 'other';
+                      && pack.clusterProfile === 'other'
+                      && mode !== 'mock';
                     const cls = [
                       'devpanel-stage',
                       isCurrent && 'devpanel-stage-current',
