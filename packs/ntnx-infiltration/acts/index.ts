@@ -36,6 +36,24 @@ function sdk(ctx: ActContext): NutanixSdk {
   return ctx.nutanix.sdk as NutanixSdk;
 }
 
+/** Look up a PC user's uuid by username (case-insensitive) via v4 IAM.
+ *  Returns undefined on miss/error — callers degrade gracefully. */
+async function findUserUuid(ctx: ActContext, name: string): Promise<string | undefined> {
+  try {
+    const resp = await ctx.nutanix.rest.request<{ data?: AnyRec[] }>(
+      'GET',
+      '/api/iam/v4.0/authn/users?$limit=100',
+    );
+    const u = (resp.data ?? []).find(
+      (e) => (e?.username ?? '').toLowerCase() === name.toLowerCase(),
+    );
+    return u?.extId as string | undefined;
+  } catch (err) {
+    ctx.logger.warn('findUserUuid failed', { name, err: String(err).slice(0, 200) });
+    return undefined;
+  }
+}
+
 // ───────────────────────────────────────────────────────────────────────
 //  Seeds: create the resources downstream stages need
 // ───────────────────────────────────────────────────────────────────────
@@ -160,6 +178,13 @@ async function actCreateProject(ctx: ActContext): Promise<void> {
   // if missing, project still creates but with empty subnet list.
   const subnets = await listAllSdk<AnyRec>(($p) => sdk(ctx).networking.subnets.listSubnets($p));
   const secondary = subnets.find((s) => /^secondary$/i.test(s.name ?? ''));
+  // The prompt asks for "user TheProjectManager as Project Admin". Add it as a
+  // project member so the create-vm Manage Ownership step can set owner=
+  // theprojectmanager (impossible if the user isn't in the project).
+  const pmUuid = await findUserUuid(ctx, 'theprojectmanager');
+  if (!pmUuid) {
+    ctx.logger.warn('actCreateProject: theprojectmanager user not found, project created without it');
+  }
   await ctx.nutanix.rest.request('POST', '/api/nutanix/v3/projects', {
     spec: {
       name,
@@ -172,6 +197,9 @@ async function actCreateProject(ctx: ActContext): Promise<void> {
           : [],
         subnet_reference_list: secondary?.extId
           ? [{ kind: 'subnet', name: secondary.name, uuid: secondary.extId }]
+          : [],
+        user_reference_list: pmUuid
+          ? [{ kind: 'user', name: 'theprojectmanager', uuid: pmUuid }]
           : [],
       },
     },
@@ -499,27 +527,38 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
       ctx.logger.warn('actCreateVm: project lookup failed', { err: String(err).slice(0, 200) });
     }
   }
+  // Manage Ownership sets BOTH project + owner on the VM. Owner = theproject-
+  // manager (a project member, added at create-project). Set both in one v3 PUT.
+  const pmUuid = await findUserUuid(ctx, 'theprojectmanager');
   const lookup = (await listAllSdk<AnyRec>(($p) => sdk(ctx).vmm.vms.listVms($p))).find((v) => v.name === name);
-  if (lookup?.extId && projUuid) {
+  if (lookup?.extId && (projUuid || pmUuid)) {
     try {
       const v3vm = await ctx.nutanix.rest.request<AnyRec>(
         'GET',
         `/api/nutanix/v3/vms/${lookup.extId}`,
       );
       const meta = (v3vm?.metadata as AnyRec) ?? {};
-      if (meta.project_reference?.uuid !== projUuid) {
+      let changed = false;
+      if (projUuid && meta.project_reference?.uuid !== projUuid) {
         meta.project_reference = { kind: 'project', uuid: projUuid };
-        // v3 PUT echoes the GET body but rejects `status` (server-
-        // controlled view, re-sending triggers 422). Strip before PUT.
+        changed = true;
+      }
+      if (pmUuid && meta.owner_reference?.uuid !== pmUuid) {
+        meta.owner_reference = { kind: 'user', name: 'theprojectmanager', uuid: pmUuid };
+        changed = true;
+      }
+      if (changed) {
+        // v3 PUT echoes the GET body but rejects `status` (server-controlled
+        // view, re-sending triggers 422). Strip before PUT.
         const { status: _drop, ...putBody } = v3vm as AnyRec;
         await ctx.nutanix.rest.request('PUT', `/api/nutanix/v3/vms/${lookup.extId}`, {
           ...putBody,
           metadata: meta,
         });
-        ctx.logger.info('actCreateVm: project assigned', { vm: name, project: projUuid });
+        ctx.logger.info('actCreateVm: ownership assigned', { vm: name, project: projUuid, owner: pmUuid });
       }
     } catch (err) {
-      ctx.logger.warn('actCreateVm: project assignment failed (v3 unavailable?)', {
+      ctx.logger.warn('actCreateVm: ownership assignment failed (v3 unavailable?)', {
         err: String(err).slice(0, 200),
       });
     }

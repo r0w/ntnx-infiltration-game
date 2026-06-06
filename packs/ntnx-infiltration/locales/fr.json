@@ -58,7 +58,7 @@
   "stage-012.line-07": " - Mode <white>UEFI</white>\n",
   "stage-012.line-08": " - <white>2 NICS</white> dans les sous-réseaux <white>secondary</white> et <white>{Trigram}-subnet</white>\n\n",
   "stage-012.line-09": "Vous pouvez utiliser ce <white>cloud-init</white> pour créer des utilisateurs dans cette VM :\n<pause sec='1'/>",
-  "stage-012.line-11": "Après cela, déplacez votre VM dans votre projet avec l'action <white>Manage Ownership</white> dans le menu contextuel de la VM.\n\n",
+  "stage-012.line-11": "Après cela, utilisez l'action <white>Manage Ownership</white> dans le menu contextuel de la VM pour la déplacer dans votre projet et définir <white>TheProjectManager</white> comme propriétaire.\n\n",
   "stage-012.line-12": "Lorsque c'est fait, démarrez la VM, et appuyez sur <white>Entrée</white> lorsque vous avez terminé : <input/>",
   "stage-013.line-02": "Je ne suis pas très serein, il se passe beaucoup de choses étranges autour de nous.<pause sec='5'/>\n\n",
   "stage-013.line-03": "Merci de vous déconnecter de Nutanix Prism Central et vous reconnecter avec l'utilisateur <red>Active Directory</red> <white>{ProdUsername}</white> ayant pour mot de passe <white>{ProdPassword}</white> ...\n\n",

@@ -7,6 +7,7 @@ import {
   listAll,
   listAllV3,
   localizedHint,
+  lookupUserUuid,
   nutanixErrorDetail,
   recoverVar,
 } from './helpers';
@@ -245,6 +246,7 @@ async function CheckProject(ctx: CheckContext): Promise<CheckResult> {
           account_reference_list?: unknown[];
           cluster_reference_list?: unknown[];
           subnet_reference_list?: unknown[];
+          user_reference_list?: Array<{ name?: string; uuid?: string }>;
         };
       };
       status?: { name?: string };
@@ -258,6 +260,19 @@ async function CheckProject(ctx: CheckContext): Promise<CheckResult> {
       return {
         pass: false,
         detail: `Project '${expected}' has no infrastructure — add the Nutanix cluster account in the Infrastructure tab.`,
+      };
+    }
+    // The prompt asks for "user TheProjectManager as Project Admin" — required
+    // so create-vm's Manage Ownership can set owner=theprojectmanager.
+    const users = found.spec?.resources?.user_reference_list ?? [];
+    if (!users.some((u) => (u.name ?? '').toLowerCase() === 'theprojectmanager')) {
+      return {
+        pass: false,
+        detail: `Project '${expected}' is missing user TheProjectManager.`,
+        hint: localizedHint(ctx, {
+          en: `Add user TheProjectManager to the project (as Project Admin).`,
+          fr: `Ajoutez l'utilisateur TheProjectManager au projet (comme Project Admin).`,
+        }),
       };
     }
     if (found.metadata?.uuid) {
@@ -409,9 +424,10 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
         };
       }>;
       guestCustomization?: unknown;
-      // PC 7.x exposes the VM's project directly on the v4 payload — the
-      // reliable signal for the Manage Ownership step (v3 was flaky here).
+      // PC 7.x exposes the VM's project + owner directly on the v4 payload —
+      // the reliable signal for the Manage Ownership step (v3 was flaky here).
       project?: { extId?: string };
+      ownershipInfo?: { owner?: { extId?: string } };
     }>(ctx, `/api/vmm/v4.0/ahv/config/vms?%24filter=name%20eq%20'${expected}'`);
     const found = vms.find((v) => v.name === expected);
     if (!found) {
@@ -583,8 +599,9 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
         }),
       };
     }
-    // Project ownership (the Manage Ownership step): read straight from the
-    // v4 payload's `project.extId` — reliable on PC 7.x where v3 was flaky.
+    // Manage Ownership sets BOTH the project and the owner on the VM (the
+    // Prism dialog requires both). Read them straight from the v4 payload —
+    // reliable on PC 7.x where v3 was flaky.
     if (projectUuid) {
       const vmProj = found.project?.extId;
       if (!vmProj || vmProj !== projectUuid) {
@@ -594,6 +611,23 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
           hint: localizedHint(ctx, {
             en: `VM is not in your project — use Manage Ownership.`,
             fr: `La VM n'est pas dans votre projet — utilisez Manage Ownership.`,
+          }),
+        };
+      }
+    }
+    // Owner must be theprojectmanager (a project member, added at create-project).
+    const pmUuid = await recoverVar(ctx, 'ProjectManagerUUID', 'create-vm', () =>
+      lookupUserUuid(ctx, 'theprojectmanager'),
+    );
+    if (pmUuid) {
+      const owner = found.ownershipInfo?.owner?.extId;
+      if (owner !== pmUuid) {
+        return {
+          pass: false,
+          detail: `VM '${expected}' owner is '${owner ?? 'none'}', expected theprojectmanager.`,
+          hint: localizedHint(ctx, {
+            en: `Set the VM owner to TheProjectManager via Manage Ownership.`,
+            fr: `Définissez TheProjectManager comme propriétaire de la VM via Manage Ownership.`,
           }),
         };
       }

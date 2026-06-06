@@ -67,7 +67,7 @@
   "stage-012.line-08": " - <white>2 NICS</white> in the subnets <white>secondary</white> and <white>{Trigram}-subnet</white>\n\n",
   "stage-012.line-09": "You can use this <white>cloud-init</white> to create a few users in this VM:\n<pause sec='1'/>",
   "stage-012.line-10": "<code lang='yaml'>\n#cloud-config\nusers:\n  - name: nutanix\n    shell: /bin/bash\n    sudo: ['ALL=(ALL) NOPASSWD:ALL']\n  - name: admin\n    shell: /bin/bash\n    sudo: ['ALL=(ALL) NOPASSWD:ALL']\n    primary_group: users\n    groups: [sudo]\n    no_user_group: true\nchpasswd:\n  list: |\n    nutanix:MyPassword\n    admin:MyPassword\n  expire: false\nssh_pwauth: true\nwrite_files:\n  - path: /etc/netplan/50-cloud-init.yaml\n    permissions: '0600'\n    content: |\n      network:\n        version: 2\n        ethernets:\n          all-eths:\n            match:\n              name: \"e*\"\n            dhcp4: true\nruncmd:\n  - netplan apply\n</code>\n",
-  "stage-012.line-11": "After that, move your VM into your project with <white>Manage Ownership</white> action in the VM contextual menu.\n\n",
+  "stage-012.line-11": "After that, use the <white>Manage Ownership</white> action in the VM contextual menu to move it into your project and set <white>TheProjectManager</white> as the owner.\n\n",
   "stage-012.line-12": "When it is done, start the VM, and press <white>Enter</white> when you have finished: <input/>",
   "stage-013.line-01": "<action name='createRecoveryPoint'/><pagebreak/>",
   "stage-013.line-02": "I am not very peaceful, there are many strange things happening around us.<pause sec='5'/>\n\n",
