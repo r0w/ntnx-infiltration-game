@@ -1948,6 +1948,64 @@ async function cleanupCloneAppBlueprint(ctx: ActContext): Promise<void> {
       }
     }
   }
+  // Self-contained VPC teardown. The app's Calm `__delete__` action
+  // (CloneProd `CleanuptheVPC`) is *supposed* to tear down `{trigram}-vpc` +
+  // its cloned VMs, but it fires unreliably — deleting the app routinely
+  // leaves the VPC + every clone-* VM orphaned (confirmed live: deleting the
+  // apps left 6 VPCs and dozens of clones behind). So don't trust it; do the
+  // teardown ourselves. Skipped in mock (no real VPC; deleteV4Entity is inert).
+  if (ctx.nutanix.mode === 'mock') return;
+  const vpcName = `${trigram}-vpc`;
+  let vpc: AnyRec | undefined;
+  try {
+    const vpcs = await ctx.nutanix.rest.request<{ data?: AnyRec[] }>(
+      'GET',
+      '/api/networking/v4.0/config/vpcs?%24limit=100',
+    );
+    vpc = (vpcs.data ?? []).find((v) => v.name === vpcName);
+  } catch {
+    return; // networking absent on this PC — nothing to tear down
+  }
+  if (!vpc?.extId) return;
+  const vpcExtId = vpc.extId as string;
+  const subnets = await listAllSdk<AnyRec>(($p) => sdk(ctx).networking.subnets.listSubnets($p));
+  const vpcSubnetIds = new Set(
+    subnets.filter((s) => s.vpcReference === vpcExtId).map((s) => s.extId as string),
+  );
+  // A VM belongs to this VPC if any NIC sits on one of its subnets. Match by
+  // network membership, NOT by name, so every clone is caught regardless of
+  // how deeply it was re-cloned (clone-*, clone-clone-*, …).
+  const onThisVpc = (vm: AnyRec): boolean =>
+    (vm.nics ?? []).some((n: AnyRec) => {
+      const ext = n.networkInfo?.subnet?.extId ?? n.nicNetworkInfo?.subnet?.extId;
+      return typeof ext === 'string' && vpcSubnetIds.has(ext);
+    });
+  if (vpcSubnetIds.size > 0) {
+    const vms = await listAllSdk<AnyRec>(($p) => sdk(ctx).vmm.vms.listVms($p));
+    for (const vm of vms) {
+      // v3 DELETE removes a powered-on VM without the ETag/power-off dance v4
+      // needs (extId == the v3 uuid).
+      if (onThisVpc(vm) && vm.extId) {
+        try {
+          await ctx.nutanix.rest.request('DELETE', `/api/nutanix/v3/vms/${vm.extId}`);
+        } catch {
+          /* gone */
+        }
+      }
+    }
+    // VM deletes are async; wait (bounded ~60 s) for the subnets to clear,
+    // else the subnet/VPC delete 409s on an in-use network.
+    for (let i = 0; i < 12; i++) {
+      const left = (await listAllSdk<AnyRec>(($p) => sdk(ctx).vmm.vms.listVms($p))).filter(onThisVpc);
+      if (left.length === 0) break;
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
+  // Subnets first, then the VPC (the VPC delete needs its subnets gone).
+  for (const sid of vpcSubnetIds) {
+    await deleteV4Entity(ctx, '/api/networking/v4.0/config/subnets', sid);
+  }
+  await deleteV4Entity(ctx, '/api/networking/v4.0/config/vpcs', vpcExtId);
 }
 
 async function cleanupScheduleDay2Action(ctx: ActContext): Promise<void> {

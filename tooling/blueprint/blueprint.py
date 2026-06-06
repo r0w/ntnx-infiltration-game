@@ -188,16 +188,17 @@ class GameContent(Package):
         )
 
         # ─── Parallel branches ─────────────────────────────────────────
-        # The two long-running ops (node-remove ~16-40 min in Branch 1
-        # and Activate policy engine ~30s-10min in Branch 2) start at
-        # the same time. The shorter branches (IAM/AD/LCM) finish well
-        # before either. Branch 1 is the critical path; the container
-        # chain sits at its tail so the deploy is "done" only when the
-        # cluster has its final 3-node shape AND the game URL is up.
-        # Branch 2's Activate policy engine almost always finishes
-        # before Branch 1 reaches its container tail, so by then the
-        # policy MSP is also up — stage 21 (create-approval-policy)
-        # plays without manual UI intervention.
+        # The long pole is Branch 1's node-remove (~16-40 min). Branch 2
+        # (policy engine) starts in parallel but its first task gates on
+        # host-4 leaving the scheduling pool (see Branch 2 below) so the
+        # Policy VM is never placed on the node being removed; activation
+        # then runs concurrently with the rest of the shrink. The shorter
+        # branches (IAM/AD/LCM) finish well before either. Branch 1 is the
+        # critical path; the container chain sits at its tail so the deploy
+        # is "done" only when the cluster has its final 3-node shape AND the
+        # game URL is up. Branch 2's activation almost always finishes before
+        # Branch 1 reaches its container tail, so by then the policy MSP is
+        # up — stage 21 (create-approval-policy) plays without manual UI.
         with parallel() as p0:
 
             # Branch 1 — cluster prep + production world + container.
@@ -359,12 +360,28 @@ class GameContent(Package):
             # project_calm_policy_vm_unstable). Best-effort: the
             # script exits 0 with a loud `[best-effort WARN]` if both
             # retries time out, so the install runbook keeps going.
-            # Ideal placement is parallel-with-Branch-1 so the MSP has
-            # the full ~16-40 min cluster-shrink window to come up;
-            # by the time Branch 1 reaches `Run game container`, the
-            # policy engine is up and stage 21 (create-approval-
-            # policy) is playable without operator intervention.
+            # Runs parallel-with-Branch-1 so the MSP has the full
+            # ~16-40 min cluster-shrink window to come up; by the time
+            # Branch 1 reaches `Run game container`, the policy engine
+            # is up and stage 21 (create-approval-policy) is playable
+            # without operator intervention.
+            #
+            # BUT: enabling the policy engine deploys a Calm Policy VM
+            # whose host is chosen by AHV/ADS, not us. If it lands on
+            # host-4 while Branch 1 is removing that node, the two
+            # contend. So we gate activation on `Wait for node draining`
+            # first: it blocks until host-4 has left the scheduling pool
+            # (in_maintenance / TO_BE_REMOVED / gone), after which ADS
+            # can only place the Policy VM on the surviving 3 nodes. The
+            # gate returns immediately on non-hpoc / no-4th-host, so the
+            # activation still kicks off promptly there and keeps
+            # overlapping the (much longer) rebalance on hpoc.
             with branch(p0):
+                CalmTask.Exec.escript.py3(
+                    name="Wait for node draining",
+                    filename=os.path.join("scripts", "wait_node_draining.py"),
+                    target=ref(Game),
+                )
                 CalmTask.Exec.escript.py3(
                     name="Activate policy engine",
                     filename=os.path.join("scripts", "activate_policy_engine.py"),
