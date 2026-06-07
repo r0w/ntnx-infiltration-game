@@ -87,9 +87,9 @@ export async function listAllV3<T = unknown>(
       entities?: T[];
       metadata?: { total_matches?: number };
     }>('POST', path, { ...body, length: PAGE, offset });
-    const chunk = res.entities ?? [];
+    const chunk = res?.entities ?? [];
     all.push(...chunk);
-    const total = res.metadata?.total_matches;
+    const total = res?.metadata?.total_matches;
     if (chunk.length < PAGE) break;
     if (typeof total === 'number' && all.length >= total) break;
   }
@@ -112,9 +112,9 @@ export async function listAllV4Rest<T = unknown>(ctx: ActContext, path: string):
       data?: T[];
       metadata?: { totalAvailableResults?: number };
     }>('GET', `${path}${sep}$page=${page}&$limit=${PAGE}`);
-    const chunk = res.data ?? [];
+    const chunk = res?.data ?? [];
     all.push(...chunk);
-    const total = res.metadata?.totalAvailableResults;
+    const total = res?.metadata?.totalAvailableResults;
     if (chunk.length < PAGE) break;
     if (typeof total === 'number' && all.length >= total) break;
   }

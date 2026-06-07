@@ -414,7 +414,7 @@ export class SessionService {
           'GET',
           `/api/networking/v4.0/config/subnets?$page=${page}&$limit=${limit}`,
         );
-        const data = resp.data ?? [];
+        const data = resp?.data ?? [];
         for (const s of data) {
           if (s.subnetType === 'VLAN' && typeof s.networkId === 'number') {
             used.push(s.networkId);
