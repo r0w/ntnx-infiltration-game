@@ -72,7 +72,7 @@ async function ensureUserUuid(
       'GET',
       '/api/iam/v4.0/authn/directory-services',
     );
-    const idpId = dirs.data?.[0]?.extId;
+    const idpId = dirs?.data?.[0]?.extId;
     if (!idpId) {
       ctx.logger.warn('ensureUserUuid: no directory service to import from', { name });
       return undefined;
