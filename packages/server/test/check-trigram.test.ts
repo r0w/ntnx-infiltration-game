@@ -231,9 +231,9 @@ describe('SessionDirectory (integration via SessionService)', () => {
     new VariableQueries(db).upsert(sessionId, 'Trigram', trigram, 1);
   }
 
-  test('finds other sessions with matching captured Trigram; excludes current session', () => {
+  test('finds other sessions with matching captured Trigram; excludes current session', async () => {
     const { db, svc } = makeSvc();
-    const me = svc.create({ clusterEndpoint: '', clusterProfile: 'other', capabilities: [] });
+    const me = await svc.create({ clusterEndpoint: '', clusterProfile: 'other', capabilities: [] });
     // Seed another session in the same pack with the same trigram
     seedCaptured(db, 'sess-other', 'ntnx-infiltration', 'rbo');
     // And the current session also captures it
@@ -248,18 +248,18 @@ describe('SessionDirectory (integration via SessionService)', () => {
     expect(rows[0].finishedAt).toBeNull();
   });
 
-  test('scopes to packId — other-pack sessions with same trigram are invisible', () => {
+  test('scopes to packId — other-pack sessions with same trigram are invisible', async () => {
     const { db, svc } = makeSvc();
-    const me = svc.create({ clusterEndpoint: '', clusterProfile: 'other', capabilities: [] });
+    const me = await svc.create({ clusterEndpoint: '', clusterProfile: 'other', capabilities: [] });
     seedCaptured(db, 'sess-other-pack', 'some-other-pack', 'rbo');
     const dir = (svc as unknown as { sessionDirectory: SessionDirectory }).sessionDirectory;
     const rows = dir.findOtherSessionsWithVariable(me.id, 'Trigram', 'rbo');
     expect(rows).toHaveLength(0);
   });
 
-  test('surfaces finished sessions too — caller filters by finishedAt', () => {
+  test('surfaces finished sessions too — caller filters by finishedAt', async () => {
     const { db, svc } = makeSvc();
-    const me = svc.create({ clusterEndpoint: '', clusterProfile: 'other', capabilities: [] });
+    const me = await svc.create({ clusterEndpoint: '', clusterProfile: 'other', capabilities: [] });
     seedCaptured(db, 'sess-done', 'ntnx-infiltration', 'rbo', 4000);
     const dir = (svc as unknown as { sessionDirectory: SessionDirectory }).sessionDirectory;
     const rows = dir.findOtherSessionsWithVariable(me.id, 'Trigram', 'rbo');
@@ -267,11 +267,11 @@ describe('SessionDirectory (integration via SessionService)', () => {
     expect(rows[0].finishedAt).toBe(4000);
   });
 
-  test('JSON-encoded value in session_variables matches probe exact value', () => {
+  test('JSON-encoded value in session_variables matches probe exact value', async () => {
     // Guards against a regression where the query would compare raw strings
     // with JSON-quoted storage (mismatch → zero results silently).
     const { db, svc } = makeSvc();
-    const me = svc.create({ clusterEndpoint: '', clusterProfile: 'other', capabilities: [] });
+    const me = await svc.create({ clusterEndpoint: '', clusterProfile: 'other', capabilities: [] });
     seedCaptured(db, 'sess-with-symbols', 'ntnx-infiltration', 'a-b_9');
     const dir = (svc as unknown as { sessionDirectory: SessionDirectory }).sessionDirectory;
     const rows = dir.findOtherSessionsWithVariable(me.id, 'Trigram', 'a-b_9');

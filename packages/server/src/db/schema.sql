@@ -22,6 +22,12 @@ CREATE TABLE IF NOT EXISTS sessions (
   awaiting_variable TEXT,
   awaiting_stage TEXT,
   awaiting_render_offset INTEGER,
+  -- Two-phase themed check: a check deferred to /resolve-check while the
+  -- "wait…" narrative plays. Stage owing the check + the input to rewind to
+  -- on failure. All NULL = nothing pending.
+  pending_check_stage TEXT,
+  pending_check_retry_variable TEXT,
+  pending_check_retry_offset INTEGER,
   -- 'manual' (player-driven, default) or 'auto' (server fires seeds + runs
   -- checks without waiting for input). Auto-play sessions are used for live
   -- validation against a real cluster and for pre-event warm-up — the game

@@ -19,6 +19,8 @@ export interface AdvanceResponse {
   /** Discriminator on gated: 'stage' (per-stage gate) | 'global' (lunch lock). */
   gatedReason?: 'stage' | 'global';
   actions: string[];
+  /** Phase-1 flag: check deferred to /resolve-check (two-phase themed check). */
+  checkPending?: boolean;
   check?: { pass: boolean; detail?: string; hint?: string; cheer?: string };
   disabledStages: DisabledStage[];
   typingSpeedMs?: number;
@@ -33,6 +35,8 @@ export interface SessionSnapshot {
   clusterProfile: 'hpoc' | 'other';
   capabilities: string[];
   awaiting: { variable: string; stageName: string; renderOffset: number } | null;
+  /** Set when the session reloaded mid-check — resolve it to finish the stage. */
+  pendingCheck?: { stageName: string } | null;
   locale: string;
   finishedAt: number | null;
   replay?: MessageUnit[] | null;
@@ -308,6 +312,9 @@ export const api = {
   advance: (id: string) => post<AdvanceResponse>(`/session/${id}/advance`),
   submitInput: (id: string, req: SubmitInputRequest) =>
     post<AdvanceResponse>(`/session/${id}/input`, req),
+  /** Phase 2 of the two-phase check: run the check deferred by submitInput. */
+  resolveCheck: (id: string) =>
+    post<AdvanceResponse>(`/session/${id}/resolve-check`),
   skipTo: (id: string, stageName: string) =>
     post<{ skipped: string[]; finalStage: string | null }>(
       `/session/${id}/skip-to/${encodeURIComponent(stageName)}`,
@@ -318,9 +325,6 @@ export const api = {
     ),
   switchIdentity: (id: string) =>
     post<{ currentStage: string | null }>(`/session/${id}/switch-identity`),
-  fireAction: (id: string, name: string) =>
-    post<{ fired: string }>(`/session/${id}/action/${name}`),
-  listActions: (id: string) => get<{ names: string[] }>(`/session/${id}/actions`),
   /**
    * Auto-play helper: fires the registered **act** handler for whatever stage
    * the session is currently awaiting on. Server-side gated to `test` mode

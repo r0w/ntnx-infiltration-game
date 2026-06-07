@@ -25,7 +25,6 @@ export interface ServerConfig {
   clusterProfile: ClusterProfile | undefined;
   typingSpeedMs: number;
   publicDir: string | undefined;
-  gameVlanId: string;
   gameImageUrl: string;
   /**
    * Suffix appended to the player's `{Trigram}` to form the report-recipient
@@ -116,7 +115,6 @@ export function loadConfig(env = process.env): ServerConfig {
     clusterProfile: asProfile(env.CLUSTER_PROFILE),
     typingSpeedMs: asInt(env.TYPING_SPEED_MS, 15),
     publicDir: env.PUBLIC_DIR,
-    gameVlanId: env.GAME_VLAN_ID ?? '',
     // Default to Jammy (cohérent w/ BP substrate; Noble cidata is unreliable
     // on some HPoC AHV builds — cf. project_ahv_use_jammy memory).
     gameImageUrl:

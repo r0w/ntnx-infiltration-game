@@ -267,6 +267,8 @@
           { "backingInfo": { "dataSource": { "reference": { "imageExtId": "img-{Trigram}-ubuntu" } } } }
         ],
         "guestCustomization": { "config": { "cloudInit": {} } },
+        "project": { "extId": "proj-{Trigram}" },
+        "ownershipInfo": { "owner": { "extId": "user-theprojmgr" } },
         "categories": [{ "extId": "cat-{Trigram}-critical" }]
       }
     ]
@@ -354,7 +356,7 @@
             "$objectType": "microseg.v4.config.ApplicationRuleSpec",
             "securedGroupCategoryAssociatedEntityType": "VM",
             "securedGroupCategoryReferences": ["cat-{Trigram}-critical"],
-            "srcSubnet": { "value": "10.42.0.42", "prefixLength": 32 },
+            "srcSubnet": { "value": "{frontendHost}", "prefixLength": 32 },
             "tcpServices": [{ "startPort": 22, "endPort": 22 }]
           }
         },

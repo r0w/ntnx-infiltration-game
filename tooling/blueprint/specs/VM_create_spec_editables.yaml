@@ -1,6 +1,5 @@
 cluster_reference: true
 resources:
-  gpu_list: true
   nic_list:
     '0':
       ip_endpoint_list: true

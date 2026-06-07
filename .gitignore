@@ -47,9 +47,10 @@ tooling/archive/v1/blueprint_legacy_scrubbed.json
 tooling/archive/v2/blueprint.json
 tooling/archive/blueprint-v3-tmp/blueprint.json
 
-# Generated at compile time by tooling/blueprint/compile.sh —
-# base64 .tgz blobs inlined into the sh task script.
+# Generated at compile time by tooling/blueprint/compile.sh from a
+# .template + a bundled asset (push: base64 .tgz blobs; run: docker-compose.yml).
 tooling/blueprint/scripts/push_prereq_bps.sh
+tooling/blueprint/scripts/run_container.sh
 
 # Nutanix v4 Swagger specs — local reference only, too large for git (~17 MB)
 /specs/

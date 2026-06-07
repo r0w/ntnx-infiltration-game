@@ -7,6 +7,7 @@ import {
   listAll,
   listAllV3,
   localizedHint,
+  lookupUserUuid,
   nutanixErrorDetail,
   recoverVar,
 } from './helpers';
@@ -245,6 +246,7 @@ async function CheckProject(ctx: CheckContext): Promise<CheckResult> {
           account_reference_list?: unknown[];
           cluster_reference_list?: unknown[];
           subnet_reference_list?: unknown[];
+          user_reference_list?: Array<{ name?: string; uuid?: string }>;
         };
       };
       status?: { name?: string };
@@ -258,6 +260,19 @@ async function CheckProject(ctx: CheckContext): Promise<CheckResult> {
       return {
         pass: false,
         detail: `Project '${expected}' has no infrastructure — add the Nutanix cluster account in the Infrastructure tab.`,
+      };
+    }
+    // The prompt asks for "user TheProjectManager as Project Admin" — required
+    // so create-vm's Manage Ownership can set owner=theprojectmanager.
+    const users = found.spec?.resources?.user_reference_list ?? [];
+    if (!users.some((u) => (u.name ?? '').toLowerCase() === 'theprojectmanager')) {
+      return {
+        pass: false,
+        detail: `Project '${expected}' is missing user TheProjectManager.`,
+        hint: localizedHint(ctx, {
+          en: `Add user TheProjectManager to the project (as Project Admin).`,
+          fr: `Ajoutez l'utilisateur TheProjectManager au projet (comme Project Admin).`,
+        }),
       };
     }
     if (found.metadata?.uuid) {
@@ -409,6 +424,10 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
         };
       }>;
       guestCustomization?: unknown;
+      // PC 7.x exposes the VM's project + owner directly on the v4 payload —
+      // the reliable signal for the Manage Ownership step (v3 was flaky here).
+      project?: { extId?: string };
+      ownershipInfo?: { owner?: { extId?: string } };
     }>(ctx, `/api/vmm/v4.0/ahv/config/vms?%24filter=name%20eq%20'${expected}'`);
     const found = vms.find((v) => v.name === expected);
     if (!found) {
@@ -534,10 +553,7 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
         };
       }
     }
-    // Cloud-init + project both live on the v3 VM payload — fetch ONCE
-    // and read both fields. Saves a round-trip vs the previous two-GET
-    // pattern. Failures here don't block the check (defensive: PC 7.3+
-    // hides the v3 endpoint sometimes).
+    // Resolve the player's project UUID (session var, or self-heal by name).
     const projectUuid = await recoverVar(ctx, 'ProjectUUID', 'create-vm', async () => {
       try {
         const projects = await listAllV3<{
@@ -555,31 +571,22 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
         return undefined;
       }
     });
-    let v3vm:
-      | {
-          spec?: { resources?: Record<string, unknown> };
-          metadata?: { project_reference?: { uuid?: string } };
-        }
-      | null = null;
-    if (found.extId && (!found.guestCustomization || projectUuid)) {
-      try {
-        v3vm = await ctx.nutanix.rest.request('GET', `/api/nutanix/v3/vms/${found.extId}`);
-      } catch {
-        v3vm = null;
-      }
-    }
     // Cloud-init: v4 GET stops returning `guestCustomization` on PC 7.3+
-    // (always null even when set); v3 mirror also drops the key. Mirror
-    // Python `hasVMCloudinit`: only fail when v3 explicitly returns the
-    // key with a null value; absent key OR HTTP error → assume pass.
+    // (always null even when set); the v3 mirror also drops the key. Mirror
+    // Python `hasVMCloudinit`: only fail when v3 explicitly returns the key
+    // with a null value; absent key OR HTTP error → assume pass.
     let cloudInitOk = !!found.guestCustomization;
-    if (!cloudInitOk) {
-      const resources = v3vm?.spec?.resources;
-      if (resources && 'guest_customization' in resources) {
-        cloudInitOk = resources.guest_customization != null;
-      } else {
-        // No v3 payload OR key absent → defensive pass.
-        cloudInitOk = true;
+    if (!cloudInitOk && found.extId) {
+      try {
+        const v3vm = await ctx.nutanix.rest.request<{
+          spec?: { resources?: Record<string, unknown> };
+        }>('GET', `/api/nutanix/v3/vms/${found.extId}`);
+        const resources = v3vm?.spec?.resources;
+        cloudInitOk = resources && 'guest_customization' in resources
+          ? resources.guest_customization != null
+          : true; // key absent → defensive pass
+      } catch {
+        cloudInitOk = true; // v3 unreachable → defensive pass
       }
     }
     if (!cloudInitOk) {
@@ -592,9 +599,11 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
         }),
       };
     }
-    // Project ownership comparison from the same v3 payload.
-    if (projectUuid && v3vm) {
-      const vmProj = v3vm.metadata?.project_reference?.uuid;
+    // Manage Ownership sets BOTH the project and the owner on the VM (the
+    // Prism dialog requires both). Read them straight from the v4 payload —
+    // reliable on PC 7.x where v3 was flaky.
+    if (projectUuid) {
+      const vmProj = found.project?.extId;
       if (!vmProj || vmProj !== projectUuid) {
         return {
           pass: false,
@@ -605,8 +614,23 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
           }),
         };
       }
-    } else if (projectUuid && !v3vm) {
-      ctx.logger.warn(`CheckVM: project verification unavailable for ${expected}`);
+    }
+    // Owner must be theprojectmanager (a project member, added at create-project).
+    const pmUuid = await recoverVar(ctx, 'ProjectManagerUUID', 'create-vm', () =>
+      lookupUserUuid(ctx, 'theprojectmanager'),
+    );
+    if (pmUuid) {
+      const owner = found.ownershipInfo?.owner?.extId;
+      if (owner !== pmUuid) {
+        return {
+          pass: false,
+          detail: `VM '${expected}' owner is '${owner ?? 'none'}', expected theprojectmanager.`,
+          hint: localizedHint(ctx, {
+            en: `Set the VM owner to TheProjectManager via Manage Ownership.`,
+            fr: `Définissez TheProjectManager comme propriétaire de la VM via Manage Ownership.`,
+          }),
+        };
+      }
     }
     if (found.extId) {
       ctx.cache.set({ kind: 'vm', logicalName: expected, uuid: found.extId });
@@ -986,11 +1010,13 @@ async function CheckSecurityPolicy2(ctx: CheckContext): Promise<CheckResult> {
     }
     // …and at least one SSH rule must be scoped to the expected source IP.
     const restricted = sshRules.some((r) => {
-      const v = r.spec?.srcSubnet?.value;
-      if (!v) return false;
-      // No frontendHost to pin against (offline/misconfigured) — at least demand
-      // a single-host /32 so a broad range like 0.0.0.0/0 can't sneak through.
-      return frontendHost ? v === frontendHost : r.spec?.srcSubnet?.prefixLength === 32;
+      const sub = r.spec?.srcSubnet;
+      if (!sub) return false;
+      // No frontendHost to pin against (offline/misconfigured, or mock with no
+      // GAME_FRONTEND_HOST so the fixture's `{frontendHost}` resolves to '') —
+      // at least demand a single-host /32 so a broad range like 0.0.0.0/0 can't
+      // sneak through.
+      return frontendHost ? sub.value === frontendHost : sub.prefixLength === 32;
     });
     if (!restricted) {
       const want = frontendHost ? ` to ${frontendHost}` : ' to a specific source IP';

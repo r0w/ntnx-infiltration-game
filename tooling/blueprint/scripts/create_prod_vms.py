@@ -3,13 +3,18 @@
 """
 1:1 port of the legacy CreateProdVMs.sh — creates 7 hardcoded VMs in the
 `production` project, tagged Environment=Production, on the `secondary`
-subnet, cloned from the Ubuntu2204 image. Powers them on and reassigns
-their project via v3 API (v4 doesn't expose project assignment yet).
+subnet, cloned from the Ubuntu2204 image. Assigns their project via v3
+API (v4 doesn't expose project assignment yet).
+
+Power: on `hpoc` (dedicated cluster) the VMs are powered ON. On `other`
+(shared cluster) they are created + project-assigned but left powered
+OFF — the player still sees the production inventory for the AD-login
+narrative, but we don't burn compute on a cluster we don't own.
 
 Idempotent: skips a VM if a VM with the same name already exists.
 
 Calm injects @@{PC_IP}@@, @@{PC_USERNAME}@@, @@{PC_PASSWORD}@@,
-@@{Game.CLUSTERUUID}@@, @@{Game.ProjectUUID}@@.
+@@{Game.CLUSTERUUID}@@, @@{Game.ProjectUUID}@@, @@{CLUSTER_PROFILE}@@.
 """
 
 import json
@@ -26,6 +31,7 @@ PC_USERNAME = '@@{PC_USERNAME}@@'
 PC_PASSWORD = '@@{PC_PASSWORD}@@'
 CLUSTER_UUID = '@@{Game.CLUSTERUUID}@@'
 PROJECT_UUID = '@@{Game.ProjectUUID}@@'
+CLUSTER_PROFILE = '@@{CLUSTER_PROFILE}@@'
 
 CAT_KEY = "Environment"
 CAT_VALUE = "Production"
@@ -48,11 +54,36 @@ AUTH = (PC_USERNAME, PC_PASSWORD)
 HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
 
+def _req_retry(method, url, attempts=5, backoff=4, timeout=20, **kwargs):
+    """GET/POST with retry on transient 5xx + network errors. PC's v3/v4 list
+    endpoints throw sporadic 500s when the cluster is busy (aplos under load
+    during a deploy) — a single blip shouldn't fail the whole task. This is
+    what bit `Create Prod VMs` once (500 on v3/images/list). Mirrors the
+    retry loops in setup_production_project.py. Read-only lookups only — never
+    wrap the VM-create POST (retrying a mutation risks double-create)."""
+    last = None
+    for i in range(attempts):
+        try:
+            r = requests.request(method, url, auth=AUTH, headers=HEADERS,
+                                  verify=False, timeout=timeout, **kwargs)
+        except requests.RequestException as e:
+            last = "network error: %s" % str(e)[:200]
+        else:
+            if r.status_code < 500:
+                return r
+            last = "%d %s" % (r.status_code, r.text[:200])
+        if i < attempts - 1:
+            print("  [retry %d/%d] %s -> %s" % (i + 1, attempts, url.split('?')[0], last))
+            time.sleep(backoff)
+    raise Exception("request failed after %d attempts: %s %s -> %s"
+                    % (attempts, method, url, last))
+
+
 def get_category_uuid():
-    r = requests.get(
+    r = _req_retry(
+        "GET",
         "%s/api/prism/v4.0/config/categories?$filter=(key eq '%s') and (value eq '%s')"
         % (BASE, CAT_KEY, CAT_VALUE),
-        auth=AUTH, headers=HEADERS, verify=False, timeout=20,
     )
     r.raise_for_status()
     data = r.json().get('data') or []
@@ -60,22 +91,27 @@ def get_category_uuid():
 
 
 def get_subnet_uuid(name):
-    r = requests.get(
-        "%s/api/networking/v4.0/config/subnets?$limit=100" % BASE,
-        auth=AUTH, headers=HEADERS, verify=False, timeout=20,
+    r = _req_retry(
+        "GET", "%s/api/networking/v4.0/config/subnets?$limit=100" % BASE,
     )
     r.raise_for_status()
-    for s in r.json().get('data') or []:
-        if s.get('name') == name:
+    subs = r.json().get('data') or []
+    name_lc = (name or '').lower()
+    for s in subs:
+        if (s.get('name') or '').lower() == name_lc:
+            return s['extId']
+    # Tolerate cluster-prefixed names (e.g. `secondary-<cluster>`), casing
+    # included; same pattern as setup_production_project.get_subnet_uuid.
+    for s in subs:
+        if (s.get('name') or '').lower().startswith(name_lc + '-'):
             return s['extId']
     return None
 
 
 def get_image_uuid():
     """Image was registered when Calm provisioned the Game VM substrate."""
-    r = requests.post(
-        "%s/api/nutanix/v3/images/list" % BASE,
-        auth=AUTH, headers=HEADERS, verify=False, timeout=20,
+    r = _req_retry(
+        "POST", "%s/api/nutanix/v3/images/list" % BASE,
         data=json.dumps({"kind": "image", "length": 100}),
     )
     r.raise_for_status()
@@ -138,9 +174,11 @@ def create_vm(spec, cat_uuid, subnet_uuid, image_uuid):
     return True, "created"
 
 
-def assign_project_and_power_on(vm_name):
-    """Wait for the VM to appear, then PUT v3 with project + power_state=ON.
+def assign_project_and_set_power(vm_name, power_on):
+    """Wait for the VM to appear, then PUT v3 with project + power_state.
     v4 doesn't expose project assignment yet — v3 round-trip required.
+    `power_on=False` (shared `other` cluster) leaves the VM created +
+    project-assigned but powered OFF.
 
     Iteration-based poll (sandbox time.time() is a counter; time.sleep() may
     no-op). Each /vms?$filter GET takes ~0.5-1s naturally → MAX_POLLS=300 is
@@ -171,7 +209,7 @@ def assign_project_and_power_on(vm_name):
     info['metadata']['project_reference'] = {
         "kind": "project", "name": PROJECT_NAME, "uuid": PROJECT_UUID,
     }
-    info['spec']['resources']['power_state'] = 'ON'
+    info['spec']['resources']['power_state'] = 'ON' if power_on else 'OFF'
     r = requests.put(
         "%s/api/nutanix/v3/vms/%s" % (BASE, vm_uuid),
         auth=AUTH, headers=HEADERS, verify=False, timeout=30,
@@ -179,7 +217,7 @@ def assign_project_and_power_on(vm_name):
     )
     if r.status_code != 202:
         return False, "v3 PUT: %d %s" % (r.status_code, r.text[:200])
-    return True, "project assigned + powered ON"
+    return True, "project assigned + powered %s" % ("ON" if power_on else "OFF")
 
 
 def main():
@@ -200,6 +238,12 @@ def main():
         print("[FAIL] image '%s' not found — Calm should have registered it during VM provisioning" % IMAGE_NAME)
         return 1
 
+    power_on = CLUSTER_PROFILE == 'hpoc'
+    if not power_on:
+        print("[info] CLUSTER_PROFILE=%r — prod VMs created + project-assigned but "
+              "left powered OFF (shared cluster: visible for the AD-login narrative, "
+              "no compute burned)." % CLUSTER_PROFILE)
+
     for spec in VM_SPECS:
         if vm_exists(spec['name']):
             print("  [skip] %-30s already present" % spec['name'])
@@ -209,7 +253,7 @@ def main():
             print("  [FAIL] %-30s — %s" % (spec['name'], msg))
             continue
         print("  [ok]   %-30s — %s" % (spec['name'], msg))
-        ok, msg = assign_project_and_power_on(spec['name'])
+        ok, msg = assign_project_and_set_power(spec['name'], power_on)
         if not ok:
             print("        post-create: [FAIL] %s" % msg)
         else:

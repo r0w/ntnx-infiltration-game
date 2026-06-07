@@ -4,7 +4,7 @@ Post-compile patcher for the Calm blueprint.
 Why this file exists
 ====================
 
-`calm compile bp` (calm-dsl 4.3.1) emits a `blueprint.json` that
+`calm compile bp` (calm-dsl 4.2.1) emits a `blueprint.json` that
 *almost* works on Prism Central 7.5 — six structural quirks block
 import or launch. This patcher applies them in one auditable place,
 after compile, so the source files (`blueprint.py`, `scripts/*.py`)
@@ -43,7 +43,7 @@ A. Sandbox compatibility (pass 1 — `_patch_for_calm_escript`)
    DSL source.
 
 B. Structural mismatches (passes 2-6)
-   Five bugs in the calm-dsl 4.3.1 ⇄ PC 7.5 contract that calm-dsl
+   Five bugs in the calm-dsl 4.2.1 ⇄ PC 7.5 contract that calm-dsl
    doesn't address itself:
 
      2. `rewrite_custom_packages_to_deb` — service-bearing packages
@@ -286,7 +286,7 @@ def grow_substrate_boot_disk(blueprint: dict, target_mib: int = 40960) -> int:
 def rewrite_custom_packages_to_deb(blueprint: dict) -> int:
     """Force CUSTOM packages with services attached to type=DEB.
 
-    Why: calm-dsl 4.3.1 emits Package(type=CUSTOM) by default. PC 7.5
+    Why: calm-dsl 4.2.1 emits Package(type=CUSTOM) by default. PC 7.5
     auto-synthesizes lifecycle actions (action_create / action_delete /
     action_soft_delete) on CUSTOM packages, AND on the parent Profile +
     Deployment, that close back-edges → `Found cycles in tasks` errors
@@ -351,8 +351,8 @@ def normalize_secrets_for_import(blueprint: dict) -> int:
 
     See site-packages/calm/dsl/api/util.py:223-234 + 539-549.
 
-    Operator fills the genuinely-secret values (PC_PASSWORD, GHCR_TOKEN,
-    ADMIN_PASSWORD) at Activate via Prism UI; PC encrypts them with the
+    Operator fills the genuinely-secret values (PC_PASSWORD,
+    GAME_OLD_PC_PASSWORD) at Activate via Prism UI; PC encrypts them with the
     session key at that point. launch.py path is unaffected — its own
     strip_secrets() produces the same shape.
 

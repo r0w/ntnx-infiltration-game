@@ -1,12 +1,15 @@
 import type { ActionContext } from '@ntnx-game/engine';
+import type { NutanixSdk } from '@ntnx-game/nutanix';
+import { deleteV4Entity, listAllSdk } from '../acts/helpers';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyRec = Record<string, any>;
 
 /**
- * Server-side action handlers referenced by `<action name='foo'/>` tags in
- * stage messages. Mock-mode handlers mutate the session's mock overlay so
- * fixture responses shadow the action's effect; live-mode handlers would
- * hit the Nutanix API to do the real thing. Live wiring is deferred until
- * a cluster is available — right now every handler is a mock-only no-op
- * when `ctx.nutanix.mode !== 'mock'`.
+ * Server-side handlers for `<action name='foo'/>` tags in stage messages.
+ * They run in every mode: mock handlers mutate the session's overlay so
+ * fixtures shadow the effect; test/live handlers hit the real Nutanix API.
+ * A couple are still mock-only no-ops where live wiring is pending.
  */
 
 function trigram(ctx: ActionContext): string {
@@ -15,11 +18,11 @@ function trigram(ctx: ActionContext): string {
 }
 
 /**
- * Stage 23 `incident-freeze` — simulates the villains deleting the player's
- * VM. In mock mode, marks `{Trigram}-vm` as deleted in the overlay so
- * subsequent queries against the VM list endpoint drop it. Paired with
- * `stage.invalidates: ['VMUUID', 'HostUUID']` which handles the session-var
- * side.
+ * Stage 23 `incident-freeze`: the villains delete the player's VM. Runs in
+ * every mode (the story does it, not the player): mock marks `{Trigram}-vm`
+ * deleted in the overlay; test/live really DELETE it via the v4 API. The
+ * stage's `invalidates: ['VMUUID', 'HostUUID']` clears the cached vars. The
+ * restore half is the player's job, checked at stage 26 by `CheckRestoreVM`.
  */
 async function deleteVM(ctx: ActionContext): Promise<void> {
   const name = `${trigram(ctx)}-vm`;
@@ -28,14 +31,23 @@ async function deleteVM(ctx: ActionContext): Promise<void> {
     ctx.logger.info('mock: deleteVM marked entity deleted', { name });
     return;
   }
-  ctx.logger.warn('deleteVM live-mode handler not implemented yet', { name });
+  // Find by name (SDK list is crash-safe on 200), then ETag-aware delete.
+  const sdk = ctx.nutanix.sdk as NutanixSdk;
+  const vms = await listAllSdk<AnyRec>(($p) => sdk.vmm.vms.listVms($p));
+  const vm = vms.find((v) => v.name === name);
+  if (!vm?.extId) {
+    ctx.logger.info('deleteVM: no VM found to delete', { name });
+    return;
+  }
+  await deleteV4Entity(ctx, '/api/vmm/v4.0/ahv/config/vms', vm.extId);
+  ctx.logger.info('deleteVM: VM deleted', { name });
 }
 
 /**
- * Inverse of `deleteVM` — un-marks the VM so the mock fixture reappears in
- * list responses. Fired manually via `POST /api/session/:id/action/restoreVM`
- * during mock validation (no stage emits it in the default pack) to unblock
- * stage 26's `CheckRestoreVM` once the tester has observed it fail.
+ * Inverse of `deleteVM`, emitted by stage 26's `<action name='restoreVM'/>`.
+ * Mock un-marks the VM so the fixture reappears and `CheckRestoreVM` passes.
+ * In test/live it's a no-op: the player (or the stage-26 act) does the real
+ * restore from a recovery point.
  */
 async function restoreVM(ctx: ActionContext): Promise<void> {
   const name = `${trigram(ctx)}-vm`;
@@ -48,14 +60,11 @@ async function restoreVM(ctx: ActionContext): Promise<void> {
 }
 
 /**
- * Stage 37 `modify-blueprint` — clones the cluster's `*-source` blueprint
- * (typically `BlankVM-source`) into `bp-blankvm-prd{Vlanid}` so the
- * subsequent player edit (add `foo` task) has a target. Equivalent to
- * `actions.DeployBP` in the original `r0w/ntnx-escape-game` Python.
- *
- * In mock mode, the fixture already exposes `bp-blankvm-prd{Vlanid}` so
- * we just log. In live mode, list blueprints, find the one whose name
- * ends in `source`, and POST `/clone` with the target name.
+ * Stage 37 `modify-blueprint`: clones the cluster's `*-source` blueprint
+ * into `bp-blankvm-prd{Vlanid}` so the player's edit has a target (the
+ * `actions.DeployBP` equivalent from the original ntnx-escape-game Python).
+ * Mock no-op (the fixture already exposes the target); live lists blueprints,
+ * finds the `*-source` one, and POSTs `/clone` with the target name.
  */
 async function deployBlueprint(ctx: ActionContext): Promise<void> {
   if (ctx.nutanix.mode === 'mock') {
@@ -83,7 +92,7 @@ async function deployBlueprint(ctx: ActionContext): Promise<void> {
     /source$/.test(b.metadata?.name ?? b.status?.name ?? ''),
   );
   if (!source?.metadata?.uuid) {
-    ctx.logger.warn(`deployBlueprint: no '*-source' blueprint to clone — skipping`);
+    ctx.logger.warn(`deployBlueprint: no '*-source' blueprint to clone, skipping`);
     return;
   }
   ctx.logger.info(`deployBlueprint: cloning ${source.metadata?.name} → ${target}`);
@@ -98,18 +107,10 @@ async function deployBlueprint(ctx: ActionContext): Promise<void> {
 }
 
 /**
- * Stage 13 `verify-prod-user-isolation` — silent action that fires right
- * after `create-vm` passes. Creates a VM recovery point so the later
- * `incident-freeze` (stage 23, delete) → `restore-vm-from-recovery` (stage
- * 26) chain can actually restore from a snapshot. The original Python
- * `CheckVM` in `r0w/ntnx-escape-game` baked this into the check function
- * itself; we keep the cleaner separation by exposing it as an action and
- * triggering via the locale's `<action name='createRecoveryPoint'/>` tag.
- *
- * Endpoint: `POST /api/dataprotection/v4.0/config/recovery-points` with
- * `{vmRecoveryPoints: [{vmExtId: <VMUUID>}]}`. Idempotent: skip if VMUUID
- * isn't set (CheckVM hasn't run) — silent no-op so it doesn't pollute logs
- * during the lore/login stages.
+ * Stage 13 `verify-prod-user-isolation`: silent action fired after `create-vm`.
+ * Snapshots the VM (`POST .../config/recovery-points`) so the later delete
+ * (stage 23) then restore (stage 26) chain has a recovery point to work from.
+ * Mock no-op. Idempotent: skips quietly if VMUUID isn't captured yet.
  */
 async function createRecoveryPoint(ctx: ActionContext): Promise<void> {
   if (ctx.nutanix.mode === 'mock') {

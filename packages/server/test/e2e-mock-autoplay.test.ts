@@ -90,6 +90,9 @@ async function bootApp() {
       PCPassword: 'unused-in-mock',
       Vlanid: '42',
       ImageURL: 'https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img',
+      // Ephemeral deploys set this to the host's IP; stage 19's fixture must
+      // interpolate `{frontendHost}` so CheckSecurityPolicy2's exact-match holds.
+      frontendHost: '10.0.0.5',
     },
     serverMode: 'mock',
   });

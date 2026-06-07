@@ -1,0 +1,73 @@
+#!/bin/bash
+set -euo pipefail
+
+# Install task: render /opt/ntnx-infiltration-game/{docker-compose.yml,.env}
+# from the BP vars, then bring the game container up via docker compose
+# (public repo, no auth). Idempotent: `docker compose up -d` recreates the
+# container on a re-run, so the day-2 UpdateGame action just re-pulls + re-ups
+# against the same .env. The sqlite DB persists in ./data so a roll keeps
+# session history.
+#
+# .env is the single source of truth: compose interpolates ${IMAGE_REPO} /
+# ${IMAGE_TAG} from it, and the container env is passed literally via
+# env_file (secret-safe). docker-compose.yml below is bundled from
+# specs/docker-compose.yml at build time (compile.sh / release.yml).
+
+APPDIR=/opt/ntnx-infiltration-game
+sudo mkdir -p "$APPDIR/data"
+
+# Source IP the player whitelists for SSH in stage 19. Operator can pin it via
+# the GAME_FRONTEND_HOST runtime var; left blank, derive this host's primary
+# egress IPv4 (read on the VM, not in the container, since traffic is NAT'd
+# to the host).
+FRONTEND_HOST="@@{GAME_FRONTEND_HOST}@@"
+if [[ -z "$FRONTEND_HOST" ]]; then
+    FRONTEND_HOST="$(ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1)"
+    # Fallback for hosts with no default route (isolated / host-only networks).
+    [[ -z "$FRONTEND_HOST" ]] && FRONTEND_HOST="$(hostname -I 2>/dev/null | awk '{print $1}')"
+fi
+
+# docker-compose.yml — bundled at build from specs/docker-compose.yml.
+# Quoted heredoc: bash leaves ${IMAGE_REPO}/${IMAGE_TAG} for compose to
+# interpolate from .env at `up` time.
+sudo tee "$APPDIR/docker-compose.yml" >/dev/null <<'COMPOSEEOF'
+__COMPOSE_YML__
+COMPOSEEOF
+
+# .env — Calm substitutes the runtime-variable macros to their literal values
+# before this runs; the quoted heredoc then keeps any $ / backtick in a secret intact.
+# (Do NOT write a literal at-at-brace macro token in a comment: Calm scans the
+#  whole script body and an invalid var name there fails BP validation.)
+sudo tee "$APPDIR/.env" >/dev/null <<'ENVEOF'
+IMAGE_REPO=@@{IMAGE_REPO}@@
+IMAGE_TAG=@@{IMAGE_TAG}@@
+PUBLIC_DIR=/app/public
+MODE=@@{MODE}@@
+LOG_LEVEL=@@{LOG_LEVEL}@@
+CLUSTER_PROFILE=@@{CLUSTER_PROFILE}@@
+PC_ENDPOINT=https://@@{PC_IP}@@:9440
+PC_USER=@@{PC_USERNAME}@@
+PC_PASSWORD=@@{PC_PASSWORD}@@
+NUTANIX_VERIFY_SSL=false
+ADMIN_PASSWORD=@@{ADMIN_PASSWORD}@@
+GAME_PROD_USERNAME=@@{GAME_PROD_USERNAME}@@
+GAME_PROD_PASSWORD=@@{GAME_PROD_PASSWORD}@@
+GAME_OLD_PC=@@{GAME_OLD_PC}@@
+GAME_OLD_PC_USERNAME=@@{GAME_OLD_PC_USERNAME}@@
+GAME_OLD_PC_PASSWORD=@@{GAME_OLD_PC_PASSWORD}@@
+GAME_EMAIL_REPORT=@@{GAME_EMAIL_REPORT}@@
+TZ=@@{TIMEZONE}@@
+ENVEOF
+# FRONTEND_HOST is computed in bash above, so append it outside the quoted heredoc.
+echo "GAME_FRONTEND_HOST=${FRONTEND_HOST}" | sudo tee -a "$APPDIR/.env" >/dev/null
+sudo chmod 600 "$APPDIR/.env"
+
+cd "$APPDIR"
+sudo docker compose pull
+sudo docker compose up -d --remove-orphans
+
+# Surface boot status so the Calm task output is useful for diagnosis.
+sleep 5
+sudo docker compose ps
+echo "--- boot log ---"
+sudo docker compose logs --tail 30

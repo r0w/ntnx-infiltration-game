@@ -48,6 +48,22 @@ export const PLANNER_VAR_KEYS = [
   { key: 'old_pc_password', name: 'OldPCPassword' },
 ] as const;
 
+/**
+ * Mock-only default player identity. Pre-seeded at session create so a
+ * fixture-backed session can jump to any stage without first playing the
+ * login (see `create()`). Overridden the moment the player types real
+ * values in the login stages. Never applied in `test` / `live`.
+ */
+export const MOCK_IDENTITY: Record<string, string> = {
+  Trigram: 'dev',
+  PIN: '0000',
+  Username: 'dev-agent',
+};
+
+// Vlanid lives in [0, VLAN_RANGE). 250 matches the Python predecessor and fits
+// the `192.168.{Vlanid}.0/24` octet the subnet act carves.
+const VLAN_RANGE = 250;
+
 export interface SessionServiceDeps {
   db: Database;
   runner: StageRunner;
@@ -81,6 +97,9 @@ export interface AdvanceResult {
    */
   switchSessionId?: string;
   actions: string[];
+  /** Phase-1 flag: narrative rendered, check deferred to /resolve-check.
+   *  The client plays the "verifying…" beat then fetches the verdict. */
+  checkPending?: boolean;
   check?: {
     pass: boolean;
     detail?: string;
@@ -293,7 +312,7 @@ export class SessionService {
    * session id so the legacy NOT NULL + unique constraints stay satisfied.
    * Resume is now strictly sessionId-based (localStorage on the client side).
    */
-  create(input: CreateSessionInput): SessionRecord {
+  async create(input: CreateSessionInput): Promise<SessionRecord> {
     const id = crypto.randomUUID();
     // Merge boot-probed caps (input.capabilities) with config-driven
     // ones that can flip at runtime via /admin (currently only
@@ -327,18 +346,89 @@ export class SessionService {
         this.variables.upsert(id, name, v, 'session-init');
       }
     }
-    // Per-session randomized Vlanid — mirrors the original Python game's
-    // `main.py` (`Vlanid: str(random.randrange(250))`). Without this two
-    // concurrent players collide on the same VLAN ID and AHV refuses the
-    // second `{trigram}-subnet`. Operator can pin a fixed VLAN by setting
-    // `GAME_VLAN_ID` in env (the global initial overrides this only when
-    // empty / unset).
+    // Per-session Vlanid, always allocated collision-free. A blind random roll
+    // (as the single-player Python CLI did) lets two concurrent players pick the
+    // same VLAN, and AHV rejects the second subnet on it; allocateVlanId picks a
+    // free one instead. Production never pre-seeds Vlanid (pinning it would break
+    // multi-player); only tests pass one via initialVariables.
     const envVlanId = this.initialVariables.Vlanid;
     if (envVlanId === undefined || envVlanId === '' || envVlanId === null) {
-      const randVlan = String(Math.floor(Math.random() * 250));
-      this.variables.upsert(id, 'Vlanid', randVlan, 'session-init');
+      const vlan = await this.allocateVlanId();
+      this.variables.upsert(id, 'Vlanid', String(vlan), 'session-init');
+    }
+    // Mock-only: pre-seed the player identity (Trigram / PIN / Username) so
+    // fresh sessions can DevPanel-jump straight to any stage without first
+    // playing the login. Without these captured, stages that interpolate
+    // `{Trigram}` are flagged missing-upstream and silently skipped on a
+    // cold jump (confusing during translation/UX review). Real player
+    // capture still overrides them when the login stages are played; in
+    // `test`/`live` identity stays strictly manual.
+    if (this.nutanix.mode === 'mock') {
+      for (const [name, value] of Object.entries(MOCK_IDENTITY)) {
+        this.variables.upsert(id, name, value, 'session-init');
+      }
     }
     return record;
+  }
+
+  /**
+   * Pick a collision-free Vlanid in [0, VLAN_RANGE), excluding VLANs live on the
+   * cluster plus those held by active peers. The cluster fetch is the only await:
+   * the DB read, pick, and caller's upsert all run synchronously after it, so two
+   * interleaved create() calls can't land on the same free VLAN. Falls back to a
+   * random roll in mock mode, on cluster error, or if the pool is exhausted.
+   */
+  private async allocateVlanId(): Promise<number> {
+    const randomVlan = () => Math.floor(Math.random() * VLAN_RANGE);
+    // Mock mode never builds real subnets, so a collision is harmless.
+    if (this.nutanix.mode === 'mock') return randomVlan();
+
+    const used = new Set<number>(await this.clusterVlanIds());
+    for (const v of this.variables.activeVlanIds()) used.add(v);
+
+    const free: number[] = [];
+    for (let v = 0; v < VLAN_RANGE; v += 1) {
+      if (!used.has(v)) free.push(v);
+    }
+    if (free.length === 0) {
+      this.logger.warn('vlan alloc: all VLANs in use, reusing a random one', {
+        range: VLAN_RANGE,
+      });
+      return randomVlan();
+    }
+    return free[Math.floor(Math.random() * free.length)];
+  }
+
+  /**
+   * VLAN IDs of VLAN-type subnets live on the cluster. Returns [] on error so
+   * allocation degrades to DB-only rather than blocking. Paginates v4 subnets.
+   */
+  private async clusterVlanIds(): Promise<number[]> {
+    try {
+      const used: number[] = [];
+      const limit = 100;
+      for (let page = 0; ; page += 1) {
+        const resp = await this.nutanix.rest.request<{
+          data?: Array<{ subnetType?: string; networkId?: number }>;
+        }>(
+          'GET',
+          `/api/networking/v4.0/config/subnets?$page=${page}&$limit=${limit}`,
+        );
+        const data = resp?.data ?? [];
+        for (const s of data) {
+          if (s.subnetType === 'VLAN' && typeof s.networkId === 'number') {
+            used.push(s.networkId);
+          }
+        }
+        if (data.length < limit) break;
+      }
+      return used;
+    } catch (err) {
+      this.logger.warn('vlan alloc: cluster subnet list failed, falling back', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return [];
+    }
   }
 
   /**
@@ -360,46 +450,35 @@ export class SessionService {
   }
 
   /**
-   * How many stages will a fresh session on this cluster *actually* play?
+   * Stages a fresh session on this cluster will actually play: the score
+   * denominator for /admin users and /scoreboard. Dividing by the raw pack
+   * length instead would cap a player below 100% for stages filtered out by
+   * cluster reasons they could never reach.
    *
-   * Used as the score denominator in `/admin → users` (cell "Progress")
-   * and `/scoreboard` (percentage). Without this, both views divided by
-   * the raw pack length (39), so a player on a cluster where 3 stages
-   * are filtered for cluster reasons (e.g. no Policy Engine + no spare
-   * chassis slot) would top out at 36/39 ≈ 92% even after legitimately
-   * passing everything they could.
-   *
-   * The pre-existing per-session `stagesDisabled` counter only grows
-   * when the engine actually walks past a gated stage during `advance()`
-   * — for in-progress sessions, all FUTURE disabled stages still count
-   * against the player. This method shortcuts that by simulating the
-   * gate against current cluster state for every pack stage:
-   *
-   *   - excludes `active: false` (operator overlay or pack-default off)
-   *   - excludes `requires` not in caps (always)
-   *   - excludes `requiresOnOther` not in caps when profile=other
-   *   - excludes `impact: hpoc-only` when profile=other
-   *   - INCLUDES `adminGate: true` (operator can unlock; counts as
-   *     reachable)
-   *   - INCLUDES `needs`-broken (dynamic per-session; not a cluster fact)
-   *
-   * Merging boot-probed caps with `computeDynamicCapabilities()` here
-   * mirrors `create()` exactly, so admin edits via /admin → cluster
-   * propagate to the denominator on the next render.
+   * Simulates the advance() gate against current cluster state: skips inactive
+   * stages and unmet `requires` (plus `requiresOnOther` / `hpoc-only` when
+   * profile=other), but keeps adminGate stages (operator can unlock) and
+   * `needs`-broken ones (per-session, not a cluster fact). Merges boot caps
+   * with computeDynamicCapabilities() like create() so admin cluster edits
+   * reach the denominator on the next render.
    */
   effectivePlayableCount(
     bootCaps: readonly CapabilityFlag[],
     profile: ClusterProfile,
   ): number {
     const caps = new Set<CapabilityFlag>([...bootCaps, ...this.computeDynamicCapabilities()]);
+    // Mock never touches a cluster, so profile filtering doesn't apply — every
+    // stage is playable there. Mirror the gate (see nextStage) so the
+    // denominator matches what the player can actually reach.
+    const effProfile = this.nutanix.mode === 'mock' ? 'hpoc' : profile;
     let count = 0;
     for (const s of this.runner.listStages()) {
       if (!s.active) continue;
-      const required = profile === 'other'
+      const required = effProfile === 'other'
         ? [...(s.requires ?? []), ...(s.requiresOnOther ?? [])]
         : (s.requires ?? []);
       if (required.some((c) => !caps.has(c))) continue;
-      if (s.impact === 'hpoc-only' && profile === 'other') continue;
+      if (s.impact === 'hpoc-only' && effProfile === 'other') continue;
       count++;
     }
     return count;
@@ -412,20 +491,13 @@ export class SessionService {
   }
 
   /**
-   * Fire the registered **act** handler for the stage the session is currently
-   * awaiting on, reusing the session's live `vars` + cluster cache + nutanix
-   * client. Used by the auto-play UI in `test` mode: the operator's "Ok"
-   * shortcut needs the cluster-side resource to exist before the check runs,
-   * so we run the equivalent of the player's GUI step automatically.
-   *
-   * Captured vars (UUIDs, names) write through `variablesForSession` to the
-   * DB, so subsequent stages that `needs` them see them. Idempotency is the
-   * act handler's responsibility (existing handlers use an `ensure()`
-   * pattern: list → match-by-name → early return).
-   *
-   * Throws 409 when not awaiting, 404 when no act is registered for the
-   * awaiting stage. Mode gating (live vs mock/test) is the route's job —
-   * this method has no opinion on which modes should expose it.
+   * Fire the registered act handler for the stage the session is awaiting on,
+   * reusing its live vars + cluster cache + nutanix client. Powers the auto-play
+   * "Ok" shortcut: the cluster resource must exist before the check runs, so we
+   * run the player's GUI step for them. Captured vars write through to the DB so
+   * later `needs` stages see them; idempotency is the handler's job (the
+   * `ensure()` list-then-match pattern). Throws 409 when not awaiting, 404 when
+   * no act is registered. Mode gating is the route's call, not this method's.
    */
   async runActForAwaitingStage(
     sessionId: string,
@@ -643,6 +715,9 @@ export class SessionService {
     if (session.awaiting) {
       throw new HttpError(409, 'Session awaiting input; submit input before advancing');
     }
+    if (session.pendingCheck) {
+      throw new HttpError(409, 'Session has a pending check; resolve it before advancing');
+    }
     // Pack-wide pause (lunch lock, etc.) — checked BEFORE the runner so a
     // single DB row gates the whole room without rebuilding the runner.
     // submitInput intentionally bypasses this check: a player who's typing
@@ -671,7 +746,11 @@ export class SessionService {
     const next = this.runner.nextStage(
       {
         capabilities: new Set(session.capabilities),
-        clusterProfile: session.clusterProfile,
+        // clusterProfile filtering (hpoc-only / requiresOnOther) is a real-cluster
+        // concern. In mock there's no cluster, so every stage stays reachable —
+        // gate as 'hpoc' regardless of the session's profile. Checks still see
+        // the real profile (buildCheckContext is untouched).
+        clusterProfile: this.nutanix.mode === 'mock' ? 'hpoc' : session.clusterProfile,
         currentStage: currentIdx,
         gateUnlocks: this.unlockedGateIds,
       },
@@ -856,7 +935,11 @@ export class SessionService {
 
     const prevAwaiting = session.awaiting;
     this.sessions.setAwaiting(session.id, null);
-    const result = await this.finalizeStage(
+
+    // finalizeStage defers a check (streams the "wait…" narrative, parks
+    // pendingCheck) or finalizes a no-check stage inline. The retry context
+    // lets a deferred check rewind to this input on failure.
+    return await this.finalizeStage(
       session,
       stage,
       ctx,
@@ -864,20 +947,49 @@ export class SessionService {
       rendered.actions,
       [],
       rendered.typingSpeedMs,
+      { variable, offset: prevAwaiting.renderOffset },
     );
-    // On check-fail, put the player back at the same input so they can retry
-    // without the whole stage re-rendering. Otherwise awaiting stays null,
-    // auto-advance fires, and the gate re-picks this stage (currentStage
-    // didn't move) — the full prompt prints again on top of the failure line.
-    if (prevAwaiting && result.check && !result.check.pass) {
-      // Rewind path: the check named an earlier `<input/>` as the root
-      // cause (e.g. CheckTrigram fails on PIN submission but the collision
-      // is on Trigram). Move awaiting back to that input and clear every
-      // captured variable at or after it so the player re-enters them.
+  }
+
+  /**
+   * Phase 2 of the two-phase check: run the deferred check. The narrative
+   * already streamed in phase 1, so this returns only the verdict (empty
+   * `units` + `check`) — advancing on pass, rewinding awaiting on fail.
+   */
+  async resolvePendingCheck(sessionId: string): Promise<AdvanceResult> {
+    const session = this.getSession(sessionId);
+    if (session.finishedAt) throw new HttpError(409, 'Session already finished');
+    const pending = session.pendingCheck;
+    if (!pending) throw new HttpError(409, 'Session has no pending check');
+    const stage = this.runner.stageByName(pending.stageName);
+    if (!stage) throw new HttpError(500, 'Pending-check stage disappeared from pack');
+
+    const ctx = this.buildCheckContext(session);
+    // No narrative units — those streamed in phase 1. Run the check BEFORE
+    // clearing pendingCheck: if it throws (transient cluster/network blip), the
+    // parked state survives so the client's "still parked, retryable" assumption
+    // holds and advance() keeps 409ing instead of replaying the stage.
+    const result = await this.runStageCheck(session, stage, ctx, [], [], [], undefined);
+    if (result.kind === 'switch-session') return result; // session already deleted
+    this.sessions.setPendingCheck(session.id, null);
+
+    // On fail, re-park an input so the player can retry (switchTo /
+    // silentOnSuccess paths have no `check` and fall straight through).
+    if (result.check && !result.check.pass) {
+      // Re-render only here (the pass path doesn't need it) to locate the
+      // inputs. The check may blame an earlier one (e.g. a PIN submit failing
+      // on a Trigram collision) — rewind there and clear the captures past it.
+      const rendered = this.runner.render(
+        stage,
+        ctx.vars,
+        session.locale,
+        this.bundle,
+        this.globalTypingSpeedMs,
+      );
       const retryFrom = result.check.retryFromVariable;
       if (retryFrom) {
         const rewindIdx = this.runner.firstAwaitInputFor(rendered.units, retryFrom);
-        if (rewindIdx >= 0 && rewindIdx + 1 < prevAwaiting.renderOffset) {
+        if (rewindIdx >= 0 && rewindIdx + 1 < pending.retryOffset) {
           for (let i = rewindIdx; i < rendered.units.length; i++) {
             const u = rendered.units[i];
             if (u.kind === 'await-input') ctx.vars.delete(u.variable);
@@ -887,23 +999,21 @@ export class SessionService {
             stageName: stage.name,
             renderOffset: rewindIdx + 1,
           });
-          return {
-            ...result,
-            kind: 'awaiting-input',
-            awaitingVariable: retryFrom,
-            // Empty units: the failure chip (result.check.detail) carries
-            // the retry instruction; re-emitting the prompt text would
-            // duplicate noise the player already sees above.
-            units: [],
-          };
+          return { ...result, kind: 'awaiting-input', awaitingVariable: retryFrom, units: [] };
         }
       }
-      this.sessions.setAwaiting(session.id, prevAwaiting);
-      return {
-        ...result,
-        kind: 'awaiting-input',
-        awaitingVariable: prevAwaiting.variable,
-      };
+      // Default: re-park the input just submitted so a bare retry re-checks.
+      // Only when there's an input to re-park (submit-reached check). An
+      // advance-reached check has no input (retryVariable=''), so re-parking
+      // would wedge the session on awaiting variable='' — just return the verdict.
+      if (pending.retryVariable) {
+        this.sessions.setAwaiting(session.id, {
+          variable: pending.retryVariable,
+          stageName: stage.name,
+          renderOffset: pending.retryOffset,
+        });
+        return { ...result, kind: 'awaiting-input', awaitingVariable: pending.retryVariable };
+      }
     }
     return result;
   }
@@ -926,7 +1036,7 @@ export class SessionService {
     if (names.length >= 2) {
       this.history.deleteFrom(session.id, names[1]!, names);
     }
-    this.sessions.setAwaiting(session.id, null);
+    this.clearFlowState(session.id);
     this.sessions.clearFinished(session.id);
     this.sessions.updateCurrentStage(session.id, loreName);
     for (const name of ['Trigram', 'PIN', 'Username']) {
@@ -947,12 +1057,14 @@ export class SessionService {
     const session = this.getSession(sessionId);
     const targetIdx = this.stageIndex(stageName);
     if (targetIdx < 0) throw new HttpError(404, `Stage '${stageName}' not in pack`);
-    if (targetIdx < 1) throw new HttpError(400, `Stage '${stageName}' is not a valid goto target`);
     const names = this.stageNames();
     this.history.deleteFrom(session.id, stageName, names);
-    this.sessions.setAwaiting(session.id, null);
+    this.clearFlowState(session.id);
     this.sessions.clearFinished(session.id);
-    const prevName = names[targetIdx - 1]!;
+    // Land on the stage just BEFORE the target so the next advance() picks the
+    // target up. Jumping to the very first stage (idx 0) lands on the pre-game
+    // NULL state a fresh session starts in.
+    const prevName = targetIdx > 0 ? names[targetIdx - 1]! : null;
     this.sessions.updateCurrentStage(session.id, prevName);
     return { currentStage: prevName };
   }
@@ -989,12 +1101,68 @@ export class SessionService {
       }
       skipped.push(stage.name);
     }
-    this.sessions.setAwaiting(session.id, null);
+    this.clearFlowState(session.id);
     this.sessions.updateCurrentStage(session.id, stageName);
     return { skipped, finalStage: stageName };
   }
 
+  /** Drop both transient flow flags. Awaiting-input and a deferred check are
+   *  mutually exclusive, so every reset/jump clears whichever is set. */
+  private clearFlowState(sessionId: string): void {
+    this.sessions.setAwaiting(sessionId, null);
+    this.sessions.setPendingCheck(sessionId, null);
+  }
+
+  /**
+   * Commit a stage once its narrative has rendered. A stage with a check is
+   * NOT run here — it's deferred: park pendingCheck and return `checkPending`
+   * so the client plays the verifying beat, then calls resolvePendingCheck.
+   * Both advance() and submitInput route through here, so the two-phase beat is
+   * uniform. `pendingRetry` is the input to rewind to on a fail (submit path);
+   * absent for advance-reached checks. No-check stages finalize inline.
+   */
   private async finalizeStage(
+    session: SessionRecord,
+    stage: StageDefinition,
+    ctx: CheckContext,
+    units: MessageUnit[],
+    actions: string[],
+    disabledStages: DisabledStage[],
+    typingSpeedMs: number | undefined,
+    pendingRetry?: { variable: string; offset: number },
+  ): Promise<AdvanceResult> {
+    if (stage.check) {
+      this.sessions.setPendingCheck(session.id, {
+        stageName: stage.name,
+        retryVariable: pendingRetry?.variable ?? '',
+        retryOffset: pendingRetry?.offset ?? 0,
+      });
+      return {
+        kind: 'units',
+        stageName: stage.name,
+        units,
+        actions,
+        checkPending: true,
+        disabledStages,
+        typingSpeedMs,
+      };
+    }
+    // Narrative stage (no check) — advancement is the commit point, so
+    // invalidations fire here unconditionally.
+    if (stage.invalidates) {
+      for (const name of stage.invalidates) ctx.vars.delete(name);
+    }
+    this.history.record(session.id, stage.name, 'passed', null, null);
+    this.sessions.updateCurrentStage(session.id, stage.name);
+    return { kind: 'units', stageName: stage.name, units, actions, disabledStages, typingSpeedMs };
+  }
+
+  /**
+   * Phase 2: run a deferred stage check. Captures, invalidates, history and
+   * advancement happen here; `switchTo` short-circuits to a session handoff
+   * (drop this session, skip everything, let the client swap localStorage).
+   */
+  private async runStageCheck(
     session: SessionRecord,
     stage: StageDefinition,
     ctx: CheckContext,
@@ -1004,83 +1172,39 @@ export class SessionService {
     typingSpeedMs: number | undefined,
   ): Promise<AdvanceResult> {
     const start = Date.now();
-    let checkResult: AdvanceResult['check'] | undefined;
-    if (stage.check) {
-      const r = await this.runner.runCheck(stage, ctx);
-      // `switchTo` short-circuits the whole finalize path. The check said
-      // "don't keep going, hand off to this other sessionId" — we drop the
-      // current session (cascades child rows), skip history + captures +
-      // currentStage, and return a switch-session response so the client
-      // swaps localStorage.
-      if (r.switchTo) {
-        this.sessions.deleteById(session.id);
-        return {
-          kind: 'switch-session',
-          switchSessionId: r.switchTo,
-          units: [],
-          actions: [],
-          disabledStages: [],
-        };
-      }
-      // Stages marked silentOnSuccess omit the check row from the UI on pass —
-      // narrative beats already say their piece in-prose, no need for a
-      // synthetic `[✓] Stage validated.` cap. Failures still surface so the
-      // player knows why they're stuck.
-      if (!(r.pass && stage.silentOnSuccess)) {
-        const cheer = pickSentence(
-          this.bundle,
-          session.locale,
-          r.pass ? 'sentences.ok-' : 'sentences.ko-',
-        );
-        checkResult = {
-          pass: r.pass,
-          detail: r.detail,
-          hint: r.hint,
-          cheer,
-          retryFromVariable: r.retryFromVariable,
-        };
-      }
-      if (r.captured) {
-        for (const [name, value] of Object.entries(r.captured)) {
-          ctx.vars.set(name, value, stage.name);
-        }
-      }
-      // Invalidations run AFTER captures so a stage that both captures and
-      // invalidates the same name (edge case) lands in a well-defined state.
-      // Only fire on pass — a failing check hasn't actually destroyed anything.
-      if (r.pass && stage.invalidates) {
-        for (const name of stage.invalidates) ctx.vars.delete(name);
-      }
-      this.history.record(
-        session.id,
-        stage.name,
-        r.pass ? 'passed' : 'failed',
-        Date.now() - start,
-        r.detail ?? null,
-      );
-      // Progress on pass regardless of saveScore. saveScore is a checkpoint
-      // marker (for leaderboards / UI), not a gate on advancement — otherwise
-      // narrative stages with SaveScore:false would loop forever.
-      if (r.pass) this.sessions.updateCurrentStage(session.id, stage.name);
-    } else {
-      // Narrative stage (no check) — advancement is the commit point, so
-      // invalidations fire here unconditionally.
-      if (stage.invalidates) {
-        for (const name of stage.invalidates) ctx.vars.delete(name);
-      }
-      this.history.record(session.id, stage.name, 'passed', Date.now() - start, null);
-      this.sessions.updateCurrentStage(session.id, stage.name);
+    const r = await this.runner.runCheck(stage, ctx);
+    if (r.switchTo) {
+      this.sessions.deleteById(session.id);
+      return {
+        kind: 'switch-session',
+        switchSessionId: r.switchTo,
+        units: [],
+        actions: [],
+        disabledStages: [],
+      };
     }
-
-    return {
-      kind: 'units',
-      stageName: stage.name,
-      units,
-      actions,
-      check: checkResult,
-      disabledStages,
-      typingSpeedMs,
-    };
+    let checkResult: AdvanceResult['check'] | undefined;
+    // silentOnSuccess omits the verdict row on pass — narrative already says
+    // its piece. Failures always surface so the player knows why they're stuck.
+    if (!(r.pass && stage.silentOnSuccess)) {
+      const cheer = pickSentence(
+        this.bundle,
+        session.locale,
+        r.pass ? 'sentences.ok-' : 'sentences.ko-',
+      );
+      checkResult = { pass: r.pass, detail: r.detail, hint: r.hint, cheer, retryFromVariable: r.retryFromVariable };
+    }
+    if (r.captured) {
+      for (const [name, value] of Object.entries(r.captured)) ctx.vars.set(name, value, stage.name);
+    }
+    // Invalidations run after captures and only on pass — a failing check
+    // hasn't destroyed anything.
+    if (r.pass && stage.invalidates) {
+      for (const name of stage.invalidates) ctx.vars.delete(name);
+    }
+    this.history.record(session.id, stage.name, r.pass ? 'passed' : 'failed', Date.now() - start, r.detail ?? null);
+    if (r.pass) this.sessions.updateCurrentStage(session.id, stage.name);
+    return { kind: 'units', stageName: stage.name, units, actions, check: checkResult, disabledStages, typingSpeedMs };
   }
 }
 

@@ -20,7 +20,7 @@ export function buildSessionRoutes(deps: SessionRoutesDeps): Hono {
     const requested = typeof body.locale === 'string' ? body.locale : undefined;
     const locale: Locale =
       requested && deps.supportedLocales.includes(requested) ? requested : deps.defaultLocale;
-    const session = deps.service.create({
+    const session = await deps.service.create({
       locale,
       clusterEndpoint: deps.clusterEndpoint,
       clusterProfile: deps.clusterProfile,
@@ -46,6 +46,9 @@ export function buildSessionRoutes(deps: SessionRoutesDeps): Hono {
       clusterProfile: session.clusterProfile,
       capabilities: session.capabilities,
       awaiting: session.awaiting,
+      // Surface only the stage name — the client re-runs /resolve-check to
+      // finish a check it was parked on when it reloaded.
+      pendingCheck: session.pendingCheck ? { stageName: session.pendingCheck.stageName } : null,
       locale: session.locale,
       finishedAt: session.finishedAt,
       replay,
