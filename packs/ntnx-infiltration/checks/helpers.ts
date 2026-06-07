@@ -162,6 +162,23 @@ export async function recoverVar(
   return undefined;
 }
 
+/** Look up a PC user's uuid by username (case-insensitive) via v4 IAM.
+ *  Returns undefined on miss/error so callers can degrade gracefully. */
+export async function lookupUserUuid(
+  ctx: CheckContext,
+  name: string,
+): Promise<string | undefined> {
+  try {
+    const users = await listAll<{ extId?: string; username?: string }>(
+      ctx,
+      '/api/iam/v4.0/authn/users',
+    );
+    return users.find((u) => (u.username ?? '').toLowerCase() === name.toLowerCase())?.extId;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Pack-local copy of the engine's `discoverableNodeSerials` (same body, same
  * semantics). Lives here because the pack module is dynamically loaded from

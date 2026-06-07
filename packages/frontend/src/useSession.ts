@@ -6,10 +6,16 @@ import { VERIFYING_LABELS } from './renderer';
 /** Sentinel variable name emitted by `<input/>` — press-Enter-to-continue. */
 export const CONTINUE_VAR = '$continue';
 
-/** How long the `verifying…` spinner holds between the operator's "let me
- *  check…" line and the verdict. Long enough to read as a real check, short
- *  enough not to drag across the pack's ~10 check stages. */
-const CHECK_DWELL_MS = 1200;
+/** Floor for the "verifying…" beat so even an instant mock check reads as real.
+ *  Real latency counts toward it; "skip pauses" zeroes it in the renderer. */
+const VERIFY_FLOOR_MIN_MS = 800;
+const VERIFY_FLOOR_MAX_MS = 1800;
+
+/** Dwell left after `latencyMs` of real check already showed as a spinner. */
+function verifyDwellMs(latencyMs: number): number {
+  const target = VERIFY_FLOOR_MIN_MS + Math.random() * (VERIFY_FLOOR_MAX_MS - VERIFY_FLOOR_MIN_MS);
+  return Math.max(0, Math.round(target - latencyMs));
+}
 
 /** Human-readable label for a pending await-input prompt. */
 export function awaitingLabel(variable: string | null | undefined): string {
@@ -108,6 +114,17 @@ export interface SessionHandle {
 
 const STORAGE_KEY = 'ntnx-infiltration-session';
 
+/** How often the idle player pings the server to confirm the session still
+ *  exists. The action paths (advance/submit/hydrate) already drop a deleted
+ *  session, but a player parked at an input makes no requests — this catches
+ *  an operator-side delete while they sit idle. */
+const HEARTBEAT_MS = 5000;
+
+/** Shown on the login screen after the operator deletes the player's session
+ *  mid-game. Routed through the existing `error` channel (LoginForm renders it).
+ */
+const KICK_NOTICE = 'Your session was ended by the operator. Sign in to start a new one.';
+
 function appendUnits(
   prev: RenderItem[],
   units: MessageUnit[],
@@ -182,7 +199,7 @@ export function useSession(): SessionHandle {
   gatedRef.current = gatedAt;
   localeRef.current = locale;
 
-  const handleResponse = useCallback((r: AdvanceResponse) => {
+  const handleResponse = useCallback((r: AdvanceResponse, opts?: { verifyLatencyMs?: number }) => {
     if (r.kind === 'switch-session' && r.switchSessionId) {
       // Server closed the current session and handed us a new sessionId —
       // happens on returning-agent re-auth (trigram collision + PIN match
@@ -206,6 +223,7 @@ export function useSession(): SessionHandle {
       r.stageName &&
       r.kind !== 'awaiting-input' &&
       r.kind !== 'gated' &&
+      !r.checkPending && // phase 1: stage hasn't passed yet, check still to come
       r.check?.pass !== false
     ) {
       setCurrentStage(r.stageName);
@@ -281,12 +299,11 @@ export function useSession(): SessionHandle {
         });
       }
       if (r.check) {
-        // A "checking…" beat between the narration and the verdict so the
-        // line announcing the check and its result don't land on one frame.
+        // Floored "verifying…" beat before the verdict (see verifyDwellMs).
         next.push({
           kind: 'check-dwell',
           id: `${prefix}-checkdwell`,
-          ms: CHECK_DWELL_MS,
+          ms: verifyDwellMs(opts?.verifyLatencyMs ?? 0),
           label: VERIFYING_LABELS[localeRef.current] ?? VERIFYING_LABELS.en,
         });
         next.push({
@@ -310,6 +327,22 @@ export function useSession(): SessionHandle {
       userActedSinceClearRef.current = false;
     }
   }, []);
+
+  // Phase 2: run the parked check behind the verifying spinner, then show the
+  // verdict. Shared by inline submit and resume-after-reload so they pace alike.
+  const resolveAndApply = useCallback(
+    async (id: string) => {
+      setCheckPending(true);
+      try {
+        const t0 = performance.now();
+        const verdict = await api.resolveCheck(id);
+        handleResponse(verdict, { verifyLatencyMs: performance.now() - t0 });
+      } finally {
+        setCheckPending(false);
+      }
+    },
+    [handleResponse],
+  );
 
   const createSession = useCallback(
     async ({ locale: createLocale }: { locale: string }) => {
@@ -344,14 +377,19 @@ export function useSession(): SessionHandle {
     setSessionId(id);
   }, []);
 
-  const dropStaleSession = useCallback(() => {
+  const dropStaleSession = useCallback((notice?: string) => {
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
     finishedRef.current = false;
+    gatedRef.current = null;
     setSessionId(null);
     setItems([]);
     setAwaitingVariable(null);
     setAwaitingStageName(null);
     setFinished(false);
+    setGatedAt(null);
+    // Surface a reason on the login screen (it renders `error`). null leaves
+    // any prior error untouched — callers that want a clean drop pass nothing.
+    if (notice !== undefined) setError(notice);
   }, []);
 
   const hydrated = useRef<string | null>(null);
@@ -376,6 +414,26 @@ export function useSession(): SessionHandle {
           },
           { kind: 'finished', id: `hydrate-fin-marker-${id}` },
         ]);
+      } else if (snap.pendingCheck) {
+        // Mid-check resume: banner only on a cold load; an in-session retry
+        // keeps the existing scrollback instead of wiping it.
+        const stageName = snap.pendingCheck.stageName;
+        setItems((prev) =>
+          prev.length === 0
+            ? [{ kind: 'info', id: `hydrate-pending-${id}`, text: `[resuming verification at ${stageName}…]`, color: 'dim' }]
+            : prev,
+        );
+        try {
+          await resolveAndApply(id);
+        } catch (err) {
+          // Transient resolve failure: surface it, leave the check parked and
+          // retryable. Don't mark finished — that would strand the game.
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.startsWith('404')) dropStaleSession(KICK_NOTICE);
+          else setError(msg);
+        }
+        hydrated.current = id;
+        return;
       } else if (snap.awaiting) {
         awaitingRef.current = snap.awaiting.variable;
         setAwaitingVariable(snap.awaiting.variable);
@@ -416,7 +474,7 @@ export function useSession(): SessionHandle {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.startsWith('404')) {
-        dropStaleSession();
+        dropStaleSession(KICK_NOTICE);
       } else {
         setError(msg);
         finishedRef.current = true;
@@ -425,7 +483,7 @@ export function useSession(): SessionHandle {
     } finally {
       hydratingRef.current = null;
     }
-  }, [dropStaleSession]);
+  }, [dropStaleSession, resolveAndApply]);
 
   useEffect(() => {
     if (sessionId && hydrated.current !== sessionId) {
@@ -448,8 +506,11 @@ export function useSession(): SessionHandle {
       try {
         const r = await api.advance(sessionId);
         if (!cancelled) handleResponse(r);
-      } catch {
-        /* swallow — next tick will retry */
+      } catch (err) {
+        // A 404 here means the operator deleted the session while it sat at
+        // the gate — kick to login. Anything else: swallow, next tick retries.
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!cancelled && msg.startsWith('404')) dropStaleSession(KICK_NOTICE);
       } finally {
         inFlightRef.current = false;
       }
@@ -460,7 +521,36 @@ export function useSession(): SessionHandle {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [sessionId, gatedAt, handleResponse]);
+  }, [sessionId, gatedAt, handleResponse, dropStaleSession]);
+
+  // Heartbeat: detect an operator-side session delete even while the player is
+  // idle. advance()/submitInput()/hydrate() already drop a 404'd session, but a
+  // player parked at an input (or just reading) issues no requests and would
+  // otherwise sit on a dead session forever. Poll the snapshot on a slow cadence;
+  // a 404 means the operator deleted it → kick back to login with a notice.
+  // Skipped while gated (its 1 s poll already 404-drops) and once finished.
+  useEffect(() => {
+    if (!sessionId || finished || gatedAt) return;
+    let cancelled = false;
+    const tick = async () => {
+      // Don't race a real action, and wait until the session is hydrated so we
+      // don't 404 on a localStorage id mid-hydrate (hydrate handles that path).
+      if (cancelled || inFlightRef.current || hydrated.current !== sessionId) return;
+      try {
+        await api.getSession(sessionId);
+      } catch (err) {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.startsWith('404')) dropStaleSession(KICK_NOTICE);
+        // Any other error (network blip, 5xx) — ignore; next tick retries.
+      }
+    };
+    const id = window.setInterval(tick, HEARTBEAT_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [sessionId, finished, gatedAt, dropStaleSession]);
 
   const advance = useCallback(async () => {
     if (!sessionId) return;
@@ -472,19 +562,27 @@ export function useSession(): SessionHandle {
     inFlightRef.current = true;
     setBusy(true);
     setError(null);
+    let resolving = false;
     try {
       const r = await api.advance(sessionId);
       handleResponse(r);
+      // An advance-reached check defers too — run it behind the verifying beat.
+      if (r.checkPending) {
+        resolving = true;
+        await resolveAndApply(sessionId);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
       if (msg.startsWith('404')) {
-        dropStaleSession();
+        dropStaleSession(KICK_NOTICE);
       } else if (msg.startsWith('409')) {
-        // Server says we're awaiting input — re-hydrate to find out which.
+        // Awaiting input or a parked check — re-hydrate to resume correctly.
         hydrated.current = null;
         await hydrate(sessionId);
         setError(null);
+      } else if (resolving) {
+        // The deferred check failed; it stays parked server-side and retryable.
       } else {
         finishedRef.current = true;
         setFinished(true);
@@ -493,7 +591,7 @@ export function useSession(): SessionHandle {
       inFlightRef.current = false;
       setBusy(false);
     }
-  }, [sessionId, handleResponse, dropStaleSession, hydrate]);
+  }, [sessionId, handleResponse, dropStaleSession, hydrate, resolveAndApply]);
 
   const submitInput = useCallback(
     async (variable: string, value: string) => {
@@ -505,6 +603,9 @@ export function useSession(): SessionHandle {
       // The player actively moved on — the next `<clear/>` from the server
       // is now allowed to wipe (see userActedSinceClearRef in handleResponse).
       userActedSinceClearRef.current = true;
+      // Did phase 1 land? A phase-2 failure leaves the check parked (recoverable);
+      // a phase-1 failure re-prompts the input.
+      let phase1Done = false;
       try {
         setItems((prev) => [
           ...prev,
@@ -519,11 +620,18 @@ export function useSession(): SessionHandle {
         setAwaitingStageName(null);
         const r = await api.submitInput(sessionId, { variable, value });
         handleResponse(r);
+        phase1Done = true;
+        // Two-phase check: the stage streamed its "wait…" narrative; now run
+        // the deferred check while the verifying spinner masks the latency.
+        if (r.checkPending) await resolveAndApply(sessionId);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         setError(msg);
         if (msg.startsWith('404')) {
-          dropStaleSession();
+          dropStaleSession(KICK_NOTICE);
+        } else if (phase1Done) {
+          // Check parked server-side; keep the scrollback and just surface the
+          // error — the next advance() 409s and re-hydrates to retry the resolve.
         } else {
           setAwaitingVariable(variable);
           awaitingRef.current = variable;
@@ -534,7 +642,7 @@ export function useSession(): SessionHandle {
         setCheckPending(false);
       }
     },
-    [sessionId, handleResponse, dropStaleSession],
+    [sessionId, handleResponse, dropStaleSession, resolveAndApply],
   );
 
   const gotoStage = useCallback(

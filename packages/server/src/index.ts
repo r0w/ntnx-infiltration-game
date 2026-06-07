@@ -29,16 +29,18 @@ async function main() {
 
   // Cluster profile gates `impact: destructive` stages on shared clusters.
   // In mock mode there is no cluster — fixtures are immutable JSON — so the
-  // destructive guard is a no-op risk-wise. Force `hpoc` so all stages
+  // destructive guard is a no-op risk-wise. Default `hpoc` so all stages
   // (expand-cluster, create-approval-policy, …) play through; otherwise a
   // mock session that didn't set CLUSTER_PROFILE in env would silently skip
   // them and the player would see 37/39 at the end with no explanation.
+  // But honor an *explicit* CLUSTER_PROFILE — an operator who deliberately
+  // sets `other` wants to preview the shared-cluster (filtered) stage set.
   let clusterProfile: 'hpoc' | 'other';
   if (transportMode === 'mock') {
-    clusterProfile = 'hpoc';
-    consoleLogger.info('cluster profile forced (mock mode)', {
-      profile: 'hpoc',
-      reason: 'fixtures-not-a-real-cluster',
+    clusterProfile = cfg.clusterProfile ?? 'hpoc';
+    consoleLogger.info('cluster profile (mock mode)', {
+      profile: clusterProfile,
+      reason: cfg.clusterProfile ? 'explicit-env' : 'default-fixtures-not-a-real-cluster',
     });
   } else {
     clusterProfile = resolveClusterProfile({
@@ -116,9 +118,11 @@ async function main() {
   }
 
   // Seed template-facing variables from env so `{PC}` / `{PCUser}` /
-  // `{PCPassword}` / `{Vlanid}` / `{ImageURL}` render something instead of
-  // leaving a hole in the prompt. Empty strings are kept (template renders ''),
-  // which is the same behavior the player sees pre-login anyway.
+  // `{PCPassword}` / `{ImageURL}` render something instead of leaving a hole
+  // in the prompt. Empty strings are kept (template renders ''), which is the
+  // same behavior the player sees pre-login anyway. `Vlanid` is intentionally
+  // absent — it's always allocated per-session (collision-free); pinning it
+  // would break multi-player at stage 10 (two subnets on one VLAN).
   // OldPC* are NOT in this map — they're projected from cluster_config at
   // session-create instead, so admin edits via /admin → cluster apply
   // without a server restart.
@@ -126,7 +130,6 @@ async function main() {
     PC: cfg.pcEndpoint,
     PCUser: cfg.pcUser,
     PCPassword: cfg.pcPassword,
-    Vlanid: cfg.gameVlanId, // session-service randomizes per-session if empty
     ImageURL: cfg.gameImageUrl,
     EmailReport: cfg.gameEmailReport,
     ProdUsername: cfg.gameProdUsername,

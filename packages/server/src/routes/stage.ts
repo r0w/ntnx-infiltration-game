@@ -36,6 +36,12 @@ export function buildStageRoutes(deps: StageRoutesDeps): Hono {
     return c.json(r);
   });
 
+  // Phase 2 of the two-phase check: run the check deferred by /input.
+  router.post('/:id/resolve-check', async (c) => {
+    const r = await service.resolvePendingCheck(c.req.param('id'));
+    return c.json(r);
+  });
+
   router.post('/:id/skip-to/:stage', async (c) => {
     const stageName = c.req.param('stage');
     if (!stageName) throw new HttpError(400, 'missing stage name');

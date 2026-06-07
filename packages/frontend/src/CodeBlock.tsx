@@ -63,7 +63,11 @@ export function CodeBlock({ text, lang, isActive, onDone }: CodeBlockProps) {
       <button
         type="button"
         className={`code-copy${copied ? ' is-copied' : ''}`}
-        onClick={copy}
+        // Don't bubble to the terminal's click-to-focus, which scrolls the input into view.
+        onClick={(e) => {
+          e.stopPropagation();
+          void copy();
+        }}
         aria-label={copied ? 'Copied' : 'Copy to clipboard'}
         title={copied ? 'Copied' : 'Copy'}
       >
