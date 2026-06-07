@@ -53,6 +53,50 @@ async function findUserUuid(ctx: ActContext, name: string): Promise<string | und
   }
 }
 
+/** Resolve a user's uuid, importing it from the AD directory first if it's an
+ *  LDAP user not yet materialized in IAM. A directory user only appears in the
+ *  IAM users list once referenced (Prism does this when a player adds it to a
+ *  project); auto-play has no such trigger, so we import it ourselves — the
+ *  same POST the deploy runs for thebadguy (setup_production_project.py).
+ *  The import 409s when the user already exists; we re-resolve either way. */
+async function ensureUserUuid(
+  ctx: ActContext,
+  name: string,
+  firstName: string,
+  lastName: string,
+): Promise<string | undefined> {
+  const existing = await findUserUuid(ctx, name);
+  if (existing) return existing;
+  try {
+    const dirs = await ctx.nutanix.rest.request<{ data?: Array<{ extId?: string }> }>(
+      'GET',
+      '/api/iam/v4.0/authn/directory-services',
+    );
+    const idpId = dirs.data?.[0]?.extId;
+    if (!idpId) {
+      ctx.logger.warn('ensureUserUuid: no directory service to import from', { name });
+      return undefined;
+    }
+    await ctx.nutanix.rest.request('POST', '/api/iam/v4.0/authn/users', {
+      firstName,
+      lastName,
+      displayName: name,
+      username: name,
+      userType: 'LDAP',
+      idpId,
+    });
+    ctx.logger.info('ensureUserUuid: imported LDAP user', { name });
+  } catch (err) {
+    // 409 = already exists (casing/race); other errors are non-fatal — we
+    // fall through to one last resolve attempt.
+    ctx.logger.info('ensureUserUuid: import returned error (may already exist)', {
+      name,
+      err: String(err).slice(0, 200),
+    });
+  }
+  return findUserUuid(ctx, name);
+}
+
 // ───────────────────────────────────────────────────────────────────────
 //  Seeds: create the resources downstream stages need
 // ───────────────────────────────────────────────────────────────────────
@@ -180,7 +224,7 @@ async function actCreateProject(ctx: ActContext): Promise<void> {
   // The prompt asks for "user TheProjectManager as Project Admin". Add it as a
   // project member so the create-vm Manage Ownership step can set owner=
   // theprojectmanager (impossible if the user isn't in the project).
-  const pmUuid = await findUserUuid(ctx, 'theprojectmanager');
+  const pmUuid = await ensureUserUuid(ctx, 'theprojectmanager', 'Paul', 'Project Manager');
   if (!pmUuid) {
     ctx.logger.warn('actCreateProject: theprojectmanager user not found, project created without it');
   }
@@ -528,7 +572,7 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
   }
   // Manage Ownership sets BOTH project + owner on the VM. Owner = theproject-
   // manager (a project member, added at create-project). Set both in one v3 PUT.
-  const pmUuid = await findUserUuid(ctx, 'theprojectmanager');
+  const pmUuid = await ensureUserUuid(ctx, 'theprojectmanager', 'Paul', 'Project Manager');
   const lookup = (await listAllSdk<AnyRec>(($p) => sdk(ctx).vmm.vms.listVms($p))).find((v) => v.name === name);
   if (lookup?.extId && (projUuid || pmUuid)) {
     try {
