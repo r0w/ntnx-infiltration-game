@@ -58,6 +58,25 @@ describe('createRestAdapter', () => {
     expect(init.headers['Content-Type']).toBe('application/json');
   });
 
+  test('sends an Ntnx-Request-Id idempotency header, stable across retries', async () => {
+    // First attempt 503 (retryable for GET), second 200: the retried request
+    // must carry the SAME Ntnx-Request-Id so the server can dedupe it.
+    let n = 0;
+    installFetch(async () => (n++ === 0 ? jsonResponse(503, {}) : jsonResponse(200, { ok: 1 })));
+    const client = createRestAdapter({
+      endpoint: 'https://pc:9440',
+      user: 'u',
+      password: 'p',
+      retryBackoffMs: 0,
+    });
+    await client.request('GET', '/x');
+    expect(calls).toHaveLength(2);
+    const id0 = (calls[0].init as { headers: Record<string, string> }).headers['Ntnx-Request-Id'];
+    const id1 = (calls[1].init as { headers: Record<string, string> }).headers['Ntnx-Request-Id'];
+    expect(id0).toMatch(/^[0-9a-f-]{36}$/);
+    expect(id1).toBe(id0);
+  });
+
   test('defaults to verifySsl=false (HPoC-friendly), setting tls.rejectUnauthorized=false', async () => {
     installFetch(async () => jsonResponse(200, {}));
     const client = createRestAdapter({
