@@ -60,12 +60,16 @@ export function createRestAdapter(config: RestAdapterConfig): RestClient {
       const url = `${base}${path.startsWith('/') ? path : `/${path}`}`;
       const retryable = IDEMPOTENT_METHODS.has(m);
       const maxAttempts = retryable ? maxRetries + 1 : 1;
+      // Idempotency token required by v4 write endpoints (e.g. dataprotection
+      // recovery-points 400s without it). Generated once per request() so a
+      // retried call reuses the same id and the server dedupes it.
+      const requestId = crypto.randomUUID();
 
       let lastErr: unknown;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         const start = Date.now();
         try {
-          const res = await fetchWithTimeout(url, buildInit(m, body, auth, verifySsl), timeoutMs);
+          const res = await fetchWithTimeout(url, buildInit(m, body, auth, verifySsl, requestId), timeoutMs);
           const ct = res.headers.get('content-type') ?? '';
 
           if (!res.ok) {
@@ -119,13 +123,20 @@ export function createRestAdapter(config: RestAdapterConfig): RestClient {
   };
 }
 
-function buildInit(method: string, body: unknown, auth: string, verifySsl: boolean): FetchInit {
+function buildInit(
+  method: string,
+  body: unknown,
+  auth: string,
+  verifySsl: boolean,
+  requestId: string,
+): FetchInit {
   const init: FetchInit = {
     method,
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
       Authorization: auth,
+      'Ntnx-Request-Id': requestId,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   };
