@@ -12,6 +12,7 @@ import {
   type AdminUserEntry,
 } from './api';
 import { ConfirmModal } from './Modal';
+import { VersionFooter } from './VersionFooter';
 
 type AdminTab = 'users' | 'pack' | 'cluster' | 'scoreboard';
 
@@ -900,6 +901,7 @@ function AdminDashboard({
           </p>
         </ConfirmModal>
       )}
+      <VersionFooter />
     </div>
   );
 }

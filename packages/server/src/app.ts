@@ -14,6 +14,7 @@ import { buildScoreboardRoutes } from './routes/scoreboard';
 import { buildSshRoutes } from './routes/ssh';
 import { buildAdminRoutes } from './routes/admin';
 import { buildActRoutes } from './routes/act';
+import { getVersionInfo } from './version';
 
 export interface AppDeps {
   db: Database;
@@ -71,6 +72,10 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
       transport: deps.nutanix.mode,
     }),
   );
+
+  // Build-stamped version + repo, read by the admin footer. Public on
+  // purpose: it leaks nothing sensitive and the footer renders pre-login.
+  app.get('/api/version', (c) => c.json(getVersionInfo()));
 
   app.get('/api/pack', (c) =>
     c.json({

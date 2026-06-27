@@ -305,7 +305,17 @@ export interface AdminLunchStatus {
   affectedCount: number;
 }
 
+export interface VersionInfo {
+  version: string;
+  gitSha: string | null;
+  branch: string | null;
+  buildTime: string | null;
+  /** `owner/repo`, used to fetch GitHub Releases for the changelog modal. */
+  repo: string;
+}
+
 export const api = {
+  version: () => get<VersionInfo>('/version'),
   createSession: (req: CreateSessionRequest) =>
     post<CreateSessionResponse>('/session', req),
   getSession: (id: string) => get<SessionSnapshot>(`/session/${id}`),
