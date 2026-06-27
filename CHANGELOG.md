@@ -21,6 +21,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
   branch, and build time.
 - `CHANGELOG.md` (this file) and a documented branching workflow in
   `docs/BRANCHING.md`.
+- Contributor guide (`CONTRIBUTING.md`) and a pull-request template requiring a
+  changelog entry.
 
 ### Changed
 
