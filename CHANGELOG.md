@@ -26,6 +26,11 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- Install runbook now sets the `CloneProd` blueprint's `pcUser` credential to
+  the real PC admin account at deploy time, instead of asking the player to do
+  it by hand in stage 35. The shipped blueprint baked a placeholder credential
+  that 401'd the clone runbook; the manual fix also risked locking the admin
+  account on a typo. Now injected once from the PC creds Calm already provides.
 - Release workflow now uses the matching `CHANGELOG.md` section as the GitHub
   Release notes when present (falling back to auto-generated notes), and stamps
   the Docker image with version metadata via build args.
