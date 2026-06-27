@@ -1338,6 +1338,10 @@ a.terminal-link:visited {
 .admin {
   min-height: 100vh;
   padding: 24px clamp(16px, 4vw, 40px);
+  /* Flex column so the version footer can be pushed to the bottom of the
+     viewport (margin-top:auto) even when the tab content is short. */
+  display: flex;
+  flex-direction: column;
 }
 /* Baseline link style for any inline anchor inside the admin layout that
    doesn't carry an explicit class. Uses :where() for zero specificity so
@@ -1464,6 +1468,149 @@ a.terminal-link:visited {
 .admin-header-util:hover {
   color: var(--fg);
   border-color: #1b232b;
+}
+
+/* Build-stamp footer pinned at the bottom of the admin dashboard. */
+.admin-footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  /* auto pushes it to the viewport bottom when content is short. */
+  margin-top: auto;
+  padding: 16px 4px 4px;
+  font-size: 11px;
+  color: var(--dim);
+}
+/* Light, text-only stamp — reads as a quiet caption, not a button. */
+.version-chip {
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 4px;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: opacity 120ms, color 120ms;
+}
+.version-chip:hover {
+  opacity: 1;
+  color: var(--fg);
+}
+.version-chip-name {
+  color: var(--fg);
+  font-weight: 500;
+}
+.version-chip-meta {
+  letter-spacing: 0.04em;
+}
+/* Thin middot separators between the segments. */
+.version-chip-meta::before {
+  content: "·";
+  margin: 0 8px;
+  color: #3a4650;
+}
+
+/* Changelog modal (GitHub Releases). */
+.changelog-body {
+  max-height: 60vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.changelog-loading,
+.changelog-error {
+  color: var(--dim);
+  font-size: 13px;
+}
+.changelog-retry {
+  background: transparent;
+  border: 1px solid #1b232b;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  padding: 1px 7px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.changelog-entry {
+  border-bottom: 1px solid #1b232b;
+  padding-bottom: 14px;
+}
+.changelog-entry:last-child {
+  border-bottom: 0;
+}
+.changelog-entry-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.changelog-entry-title a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.changelog-entry-title a:hover {
+  text-decoration: underline;
+}
+.changelog-pre {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--bg);
+  background: var(--accent);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.changelog-date {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--dim);
+}
+.changelog-notes {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--fg);
+  word-break: break-word;
+}
+.changelog-md-h {
+  margin: 12px 0 4px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.changelog-md-h1 { font-size: 13.5px; }
+.changelog-md-h2 { font-size: 13px; }
+.changelog-md-h3,
+.changelog-md-h4,
+.changelog-md-h5,
+.changelog-md-h6 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+.changelog-md-p {
+  margin: 6px 0;
+}
+.changelog-md-list {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+.changelog-md-list li {
+  margin: 2px 0;
+}
+.changelog-notes code {
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.92em;
+}
+.changelog-notes :first-child {
+  margin-top: 0;
 }
 .admin-empty {
   padding: 40px;
