@@ -91,7 +91,7 @@ function ChangelogModal({
 
   return (
     <Modal title="changelog" onClose={onClose}>
-      <div className="changelog-body">
+      <div className="changelog-body terminal-scroll">
         {error && (
           <div className="changelog-error">
             Couldn't load releases ({error}).{' '}

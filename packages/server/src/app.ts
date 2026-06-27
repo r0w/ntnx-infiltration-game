@@ -73,8 +73,8 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
     }),
   );
 
-  // Build-stamped version + repo, read by the admin footer. Public on
-  // purpose: it leaks nothing sensitive and the footer renders pre-login.
+  // Build-stamped version + repo, read by the admin footer. Left public
+  // (no admin auth) on purpose: it leaks nothing sensitive.
   app.get('/api/version', (c) => c.json(getVersionInfo()));
 
   app.get('/api/pack', (c) =>
