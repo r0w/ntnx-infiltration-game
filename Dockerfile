@@ -40,6 +40,16 @@ ENV DATA_DIR=/data
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV PUBLIC_DIR=/app/public
+# Build-stamped version, surfaced at /api/version (admin footer). Passed
+# as --build-arg by the release workflow; defaults keep local builds sane.
+ARG APP_VERSION=dev
+ARG GIT_SHA=
+ARG GIT_BRANCH=
+ARG BUILD_TIME=
+ENV APP_VERSION=$APP_VERSION
+ENV GIT_SHA=$GIT_SHA
+ENV GIT_BRANCH=$GIT_BRANCH
+ENV BUILD_TIME=$BUILD_TIME
 EXPOSE 3000
 VOLUME /data
 CMD ["bun", "run", "dist/server/index.js"]
