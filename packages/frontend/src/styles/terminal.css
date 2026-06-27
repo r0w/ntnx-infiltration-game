@@ -1473,44 +1473,44 @@ a.terminal-link:visited {
 /* Build-stamp footer pinned at the bottom of the admin dashboard. */
 .admin-footer {
   display: flex;
+  justify-content: center;
   align-items: center;
-  gap: 12px;
-  /* auto pushes it to the viewport bottom when content is short; collapses
-     to a normal gap (the padding-top below) when content is tall. */
+  /* auto pushes it to the viewport bottom when content is short. */
   margin-top: auto;
-  padding: 14px 4px 0;
-  border-top: 1px solid #1b232b;
+  padding: 16px 4px 4px;
   font-size: 11px;
   color: var(--dim);
 }
+/* Light, text-only stamp — reads as a quiet caption, not a button. */
 .version-chip {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
   background: transparent;
-  border: 1px solid #1b232b;
+  border: 0;
   color: var(--dim);
   font: inherit;
   font-size: 11px;
-  padding: 3px 9px;
-  border-radius: 3px;
+  padding: 2px 4px;
   cursor: pointer;
-  transition: color 120ms, border-color 120ms;
+  opacity: 0.8;
+  transition: opacity 120ms, color 120ms;
 }
 .version-chip:hover {
+  opacity: 1;
   color: var(--fg);
-  border-color: var(--accent);
 }
 .version-chip-name {
   color: var(--fg);
-  font-weight: 600;
+  font-weight: 500;
 }
 .version-chip-meta {
-  color: var(--dim);
   letter-spacing: 0.04em;
 }
-.admin-footer-built {
-  color: var(--dim);
+/* Thin middot separators between the segments. */
+.version-chip-meta::before {
+  content: "·";
+  margin: 0 8px;
+  color: #3a4650;
 }
 
 /* Changelog modal (GitHub Releases). */
