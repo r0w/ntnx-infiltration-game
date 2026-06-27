@@ -187,13 +187,28 @@ class GameContent(Package):
             variables=["CLUSTERNAME", "CLUSTERUUID"],
         )
 
+        # AD users (stage 13) — sequential, before the parallel block on
+        # purpose: a bad AD credential fails this in ~30 s, before the
+        # destructive node shrink, so it can't leave a half-shrunk cluster
+        # (the old parallel placement did). Username must be UPN
+        # (administrator@ntnxlab.local), not DOMAIN\user — WinRM Basic auth
+        # rejects the NetBIOS form. inherit_target=False or Calm inherits
+        # os_type=Linux and rejects the powershell script.
+        CalmTask.Exec.powershell(
+            name="Add AD users",
+            filename=os.path.join("scripts", "add_ad_users.ps1"),
+            target=ref(Game),
+            target_endpoint=ref(AD),
+            inherit_target=False,
+        )
+
         # ─── Parallel branches ─────────────────────────────────────────
         # The long pole is Branch 1's node-remove (~16-40 min). Branch 2
         # (policy engine) starts in parallel but its first task gates on
         # host-4 leaving the scheduling pool (see Branch 2 below) so the
         # Policy VM is never placed on the node being removed; activation
         # then runs concurrently with the rest of the shrink. The shorter
-        # branches (IAM/AD/LCM) finish well before either. Branch 1 is the
+        # branches (IAM/LCM) finish well before either. Branch 1 is the
         # critical path; the container chain sits at its tail so the deploy
         # is "done" only when the cluster has its final 3-node shape AND the
         # game URL is up. Branch 2's activation almost always finishes before
@@ -396,22 +411,6 @@ class GameContent(Package):
                     name="Create Local users",
                     filename=os.path.join("scripts", "create_local_users.py"),
                     target=ref(Game),
-                )
-
-            # Branch 4 — AD users on the AD endpoint (~30 s). PowerShell
-            # against the AD endpoint creates `thebadguy` +
-            # `theprojectmanager` (stage 13). inherit_target=False is
-            # critical — without it Calm inherits the substrate
-            # os_type=Linux and rejects npsscript with "Linux os cannot
-            # have script type as powershell". target=Game is the
-            # anchor; target_endpoint=AD is where the script runs.
-            with branch(p0):
-                CalmTask.Exec.powershell(
-                    name="Add AD users",
-                    filename=os.path.join("scripts", "add_ad_users.ps1"),
-                    target=ref(Game),
-                    target_endpoint=ref(AD),
-                    inherit_target=False,
                 )
 
 

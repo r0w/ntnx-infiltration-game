@@ -139,7 +139,7 @@
                     {
                         "type": "LOCAL",
                         "name": "AD_USER",
-                        "description": "Please double \\ if needed",
+                        "description": "Use UPN (administrator@ntnxlab.local), not DOMAIN\\user — WinRM Basic auth rejects the NetBIOS form.",
                         "options": {
                             "type": "PREDEFINED",
                             "choices": []
@@ -155,7 +155,7 @@
                         "editables": {
                             "value": true
                         },
-                        "value": "NTNXLAB\\\\administrator"
+                        "value": "administrator@ntnxlab.local"
                     },
                     {
                         "type": "SECRET",
