@@ -59,6 +59,3 @@ tooling/blueprint/scripts/run_container.sh
 CLAUDE.md
 
 data/
-
-# Local-only: contains cluster secrets, never commit
-tooling/blueprint/launch.py

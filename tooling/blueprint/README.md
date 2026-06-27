@@ -17,7 +17,6 @@ that produced this code, see [`docs/`](./docs/).
 | `blueprint.py`     | Calm DSL source - Service / Substrate / Package + 15-task install runbook + 2 day-2 actions. Edit this to change the BP. |
 | `patch_escript.py` | Post-compile passes on the JSON: rewrites banned-import escripts (sandbox), retypes service-bearing CUSTOM packages → DEB, grows boot disk to 40 GiB, strips `metadata.owner_reference` + `metadata.project_reference` (UI-import portable across PCs), normalizes secrets to canonical no-secret shape. Always run via `compile.sh`. |
 | `compile.sh`       | One-liner build: bootstraps `.venv` if missing, regenerates `scripts/push_prereq_bps.sh` (template + base64 .tgz blobs), `calm compile bp`, optional patcher (`PATCH=1`). |
-| `launch.py`        | Headless launch: `/import_file` (multipart, same endpoint Prism UI hits) → activate via PUT → simple_launch with cluster + subnet wired from PC. Run after `PATCH=1 ./compile.sh blueprint.py`. |
 | `monitor.py`       | Tail the install runbook of a launched app - prints task transitions until `done: SUCCESS|FAILURE`. |
 | `seed_ci_cache.py` | Pre-seeds `~/.calm/dsl.db` with stub project/cluster/subnet refs so CI can `calm compile bp` offline. |
 | `scripts/`         | Install-task source files (escripts + sh). All the tasks the install runbook fires. |
@@ -41,20 +40,11 @@ are fast.
 
 ## Launch (headless)
 
-```bash
-PC_ENDPOINT='https://<pc>:9440' \
-PC_USER=admin \
-PC_PASSWORD='<pwd>' \
-CLUSTER_PROFILE=hpoc \
-MODE=test \
-./.venv/bin/python launch.py
-```
-
-`GHCR_TOKEN='<github_pat>'` only needs to be set if the container image is in a private repo (typically not the case for public releases).
-
-The headless path uses the same `/import_file` API endpoint Prism UI's
-upload form hits, so if `launch.py` works, manual UI upload works the
-same way.
+The headless launcher (import + activate + simple_launch over the Calm
+API) is maintainer tooling and lives in the private docs repo
+(`ntnx-infiltration-game-docs/tooling/deploy/`), driven by the
+`deploy-game` skill. It consumes the `blueprint.patched.json` compiled
+here. External operators use the Prism UI path below.
 
 ## Launch (Prism UI)
 
