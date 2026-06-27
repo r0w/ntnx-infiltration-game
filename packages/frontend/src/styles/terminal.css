@@ -1465,6 +1465,114 @@ a.terminal-link:visited {
   color: var(--fg);
   border-color: #1b232b;
 }
+
+/* Build-stamp footer pinned at the bottom of the admin dashboard. */
+.admin-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 28px;
+  padding: 12px 4px 4px;
+  border-top: 1px solid #1b232b;
+  font-size: 11px;
+  color: var(--dim);
+}
+.version-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: 1px solid #1b232b;
+  color: var(--dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 120ms, border-color 120ms;
+}
+.version-chip:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+.version-chip-name {
+  color: var(--fg);
+  font-weight: 600;
+}
+.version-chip-meta {
+  color: var(--dim);
+  letter-spacing: 0.04em;
+}
+.admin-footer-built {
+  color: var(--dim);
+}
+
+/* Changelog modal (GitHub Releases). */
+.changelog-body {
+  max-height: 60vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.changelog-loading,
+.changelog-error {
+  color: var(--dim);
+  font-size: 13px;
+}
+.changelog-retry {
+  background: transparent;
+  border: 1px solid #1b232b;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  padding: 1px 7px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.changelog-entry {
+  border-bottom: 1px solid #1b232b;
+  padding-bottom: 14px;
+}
+.changelog-entry:last-child {
+  border-bottom: 0;
+}
+.changelog-entry-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.changelog-entry-title a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.changelog-entry-title a:hover {
+  text-decoration: underline;
+}
+.changelog-pre {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--bg);
+  background: var(--accent);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.changelog-date {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--dim);
+}
+.changelog-notes {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg);
+}
 .admin-empty {
   padding: 40px;
   text-align: center;

@@ -44,6 +44,9 @@ jobs:
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
       is_release: ${{ steps.resolve.outputs.is_release }}
+      app_version: ${{ steps.resolve.outputs.app_version }}
+      branch: ${{ steps.resolve.outputs.branch }}
+      build_time: ${{ steps.resolve.outputs.build_time }}
     steps:
       - uses: actions/checkout@v6
 
@@ -71,20 +74,29 @@ jobs:
             TAG="develop"
             IS_RELEASE=false
           fi
+          SHA_SHORT="${GITHUB_SHA::7}"
           if [[ "${IS_RELEASE}" == "true" ]]; then
             DOCKER_TAGS=$(printf '%s\n%s' "${IMG}:${TAG}" "${IMG}:latest")
+            # Releases are cut from main per our merge convention.
+            APP_VERSION="${TAG}"
+            BRANCH="main"
           else
-            SHA_SHORT="${GITHUB_SHA::7}"
             DOCKER_TAGS=$(printf '%s\n%s' "${IMG}:develop" "${IMG}:develop-${SHA_SHORT}")
+            APP_VERSION="develop-${SHA_SHORT}"
+            BRANCH="develop"
           fi
+          BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           {
             echo "tag=${TAG}"
             echo "is_release=${IS_RELEASE}"
+            echo "app_version=${APP_VERSION}"
+            echo "branch=${BRANCH}"
+            echo "build_time=${BUILD_TIME}"
             echo "docker_tags<<EOF_DT"
             echo "${DOCKER_TAGS}"
             echo "EOF_DT"
           } >> "$GITHUB_OUTPUT"
-          echo "Tag=${TAG}, is_release=${IS_RELEASE}"
+          echo "Tag=${TAG}, is_release=${IS_RELEASE}, app_version=${APP_VERSION}"
           echo "Docker tags:"
           echo "${DOCKER_TAGS}"
 
@@ -104,6 +116,11 @@ jobs:
           context: .
           push: true
           tags: ${{ steps.resolve.outputs.docker_tags }}
+          build-args: |
+            APP_VERSION=${{ steps.resolve.outputs.app_version }}
+            GIT_SHA=${{ github.sha }}
+            GIT_BRANCH=${{ steps.resolve.outputs.branch }}
+            BUILD_TIME=${{ steps.resolve.outputs.build_time }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -300,19 +317,37 @@ jobs:
           # if absent. `gh release view` exits non-zero when the release
           # doesn't exist yet — that's the trigger to create it.
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            # Bound the auto-generated notes to the previous existing tag
-            # when it's resolvable. On workflow_dispatch the release tag is
-            # often not a git ref yet, so `$TAG^` doesn't resolve — falling
-            # back to "$TAG" itself produced a self-referential, nonexistent
-            # previous_tag that GitHub rejects (HTTP 400 Invalid previous_tag).
-            # When no previous tag resolves, drop the flag entirely and let
-            # --generate-notes auto-pick the prior published release.
-            PREV_TAG="$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)"
-            if [[ -n "$PREV_TAG" ]]; then
-              gh release create "$TAG" --generate-notes --title "$TAG" \
-                --notes-start-tag "$PREV_TAG"
+            # Prefer the hand-written CHANGELOG section for this version as
+            # the release body — that's the curated Added/Changed/Fixed list
+            # the admin footer surfaces. The CHANGELOG header drops the `v`
+            # prefix (## [0.2.0]), so strip it from the tag to match.
+            VER="${TAG#v}"
+            NOTES_FILE="$(mktemp)"
+            awk -v ver="$VER" '
+              $0 ~ ("^## \\[" ver "\\]") { grab=1; next }
+              grab && /^## \[/ { exit }
+              grab { print }
+            ' CHANGELOG.md > "$NOTES_FILE" || true
+
+            if [[ -s "$NOTES_FILE" ]]; then
+              echo "Using CHANGELOG.md section for ${VER} as release notes."
+              gh release create "$TAG" --title "$TAG" --notes-file "$NOTES_FILE"
             else
-              gh release create "$TAG" --generate-notes --title "$TAG"
+              # No CHANGELOG entry: fall back to auto-generated notes, bounded
+              # to the previous existing tag when it's resolvable. On
+              # workflow_dispatch the release tag is often not a git ref yet,
+              # so `$TAG^` doesn't resolve — falling back to "$TAG" itself
+              # produced a self-referential previous_tag that GitHub rejects
+              # (HTTP 400 Invalid previous_tag). When none resolves, drop the
+              # flag and let --generate-notes pick the prior published release.
+              echo "No CHANGELOG.md section for ${VER}; using auto-generated notes."
+              PREV_TAG="$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)"
+              if [[ -n "$PREV_TAG" ]]; then
+                gh release create "$TAG" --generate-notes --title "$TAG" \
+                  --notes-start-tag "$PREV_TAG"
+              else
+                gh release create "$TAG" --generate-notes --title "$TAG"
+              fi
             fi
           fi
 
