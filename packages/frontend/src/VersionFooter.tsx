@@ -70,23 +70,30 @@ function ChangelogModal({
   const [releases, setReleases] = useState<GithubRelease[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setError(null);
-    setReleases(null);
-    try {
-      const res = await fetch(
-        `https://api.github.com/repos/${info.repo}/releases?per_page=20`,
-        { headers: { Accept: 'application/vnd.github+json' } },
-      );
-      if (!res.ok) throw new Error(`GitHub API ${res.status}`);
-      setReleases((await res.json()) as GithubRelease[]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, [info.repo]);
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      setError(null);
+      setReleases(null);
+      try {
+        const res = await fetch(
+          `https://api.github.com/repos/${info.repo}/releases?per_page=20`,
+          { headers: { Accept: 'application/vnd.github+json' }, signal },
+        );
+        if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+        setReleases((await res.json()) as GithubRelease[]);
+      } catch (err) {
+        // Aborted on unmount — drop silently, the component is gone.
+        if (err instanceof Error && err.name === 'AbortError') return;
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [info.repo],
+  );
 
   useEffect(() => {
-    void load();
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
   }, [load]);
 
   return (
@@ -142,6 +149,13 @@ function ChangelogModal({
 // auto-generated fallback) only use headings, bullet lists, bold, inline code
 // and links — so a tiny hand-rolled parser beats pulling a markdown lib +
 // sanitizer, and renders real React nodes (no dangerouslySetInnerHTML).
+// Only allow benign protocols in rendered links — release bodies can carry a
+// contributor-supplied PR title, so a `[x](javascript:…)` would otherwise be a
+// clickable XSS in the admin session. Unsafe URLs render as plain text.
+function safeHref(url: string): string | undefined {
+  return /^(https?:|mailto:|\/|#)/i.test(url.trim()) ? url : undefined;
+}
+
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   // Order matters: markdown links are consumed whole before the bare-URL
@@ -154,10 +168,16 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) nodes.push(text.slice(last, m.index));
     if (m[1] !== undefined) {
+      const href = safeHref(m[2]);
       nodes.push(
-        <a key={`${keyPrefix}-a${i}`} href={m[2]} target="_blank" rel="noreferrer">
-          {m[1]}
-        </a>,
+        href ? (
+          <a key={`${keyPrefix}-a${i}`} href={href} target="_blank" rel="noreferrer">
+            {m[1]}
+          </a>
+        ) : (
+          // Unsafe protocol: render the link text only, no anchor.
+          <span key={`${keyPrefix}-a${i}`}>{m[1]}</span>
+        ),
       );
     } else if (m[3] !== undefined) {
       nodes.push(<strong key={`${keyPrefix}-b${i}`}>{m[3]}</strong>);
