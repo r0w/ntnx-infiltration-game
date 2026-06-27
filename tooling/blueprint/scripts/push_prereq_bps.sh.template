@@ -159,7 +159,7 @@ push_bp NewblankVM BlankVM-source
 #    so it must NOT abort the rest of the deploy.
 echo "[push_prereq_bps] patching CloneProd pcUser credential..."
 PC_IP="$PC_IP" PC_USER="$PC_USER" PC_PWD="$PC_PWD" python3 - <<'PY' || true
-import base64, json, os, ssl, sys, urllib.request
+import base64, json, os, ssl, sys, urllib.error, urllib.request
 
 PC_IP, PC_USER, PC_PWD = os.environ["PC_IP"], os.environ["PC_USER"], os.environ["PC_PWD"]
 BASE = f"https://{PC_IP}:9440"
@@ -173,8 +173,18 @@ def call(method, path, body=None):
     req = urllib.request.Request(BASE + path, data=data, method=method)
     req.add_header("Authorization", AUTH)
     req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req, context=CTX, timeout=60) as r:
-        return json.loads(r.read().decode())
+    try:
+        with urllib.request.urlopen(req, context=CTX, timeout=60) as r:
+            res = r.read().decode()
+            return json.loads(res) if res else None
+    except urllib.error.HTTPError as e:
+        # Surface the Nutanix error body — a bare "HTTP 400" hides the actual
+        # validation message and makes a failed deploy patch undebuggable.
+        try:
+            err = e.read().decode()
+        except Exception:
+            err = ""
+        raise RuntimeError(f"HTTP {e.code} {method} {path}: {err[:300]}") from e
 
 try:
     lst = call("POST", "/api/nutanix/v3/blueprints/list",
