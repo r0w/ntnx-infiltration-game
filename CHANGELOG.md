@@ -29,6 +29,20 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 - Release workflow now uses the matching `CHANGELOG.md` section as the GitHub
   Release notes when present (falling back to auto-generated notes), and stamps
   the Docker image with version metadata via build args.
+- Moved the headless launcher out of `tooling/blueprint/` into the maintainer's
+  private deploy kit. External operators continue to use the Prism UI flow in
+  `OPERATOR.md`; the public docs now point there for headless launches.
+- Install runbook now runs `Add AD users` as a sequential fail-fast gate right
+  after `Get Cluster`, before the parallel block. An AD failure can no longer
+  abort the install after the destructive node shrink has started, so the
+  cluster is never left half-shrunk; the operator just re-launches.
+
+### Fixed
+
+- AD endpoint username now defaults to UPN (`administrator@ntnxlab.local`)
+  instead of `NTNXLAB\administrator`. The endpoint dials WinRM Basic auth, which
+  rejects the NetBIOS `DOMAIN\user` form, so `Add AD users` failed with a
+  misleading "Authentication by password failed" even with valid credentials.
 
 ## [0.2.0]
 
