@@ -20,6 +20,7 @@ Calm injects @@{PC_IP}@@, @@{PC_USERNAME}@@, @@{PC_PASSWORD}@@,
 
 import json
 import sys
+import time
 import urllib3
 import uuid
 
@@ -37,11 +38,35 @@ AUTH = (PC_USERNAME, PC_PASSWORD)
 HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
 
+def _retry(_fn, *args, **kwargs):
+    """Retry a requests verb on transient transport errors + 5xx. Idempotent
+    calls only (reads) — the mutations here (rename PUT with If-Match, migrate /
+    create POST) stay single-shot since a retried-after-timeout write would
+    clash on the etag or duplicate. Mirrors create_prod_vms.py (issue #28)."""
+    attempts = kwargs.pop("_attempts", 5)
+    backoff = kwargs.pop("_backoff", 3)
+    last = "no attempt made"
+    for i in range(attempts):
+        try:
+            r = _fn(*args, **kwargs)
+        except requests.RequestException as e:
+            last = "network error: %s" % str(e)[:200]
+        else:
+            if r.status_code < 500:
+                return r
+            last = "%d %s" % (r.status_code, r.text[:200])
+        if i < attempts - 1:
+            print("  [retry %d/%d] %s" % (i + 1, attempts, last))
+            time.sleep(backoff)
+    raise Exception("request failed after %d attempts: %s" % (attempts, last))
+
+
 def list_subnets():
     page = 0
     out = []
     while True:
-        r = requests.get(
+        r = _retry(
+            requests.get,
             "%s/api/networking/v4.0/config/subnets?$page=%d&$limit=100" % (BASE, page),
             auth=AUTH, headers=HEADERS, verify=False, timeout=20,
         )
@@ -57,7 +82,8 @@ def list_subnets():
 
 
 def get_subnet_by_id(ext_id):
-    r = requests.get(
+    r = _retry(
+        requests.get,
         "%s/api/networking/v4.0/config/subnets/%s" % (BASE, ext_id),
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
     )

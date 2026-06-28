@@ -1,6 +1,7 @@
 #script
 
 import sys
+import time
 import requests
 
 pc_ip = '@@{PC_IP}@@'
@@ -12,9 +13,33 @@ headers = {
     "Content-Type": "application/json",
 }
 
+
+def _retry(_fn, *args, **kwargs):
+    """Retry a requests verb on transient transport errors + 5xx. This is the
+    FIRST install task and a single blip here (a ReadTimeout, à la issue #28)
+    would otherwise kill the whole deploy before CLUSTERUUID is even set."""
+    attempts = kwargs.pop("_attempts", 5)
+    backoff = kwargs.pop("_backoff", 3)
+    last = "no attempt made"
+    for i in range(attempts):
+        try:
+            r = _fn(*args, **kwargs)
+        except requests.RequestException as e:
+            last = "network error: %s" % str(e)[:200]
+        else:
+            if r.status_code < 500:
+                return r
+            last = "%d %s" % (r.status_code, r.text[:200])
+        if i < attempts - 1:
+            print("  [retry %d/%d] %s" % (i + 1, attempts, last))
+            time.sleep(backoff)
+    raise Exception("request failed after %d attempts: %s" % (attempts, last))
+
+
 url = "https://%s:9440/api/clustermgmt/v4.0/config/clusters" % pc_ip
 
-response = requests.get(url, headers=headers, verify=False, auth=(pc_user, pc_pwd))
+response = _retry(requests.get, url, headers=headers, verify=False,
+                  auth=(pc_user, pc_pwd), timeout=30)
 
 # Explicit auth / HTTP error handling — a wrong PC password otherwise blew up
 # downstream as a bare `KeyError: 'data'` (the 401 body has no 'data' key),

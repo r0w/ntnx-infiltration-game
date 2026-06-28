@@ -15,6 +15,7 @@ Calm injects @@{PC_IP}@@, @@{PC_USERNAME}@@, @@{PC_PASSWORD}@@.
 
 import json
 import sys
+import time
 import urllib3
 
 import requests
@@ -28,6 +29,28 @@ PC_PASSWORD = '@@{PC_PASSWORD}@@'
 BASE = "https://%s:9440" % PC_IP
 AUTH = (PC_USERNAME, PC_PASSWORD)
 HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
+
+
+def _retry(_fn, *args, **kwargs):
+    """Retry a requests verb on transient transport errors + 5xx. Idempotent
+    calls only (the user list) — the per-user create POST stays single-shot.
+    Mirrors create_prod_vms.py / setup_production_project.py (issue #28)."""
+    attempts = kwargs.pop("_attempts", 5)
+    backoff = kwargs.pop("_backoff", 3)
+    last = "no attempt made"
+    for i in range(attempts):
+        try:
+            r = _fn(*args, **kwargs)
+        except requests.RequestException as e:
+            last = "network error: %s" % str(e)[:200]
+        else:
+            if r.status_code < 500:
+                return r
+            last = "%d %s" % (r.status_code, r.text[:200])
+        if i < attempts - 1:
+            print("  [retry %d/%d] %s" % (i + 1, attempts, last))
+            time.sleep(backoff)
+    raise Exception("request failed after %d attempts: %s" % (attempts, last))
 
 USERS = [
     {
@@ -61,7 +84,8 @@ def list_existing_usernames():
     seen = set()
     page = 0
     while True:
-        r = requests.get(
+        r = _retry(
+            requests.get,
             "%s/api/iam/v4.0/authn/users?$page=%d&$limit=100" % (BASE, page),
             auth=AUTH, headers=HEADERS, verify=False, timeout=20,
         )

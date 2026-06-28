@@ -17,6 +17,7 @@ Calm injects @@{PC_IP}@@, @@{PC_USERNAME}@@, @@{PC_PASSWORD}@@,
 
 import json
 import sys
+import time
 import urllib3
 import uuid
 
@@ -40,9 +41,32 @@ AUTH = (PC_USERNAME, PC_PASSWORD)
 HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
 
+def _retry(_fn, *args, **kwargs):
+    """Retry a requests verb on transient transport errors + 5xx. Idempotent
+    calls only (the endpoint list + the stale-endpoint delete) — the endpoint
+    create POST stays single-shot. Mirrors create_prod_vms.py (issue #28)."""
+    attempts = kwargs.pop("_attempts", 5)
+    backoff = kwargs.pop("_backoff", 3)
+    last = "no attempt made"
+    for i in range(attempts):
+        try:
+            r = _fn(*args, **kwargs)
+        except requests.RequestException as e:
+            last = "network error: %s" % str(e)[:200]
+        else:
+            if r.status_code < 500:
+                return r
+            last = "%d %s" % (r.status_code, r.text[:200])
+        if i < attempts - 1:
+            print("  [retry %d/%d] %s" % (i + 1, attempts, last))
+            time.sleep(backoff)
+    raise Exception("request failed after %d attempts: %s" % (attempts, last))
+
+
 def find_existing_endpoint():
     """Returns the uuid of `jumphost` if present, else None."""
-    r = requests.post(
+    r = _retry(
+        requests.post,
         "%s/api/nutanix/v3/endpoints/list" % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
         data=json.dumps({"kind": "endpoint", "filter": "name==%s" % ENDPOINT_NAME}),
@@ -63,7 +87,8 @@ def main():
     # Calm's hardcoded `python_remote` venv path on the target.
     stale = find_existing_endpoint()
     if stale:
-        d = requests.delete(
+        d = _retry(
+            requests.delete,
             "%s/api/nutanix/v3/endpoints/%s" % (BASE, stale),
             auth=AUTH, headers=HEADERS, verify=False, timeout=30,
         )
