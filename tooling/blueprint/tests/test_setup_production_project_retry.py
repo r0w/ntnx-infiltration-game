@@ -173,6 +173,22 @@ def test_create_project_adopts_on_duplicate_name():
     assert ns["create_project"]("acc", "pri", "sec") == "proj-9"
 
 
+def test_create_project_recreates_after_error_state_dupe():
+    # Duplicate rejection, but find_existing_project found an ERROR-state project,
+    # deleted it, and returned None (empty list). The loop must recreate rather
+    # than raise (Gemini review). post: create#1 dup -> list(empty) -> create#2 ok.
+    dup = FakeResp(400, text='{"reason":"DUPLICATE_ENTITY"}')
+    empty_list = FakeResp(200, {"entities": []})
+    ok = FakeResp(202, {"status": {"execution_context": {"task_uuid": "t2"}}})
+    fake = FakeRequests(
+        post=[dup, empty_list, ok],
+        get=[FakeResp(200, {"status": "SUCCEEDED",
+                            "entity_reference_list": [{"uuid": "proj-fresh"}]})],
+    )
+    ns = _load(fake)
+    assert ns["create_project"]("acc", "pri", "sec") == "proj-fresh"
+
+
 def test_create_project_raises_on_genuine_failure():
     # A 400 that isn't a duplicate and isn't a subnet-lag 404 is fatal.
     fake = FakeRequests(post=[FakeResp(400, text="malformed body")])

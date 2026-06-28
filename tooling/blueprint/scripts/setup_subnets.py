@@ -39,10 +39,8 @@ HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
 
 def _retry(_fn, *args, **kwargs):
-    """Retry a requests verb on transient transport errors + 5xx. Idempotent
-    calls only (reads) — the mutations here (rename PUT with If-Match, migrate /
-    create POST) stay single-shot since a retried-after-timeout write would
-    clash on the etag or duplicate. Mirrors create_prod_vms.py (issue #28)."""
+    """Retry on transient transport errors + 5xx (issue #28). Reads only — the
+    rename/migrate/create writes stay single-shot (etag clash / duplicate risk)."""
     attempts = kwargs.pop("_attempts", 5)
     backoff = kwargs.pop("_backoff", 3)
     last = "no attempt made"

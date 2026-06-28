@@ -42,9 +42,8 @@ HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
 
 def _retry(_fn, *args, **kwargs):
-    """Retry a requests verb on transient transport errors + 5xx. Idempotent
-    calls only (the endpoint list + the stale-endpoint delete) — the endpoint
-    create POST stays single-shot. Mirrors create_prod_vms.py (issue #28)."""
+    """Retry on transient transport errors + 5xx (issue #28). Idempotent calls
+    only (list + stale-delete); the endpoint create stays single-shot."""
     attempts = kwargs.pop("_attempts", 5)
     backoff = kwargs.pop("_backoff", 3)
     last = "no attempt made"

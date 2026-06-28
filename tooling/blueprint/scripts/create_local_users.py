@@ -32,9 +32,8 @@ HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
 
 def _retry(_fn, *args, **kwargs):
-    """Retry a requests verb on transient transport errors + 5xx. Idempotent
-    calls only (the user list) — the per-user create POST stays single-shot.
-    Mirrors create_prod_vms.py / setup_production_project.py (issue #28)."""
+    """Retry on transient transport errors + 5xx (issue #28). User list only;
+    the per-user create stays single-shot."""
     attempts = kwargs.pop("_attempts", 5)
     backoff = kwargs.pop("_backoff", 3)
     last = "no attempt made"

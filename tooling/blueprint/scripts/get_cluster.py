@@ -15,9 +15,8 @@ headers = {
 
 
 def _retry(_fn, *args, **kwargs):
-    """Retry a requests verb on transient transport errors + 5xx. This is the
-    FIRST install task and a single blip here (a ReadTimeout, à la issue #28)
-    would otherwise kill the whole deploy before CLUSTERUUID is even set."""
+    """Retry on transient transport errors + 5xx. First install task: a single
+    blip here would kill the deploy before CLUSTERUUID is set (issue #28)."""
     attempts = kwargs.pop("_attempts", 5)
     backoff = kwargs.pop("_backoff", 3)
     last = "no attempt made"
