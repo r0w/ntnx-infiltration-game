@@ -21,6 +21,7 @@ import {
   getTrigram,
   getV4WithEtag,
   getVarString,
+  isSecondarySubnet,
   listAllSdk,
   listAllV3,
   listAllV4Rest,
@@ -216,39 +217,224 @@ async function actCreateProject(ctx: ActContext): Promise<void> {
       'actCreateProject: no nutanix_pc account on PC, project will be created without an infrastructure binding (CheckProject will fail)',
     );
   }
-  // Secondary subnet binding mirrors what the stage prompt asks the
-  // player to pick (`Use the VLAN named secondary`). Best-effort:
-  // if missing, project still creates but with empty subnet list.
+  // Subnet binding mirrors the stage prompt (`Use the VLAN named secondary`).
   const subnets = await listAllSdk<AnyRec>(($p) => sdk(ctx).networking.subnets.listSubnets($p));
-  const secondary = subnets.find((s) => /^secondary$/i.test(s.name ?? ''));
-  // The prompt asks for "user TheProjectManager as Project Admin". Add it as a
-  // project member so the create-vm Manage Ownership step can set owner=
-  // theprojectmanager (impossible if the user isn't in the project).
+  const secondary = subnets.find((s) => isSecondarySubnet(s.name));
+  const primary = subnets.find((s) => /^primary(-|$)/i.test(s.name ?? ''));
   const pmUuid = await ensureUserUuid(ctx, 'theprojectmanager', 'Paul', 'Project Manager');
   if (!pmUuid) {
     ctx.logger.warn('actCreateProject: theprojectmanager user not found, project created without it');
   }
+  // Create the project WITHOUT a user_reference_list. Putting an LDAP user
+  // uuid straight into the plain `/projects` POST makes PC reject it with
+  // "Users/User groups [<uuid>] not found" and the project lands in ERROR
+  // (live-confirmed on DM3-POC013). The member is added afterwards via
+  // `/projects_internal` (see addProjectAdmin) — the only call that actually
+  // registers an LDAP user as a project member on PC 7.x.
   await ctx.nutanix.rest.request('POST', '/api/nutanix/v3/projects', {
     spec: {
       name,
       resources: {
-        cluster_reference_list: clusterUuid
-          ? [{ kind: 'cluster', uuid: clusterUuid }]
-          : [],
+        cluster_reference_list: clusterUuid ? [{ kind: 'cluster', uuid: clusterUuid }] : [],
         account_reference_list: account?.metadata?.uuid
           ? [{ kind: 'account', uuid: account.metadata.uuid }]
           : [],
         subnet_reference_list: secondary?.extId
           ? [{ kind: 'subnet', name: secondary.name, uuid: secondary.extId }]
           : [],
-        user_reference_list: pmUuid
-          ? [{ kind: 'user', name: 'theprojectmanager', uuid: pmUuid }]
-          : [],
       },
     },
     metadata: { kind: 'project', name },
     api_version: '3.1',
   });
+  // Add theprojectmanager as Project Admin so create-vm's Manage Ownership
+  // step can set owner=theprojectmanager (impossible if the user isn't a
+  // project member). Idempotent: skipped if already a member.
+  if (pmUuid) {
+    await addProjectAdmin(ctx, name, pmUuid, {
+      clusterUuid,
+      accountUuid: account?.metadata?.uuid,
+      primary: primary ? { name: primary.name, uuid: primary.extId } : undefined,
+      secondary: secondary ? { name: secondary.name, uuid: secondary.extId } : undefined,
+    });
+  }
+}
+
+/** The 3-context Project Admin ACP filter list — ported verbatim from the
+ *  blueprint's setup_production_project.build_acp_filters (the proven recipe). */
+function projectAdminAcpFilters(projectUuid: string, clusterUuid?: string): AnyRec {
+  const ent = (entity_type: string, collection: string): AnyRec => ({
+    operator: 'IN',
+    left_hand_side: { entity_type },
+    right_hand_side: { collection },
+  });
+  return {
+    context_list: [
+      {
+        scope_filter_expression_list: [
+          { operator: 'IN', left_hand_side: 'PROJECT', right_hand_side: { uuid_list: [projectUuid] } },
+        ],
+        entity_filter_expression_list: [
+          { operator: 'IN', left_hand_side: { entity_type: 'ALL' }, right_hand_side: { collection: 'ALL' } },
+        ],
+      },
+      {
+        entity_filter_expression_list: [
+          ent('image', 'ALL'),
+          ent('marketplace_item', 'SELF_OWNED'),
+          ent('directory_service', 'ALL'),
+          ent('role', 'ALL'),
+          { operator: 'IN', left_hand_side: { entity_type: 'project' }, right_hand_side: { uuid_list: [projectUuid] } },
+          ent('environment', 'SELF_OWNED'),
+          ent('app_icon', 'ALL'),
+          ent('category', 'ALL'),
+          ent('app_task', 'SELF_OWNED'),
+          ent('app_variable', 'SELF_OWNED'),
+          ent('identity_provider', 'ALL'),
+          ent('vm_recovery_point', 'ALL'),
+          ent('report_config', 'SELF_OWNED'),
+          ent('virtual_network', 'ALL'),
+          ent('resource_type', 'ALL'),
+          ent('custom_provider', 'ALL'),
+          ent('distributed_virtual_switch', 'ALL'),
+          ent('container', 'ALL'),
+          {
+            operator: 'IN',
+            left_hand_side: { entity_type: 'cluster' },
+            right_hand_side: clusterUuid ? { uuid_list: [clusterUuid] } : { collection: 'ALL' },
+          },
+        ],
+      },
+      {
+        scope_filter_expression_list: [
+          { operator: 'IN', left_hand_side: 'PROJECT', right_hand_side: { uuid_list: [projectUuid] } },
+        ],
+        entity_filter_expression_list: [
+          ent('blueprint', 'ALL'),
+          ent('environment', 'ALL'),
+          ent('marketplace_item', 'ALL'),
+          ent('runbook', 'ALL'),
+          ent('vm', 'ALL'),
+          ent('user', 'ALL'),
+          ent('user_group', 'ALL'),
+          ent('app_showback', 'ALL'),
+        ],
+      },
+    ],
+  };
+}
+
+/** Register an LDAP user as a project's Project Admin via the only call that
+ *  works on PC 7.x: PUT /projects_internal with a `user_list` ADD carrying the
+ *  user's directory_service_user + a Project Admin ACP. Mirrors the blueprint's
+ *  setup_production_project.add_user_as_project_admin. Idempotent. */
+async function addProjectAdmin(
+  ctx: ActContext,
+  projectName: string,
+  pmUuid: string,
+  refs: {
+    clusterUuid?: string;
+    accountUuid?: string;
+    primary?: { name?: string; uuid?: string };
+    secondary?: { name?: string; uuid?: string };
+  },
+): Promise<void> {
+  // Resolve the project + its current members/spec_version. listAllV3
+  // paginates (a bare {length:N} silently misses entities past N).
+  const projects = await listAllV3<AnyRec>(ctx, '/api/nutanix/v3/projects/list');
+  const proj = projects.find(
+    (p) => p.spec?.name === projectName || p.status?.name === projectName,
+  );
+  if (!proj?.metadata?.uuid) {
+    ctx.logger.warn('addProjectAdmin: project not found after create', { projectName });
+    return;
+  }
+  const projectUuid = proj.metadata.uuid as string;
+  const members =
+    (proj.status?.resources?.user_reference_list as AnyRec[] | undefined) ??
+    (proj.spec?.resources?.user_reference_list as AnyRec[] | undefined) ??
+    [];
+  if (members.some((u) => u?.uuid === pmUuid)) {
+    ctx.logger.info('act noop: theprojectmanager already a member of project', { projectName });
+    return;
+  }
+  // Directory service + Project Admin role are required by the payload.
+  const dirs = await ctx.nutanix.rest.request<{ data?: Array<{ extId?: string }> }>(
+    'GET',
+    '/api/iam/v4.0/authn/directory-services',
+  );
+  const directoryId = dirs?.data?.[0]?.extId;
+  const roles = await listAllV3<AnyRec>(ctx, '/api/nutanix/v3/roles/list');
+  const roleUuid = roles.find((r) => r.status?.name === 'Project Admin')?.metadata?.uuid;
+  if (!directoryId || !roleUuid) {
+    ctx.logger.warn('addProjectAdmin: missing directory service or Project Admin role; skipping', {
+      directoryId: !!directoryId,
+      roleUuid: !!roleUuid,
+    });
+    return;
+  }
+  const subnetRefs: AnyRec[] = [];
+  if (refs.secondary?.uuid)
+    subnetRefs.push({ kind: 'subnet', name: refs.secondary.name ?? 'secondary', uuid: refs.secondary.uuid });
+  if (refs.primary?.uuid)
+    subnetRefs.push({ kind: 'subnet', name: refs.primary.name ?? 'primary', uuid: refs.primary.uuid });
+  const payload = {
+    api_version: '3.1',
+    metadata: {
+      project_reference: { kind: 'project', name: projectName, uuid: projectUuid },
+      spec_version: proj.metadata.spec_version ?? 0,
+      kind: 'project',
+      uuid: projectUuid,
+    },
+    spec: {
+      project_detail: {
+        name: projectName,
+        resources: {
+          account_reference_list: refs.accountUuid ? [{ kind: 'account', uuid: refs.accountUuid }] : [],
+          user_reference_list: [{ name: 'theprojectmanager', kind: 'user', uuid: pmUuid }],
+          ...(refs.primary?.uuid ? { default_subnet_reference: { kind: 'subnet', uuid: refs.primary.uuid } } : {}),
+          subnet_reference_list: subnetRefs,
+          cluster_reference_list: refs.clusterUuid ? [{ kind: 'cluster', uuid: refs.clusterUuid }] : [],
+          enable_directory_and_identity_provider_shortlist: false,
+        },
+      },
+      user_list: [
+        {
+          metadata: { kind: 'user', uuid: pmUuid },
+          user: {
+            resources: {
+              directory_service_user: {
+                user_principal_name: 'theprojectmanager',
+                directory_service_reference: { uuid: directoryId, kind: 'directory_service' },
+              },
+            },
+          },
+          operation: 'ADD',
+        },
+      ],
+      access_control_policy_list: [
+        {
+          acp: {
+            name: `nuCalmAcp-${crypto.randomUUID()}`,
+            resources: {
+              role_reference: { name: 'Project Admin', uuid: roleUuid, kind: 'role' },
+              user_reference_list: [{ name: 'theprojectmanager', kind: 'user', uuid: pmUuid }],
+              filter_list: projectAdminAcpFilters(projectUuid, refs.clusterUuid),
+            },
+            description: '',
+          },
+          metadata: { kind: 'access_control_policy' },
+          operation: 'ADD',
+        },
+      ],
+    },
+  };
+  try {
+    await ctx.nutanix.rest.request('PUT', `/api/nutanix/v3/projects_internal/${projectUuid}`, payload);
+    ctx.logger.info('addProjectAdmin: theprojectmanager added as Project Admin', { projectName });
+  } catch (err) {
+    ctx.logger.warn('addProjectAdmin: projects_internal PUT failed', { err: String(err).slice(0, 200) });
+  }
 }
 
 /** Stage 10 create-subnet: creates `{Trigram}-subnet` on VLAN `{Vlanid}` with
@@ -420,10 +606,10 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
   const name = `${trigram}-vm`;
   const subnets = await listAllSdk<AnyRec>(($p) => sdk(ctx).networking.subnets.listSubnets($p));
   const subnet = subnets.find((s) => s.name === `${trigram}-subnet`);
-  // `secondary` is the literal subnet name used in the stage prompt, the
-  // same name the player is asked to pick. Match case-insensitively to
-  // tolerate clusters that name it `Secondary`.
-  const secondary = subnets.find((s) => /^secondary$/i.test(s.name ?? ''));
+  // The routable subnet the stage prompt calls `secondary`. Match the bare
+  // name AND the `secondary-<cluster>` form HPoCs ship (see isSecondarySubnet)
+  // — a strict match here left this VM with 1 NIC on those clusters.
+  const secondary = subnets.find((s) => isSecondarySubnet(s.name));
   if (!secondary) {
     ctx.logger.warn(
       `actCreateVm: 'secondary' subnet missing on cluster, VM will be created with 1 NIC and CheckVM (NIC-count) will fail`,
@@ -575,22 +761,27 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
   const pmUuid = await ensureUserUuid(ctx, 'theprojectmanager', 'Paul', 'Project Manager');
   const lookup = (await listAllSdk<AnyRec>(($p) => sdk(ctx).vmm.vms.listVms($p))).find((v) => v.name === name);
   if (lookup?.extId && (projUuid || pmUuid)) {
-    try {
-      const v3vm = await ctx.nutanix.rest.request<AnyRec>(
-        'GET',
-        `/api/nutanix/v3/vms/${lookup.extId}`,
-      );
-      const meta = (v3vm?.metadata as AnyRec) ?? {};
-      let changed = false;
-      if (projUuid && meta.project_reference?.uuid !== projUuid) {
-        meta.project_reference = { kind: 'project', uuid: projUuid };
-        changed = true;
-      }
-      if (pmUuid && meta.owner_reference?.uuid !== pmUuid) {
-        meta.owner_reference = { kind: 'user', name: 'theprojectmanager', uuid: pmUuid };
-        changed = true;
-      }
-      if (changed) {
+    // Retry the GET-modify-PUT on 409: right after create-project registers
+    // theprojectmanager, the VM's IDF entry is still settling and the first
+    // owner PUT often 409s ("Edit conflict / CONCURRENT_REQUESTS"). Re-GET for
+    // a fresh spec_version each attempt (v3 enforces optimistic concurrency).
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const v3vm = await ctx.nutanix.rest.request<AnyRec>(
+          'GET',
+          `/api/nutanix/v3/vms/${lookup.extId}`,
+        );
+        const meta = (v3vm?.metadata as AnyRec) ?? {};
+        let changed = false;
+        if (projUuid && meta.project_reference?.uuid !== projUuid) {
+          meta.project_reference = { kind: 'project', uuid: projUuid };
+          changed = true;
+        }
+        if (pmUuid && meta.owner_reference?.uuid !== pmUuid) {
+          meta.owner_reference = { kind: 'user', name: 'theprojectmanager', uuid: pmUuid };
+          changed = true;
+        }
+        if (!changed) break;
         // v3 PUT echoes the GET body but rejects `status` (server-controlled
         // view, re-sending triggers 422). Strip before PUT.
         const { status: _drop, ...putBody } = v3vm as AnyRec;
@@ -599,11 +790,18 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
           metadata: meta,
         });
         ctx.logger.info('actCreateVm: ownership assigned', { vm: name, project: projUuid, owner: pmUuid });
+        break;
+      } catch (err) {
+        const msg = String(err);
+        if (/409|conflict|CONCURRENT/i.test(msg) && attempt < 4) {
+          await new Promise((r) => setTimeout(r, 3000));
+          continue; // edit conflict — re-GET and retry
+        }
+        ctx.logger.warn('actCreateVm: ownership assignment failed (v3 unavailable?)', {
+          err: msg.slice(0, 200),
+        });
+        break;
       }
-    } catch (err) {
-      ctx.logger.warn('actCreateVm: ownership assignment failed (v3 unavailable?)', {
-        err: String(err).slice(0, 200),
-      });
     }
   }
   // Power on the VM. CheckVM / CheckRestoreVM both require powerState
