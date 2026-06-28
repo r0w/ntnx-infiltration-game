@@ -21,6 +21,7 @@ Calm injects @@{PC_IP}@@, @@{PC_USERNAME}@@, @@{PC_PASSWORD}@@,
 
 import json
 import sys
+import time
 import urllib3
 import uuid
 
@@ -41,10 +42,12 @@ HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 # clustermgmt v4.2 is where the StorageContainer model exposes `erasureCode`
 # (enum NONE | OFF | ON). v4.0/v4.1 don't carry the field.
 CTR_BASE = "%s/api/clustermgmt/v4.2/config/storage-containers" % BASE
-# Tasks: iteration-based poll (sandbox time.sleep is unreliable). Each GET
-# round-trips ~0.5-1 s, so ~120 iters ≈ a couple minutes — the update task
-# is quick (~20 s live).
-TASK_POLL_ITERS = 120
+# Task poll: sleep between GETs so we don't busy-poll the task to exhaustion
+# before it settles (the update task is ~20 s live). The patcher rewrites
+# time.sleep to a TCP-timeout shim that blocks ~N s on the Calm VM. 90 × 2 s
+# = ~3 min cap; returns the moment the task is terminal.
+TASK_POLL_ITERS = 90
+TASK_POLL_INTERVAL_SEC = 2
 
 
 def list_containers():
@@ -90,6 +93,7 @@ def poll_task(task_ext_id):
                 return last
         except Exception as e:
             print("    task poll error: %s — retrying" % str(e)[:120])
+        time.sleep(TASK_POLL_INTERVAL_SEC)
     return last
 
 

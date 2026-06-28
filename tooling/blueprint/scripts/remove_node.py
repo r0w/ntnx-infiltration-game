@@ -61,7 +61,8 @@ SLOW_POLL_INTERVAL_SEC = 15
 # that window the precheck passed and the shrink is underway. On an EC
 # failure we wait EC_RETRY_GAP_SEC and re-POST, up to EC_RETRY_ATTEMPTS
 # times (~30 min of Curator drain headroom).
-TASK_PRECHECK_ITERS = 12      # ~12 task GETs (~10-20 s) to catch a fast FAIL
+TASK_PRECHECK_ITERS = 12      # 12 × 2 s ≈ 24 s window to catch the precheck verdict
+TASK_PRECHECK_INTERVAL_SEC = 2
 EC_RETRY_ATTEMPTS = 60
 EC_RETRY_GAP_SEC = 30
 
@@ -134,7 +135,10 @@ def attempt_remove(node_uuid):
         if status == 'SUCCEEDED':
             return 'started'
         # Still RUNNING/QUEUED — prechecks run first, so surviving this window
-        # means they passed and the shrink is underway.
+        # means they passed and the shrink is underway. Sleep so the window is
+        # real wall-clock, not a 1-2 s busy-poll that would exit before a
+        # slow precheck even fails (the patcher maps time.sleep to a ~N s shim).
+        time.sleep(TASK_PRECHECK_INTERVAL_SEC)
     print("  remove-node task still running past precheck window — shrink underway")
     return 'started'
 
