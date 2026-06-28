@@ -21,6 +21,7 @@ import {
   getTrigram,
   getV4WithEtag,
   getVarString,
+  isSecondarySubnet,
   listAllSdk,
   listAllV3,
   listAllV4Rest,
@@ -220,7 +221,7 @@ async function actCreateProject(ctx: ActContext): Promise<void> {
   // player to pick (`Use the VLAN named secondary`). Best-effort:
   // if missing, project still creates but with empty subnet list.
   const subnets = await listAllSdk<AnyRec>(($p) => sdk(ctx).networking.subnets.listSubnets($p));
-  const secondary = subnets.find((s) => /^secondary$/i.test(s.name ?? ''));
+  const secondary = subnets.find((s) => isSecondarySubnet(s.name));
   // The prompt asks for "user TheProjectManager as Project Admin". Add it as a
   // project member so the create-vm Manage Ownership step can set owner=
   // theprojectmanager (impossible if the user isn't in the project).
@@ -420,10 +421,10 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
   const name = `${trigram}-vm`;
   const subnets = await listAllSdk<AnyRec>(($p) => sdk(ctx).networking.subnets.listSubnets($p));
   const subnet = subnets.find((s) => s.name === `${trigram}-subnet`);
-  // `secondary` is the literal subnet name used in the stage prompt, the
-  // same name the player is asked to pick. Match case-insensitively to
-  // tolerate clusters that name it `Secondary`.
-  const secondary = subnets.find((s) => /^secondary$/i.test(s.name ?? ''));
+  // The routable subnet the stage prompt calls `secondary`. Match the bare
+  // name AND the `secondary-<cluster>` form HPoCs ship (see isSecondarySubnet)
+  // — a strict match here left this VM with 1 NIC on those clusters.
+  const secondary = subnets.find((s) => isSecondarySubnet(s.name));
   if (!secondary) {
     ctx.logger.warn(
       `actCreateVm: 'secondary' subnet missing on cluster, VM will be created with 1 NIC and CheckVM (NIC-count) will fail`,

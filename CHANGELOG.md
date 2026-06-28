@@ -46,6 +46,11 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Stage 12 (`create-vm`) auto-play now builds the 2-NIC VM on HPoCs whose
+  routable subnet is named `secondary-<cluster>` (e.g. `secondary-DM3-POC013`)
+  rather than bare `secondary`. The act matched the name strictly, so it found
+  no secondary subnet and created a 1-NIC VM that failed CheckVM; a tolerant
+  `isSecondarySubnet` matcher (same as the blueprint's) fixes it.
 - AD endpoint username now defaults to UPN (`administrator@ntnxlab.local`)
   instead of `NTNXLAB\administrator`. The endpoint dials WinRM Basic auth, which
   rejects the NetBIOS `DOMAIN\user` form, so `Add AD users` failed with a
