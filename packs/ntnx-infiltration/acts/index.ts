@@ -254,8 +254,8 @@ async function actCreateProject(ctx: ActContext): Promise<void> {
     await addProjectAdmin(ctx, name, pmUuid, {
       clusterUuid,
       accountUuid: account?.metadata?.uuid,
-      primaryUuid: primary?.extId,
-      secondaryUuid: secondary?.extId,
+      primary: primary ? { name: primary.name, uuid: primary.extId } : undefined,
+      secondary: secondary ? { name: secondary.name, uuid: secondary.extId } : undefined,
     });
   }
 }
@@ -332,15 +332,17 @@ async function addProjectAdmin(
   ctx: ActContext,
   projectName: string,
   pmUuid: string,
-  refs: { clusterUuid?: string; accountUuid?: string; primaryUuid?: string; secondaryUuid?: string },
+  refs: {
+    clusterUuid?: string;
+    accountUuid?: string;
+    primary?: { name?: string; uuid?: string };
+    secondary?: { name?: string; uuid?: string };
+  },
 ): Promise<void> {
-  // Resolve the project + its current members/spec_version.
-  const list = await ctx.nutanix.rest.request<{ entities?: AnyRec[] }>(
-    'POST',
-    '/api/nutanix/v3/projects/list',
-    { length: 250 },
-  );
-  const proj = (list.entities ?? []).find(
+  // Resolve the project + its current members/spec_version. listAllV3
+  // paginates (a bare {length:N} silently misses entities past N).
+  const projects = await listAllV3<AnyRec>(ctx, '/api/nutanix/v3/projects/list');
+  const proj = projects.find(
     (p) => p.spec?.name === projectName || p.status?.name === projectName,
   );
   if (!proj?.metadata?.uuid) {
@@ -362,13 +364,8 @@ async function addProjectAdmin(
     '/api/iam/v4.0/authn/directory-services',
   );
   const directoryId = dirs?.data?.[0]?.extId;
-  const rolesResp = await ctx.nutanix.rest.request<{ entities?: AnyRec[] }>(
-    'POST',
-    '/api/nutanix/v3/roles/list',
-    { length: 250 },
-  );
-  const roleUuid = (rolesResp.entities ?? []).find((r) => r.status?.name === 'Project Admin')
-    ?.metadata?.uuid;
+  const roles = await listAllV3<AnyRec>(ctx, '/api/nutanix/v3/roles/list');
+  const roleUuid = roles.find((r) => r.status?.name === 'Project Admin')?.metadata?.uuid;
   if (!directoryId || !roleUuid) {
     ctx.logger.warn('addProjectAdmin: missing directory service or Project Admin role; skipping', {
       directoryId: !!directoryId,
@@ -377,8 +374,10 @@ async function addProjectAdmin(
     return;
   }
   const subnetRefs: AnyRec[] = [];
-  if (refs.secondaryUuid) subnetRefs.push({ kind: 'subnet', name: 'secondary', uuid: refs.secondaryUuid });
-  if (refs.primaryUuid) subnetRefs.push({ kind: 'subnet', name: 'primary', uuid: refs.primaryUuid });
+  if (refs.secondary?.uuid)
+    subnetRefs.push({ kind: 'subnet', name: refs.secondary.name ?? 'secondary', uuid: refs.secondary.uuid });
+  if (refs.primary?.uuid)
+    subnetRefs.push({ kind: 'subnet', name: refs.primary.name ?? 'primary', uuid: refs.primary.uuid });
   const payload = {
     api_version: '3.1',
     metadata: {
@@ -393,7 +392,7 @@ async function addProjectAdmin(
         resources: {
           account_reference_list: refs.accountUuid ? [{ kind: 'account', uuid: refs.accountUuid }] : [],
           user_reference_list: [{ name: 'theprojectmanager', kind: 'user', uuid: pmUuid }],
-          ...(refs.primaryUuid ? { default_subnet_reference: { kind: 'subnet', uuid: refs.primaryUuid } } : {}),
+          ...(refs.primary?.uuid ? { default_subnet_reference: { kind: 'subnet', uuid: refs.primary.uuid } } : {}),
           subnet_reference_list: subnetRefs,
           cluster_reference_list: refs.clusterUuid ? [{ kind: 'cluster', uuid: refs.clusterUuid }] : [],
           enable_directory_and_identity_provider_shortlist: false,

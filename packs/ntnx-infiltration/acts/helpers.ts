@@ -18,8 +18,8 @@ export function getTrigram(ctx: ActContext): string | undefined {
  * cause of the stage-12 VM getting only 1 NIC on HPoCs that ship the
  * `secondary-<cluster>` form, which fails CheckVM (needs 2 NICs).
  */
-export function isSecondarySubnet(name?: string): boolean {
-  const n = (name ?? '').toLowerCase();
+export function isSecondarySubnet(name?: unknown): boolean {
+  const n = typeof name === 'string' ? name.toLowerCase() : '';
   return n === 'secondary' || n.startsWith('secondary-');
 }
 
