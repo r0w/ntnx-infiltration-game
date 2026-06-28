@@ -38,6 +38,19 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Stage 12 (`create-vm`) auto-play now builds the 2-NIC VM on HPoCs whose
+  routable subnet is named `secondary-<cluster>` (e.g. `secondary-DM3-POC013`)
+  rather than bare `secondary`. The act matched the name strictly, so it found
+  no secondary subnet and created a 1-NIC VM that failed CheckVM; a tolerant
+  `isSecondarySubnet` matcher (same as the blueprint's) fixes it.
+- Stage 8 (`create-project`) auto-play now actually adds `theprojectmanager` as
+  Project Admin, so stage 12's Manage Ownership can set the VM owner. The act
+  put the user straight into the plain `/projects` POST, which PC rejects with
+  "Users/User groups not found" (the project lands in ERROR and the member is
+  never added) — leaving stage 12 unpassable on a real cluster. It now registers
+  the member via `/projects_internal` + a Project Admin ACP (the same recipe the
+  blueprint uses for `thebadguy`), and the VM-owner PUT retries on the transient
+  409 edit-conflict that follows the membership change.
 - `Remove 4th host on HPoC` no longer stalls on a Files + EC-X cluster: it retries
   the remove-node precheck until Curator finishes un-coding the strips, instead of
   giving up on the first failure.
