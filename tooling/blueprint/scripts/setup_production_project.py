@@ -39,13 +39,48 @@ AUTH = (PC_USERNAME, PC_PASSWORD)
 HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
 
+def _retry(_fn, *args, **kwargs):
+    """Call a requests verb with retry on transient transport errors + 5xx.
+
+    PC's v3/v4 APIs throw sporadic ReadTimeouts / ConnectionErrors / 500s when
+    the cluster is busy mid-deploy (aplos under load) — a single blip shouldn't
+    fail the whole task. This is exactly what bit `Setup production project` in
+    issue #28 (ReadTimeout on a v3 call). Mirrors the `_req_retry` loop in
+    create_prod_vms.py.
+
+    IDEMPOTENT calls only (GET, or POST-for-list). Never wrap a non-idempotent
+    mutation — a retried-after-timeout create risks a duplicate. The project
+    create POST does its own retry with explicit duplicate recovery instead.
+
+    `_attempts` / `_backoff` are popped from kwargs so the rest pass through to
+    the verb verbatim.
+    """
+    attempts = kwargs.pop("_attempts", 5)
+    backoff = kwargs.pop("_backoff", 3)
+    last = "no attempt made"
+    for i in range(attempts):
+        try:
+            r = _fn(*args, **kwargs)
+        except requests.RequestException as e:
+            last = "network error: %s" % str(e)[:200]
+        else:
+            if r.status_code < 500:
+                return r
+            last = "%d %s" % (r.status_code, r.text[:200])
+        if i < attempts - 1:
+            print("  [retry %d/%d] %s" % (i + 1, attempts, last))
+            time.sleep(backoff)
+    raise Exception("request failed after %d attempts: %s" % (attempts, last))
+
+
 def find_existing_project():
     """Return the uuid of the `production` project if it exists in a HEALTHY
     state. If the project exists but state == ERROR (e.g. previous deploy hit
     a Calm policy-engine-not-ready race during create), delete it and return
     None so the caller re-creates a clean one. Recreating without deleting
     would 409 on duplicate name."""
-    r = requests.post(
+    r = _retry(
+        requests.post,
         "%s/api/nutanix/v3/projects/list" % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
         data=json.dumps({"kind": "project", "filter": "name==%s" % PROJECT_NAME}),
@@ -59,7 +94,8 @@ def find_existing_project():
     uuid = p['metadata']['uuid']
     if state == 'ERROR':
         print("  [recover] existing project %s in state=ERROR — deleting before recreate" % uuid)
-        dr = requests.delete(
+        dr = _retry(
+            requests.delete,
             "%s/api/nutanix/v3/projects/%s" % (BASE, uuid),
             auth=AUTH, headers=HEADERS, verify=False, timeout=30,
         )
@@ -81,7 +117,8 @@ def find_existing_project():
 
 
 def get_account_uuid():
-    r = requests.post(
+    r = _retry(
+        requests.post,
         "%s/api/nutanix/v3/accounts/list" % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
         data=json.dumps({"kind": "account", "filter": "type==nutanix_pc"}),
@@ -108,7 +145,8 @@ def get_subnet_uuid(name):
     'secondary'" 3 s after Setup subnets confirmed it exists.
     """
     for attempt in range(6):  # 6 × 5 s = 30 s cap
-        r = requests.post(
+        r = _retry(
+            requests.post,
             "%s/api/nutanix/v3/subnets/list" % BASE,
             auth=AUTH, headers=HEADERS, verify=False, timeout=20,
             data=json.dumps({"kind": "subnet", "length": 250}),
@@ -158,11 +196,29 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
     last = ""
     r = None
     for attempt in range(CREATE_POLLS):
-        r = requests.post(
-            "%s/api/nutanix/v3/projects" % BASE,
-            auth=AUTH, headers=HEADERS, verify=False, timeout=30,
-            data=json.dumps(body),
-        )
+        # The create POST is a non-idempotent mutation, so it can't go through
+        # the blind `_retry` wrapper: a retried-after-timeout POST would risk a
+        # duplicate. Instead, on a transport blip (the issue #28 ReadTimeout) we
+        # check whether the POST actually reached PC and created the project
+        # before re-POSTing. Timeout bumped 30->60 s: project create on a loaded
+        # PC mid-deploy legitimately takes >30 s to ack.
+        try:
+            r = requests.post(
+                "%s/api/nutanix/v3/projects" % BASE,
+                auth=AUTH, headers=HEADERS, verify=False, timeout=60,
+                data=json.dumps(body),
+            )
+        except requests.RequestException as e:
+            last = "transport error: %s" % str(e)[:200]
+            print("  [warn] create POST transport blip (attempt %d/%d): %s"
+                  % (attempt + 1, CREATE_POLLS, last))
+            existing = find_existing_project()
+            if existing:
+                print("  [recover] project was created server-side despite the "
+                      "blip — adopting uuid=%s" % existing)
+                return existing
+            time.sleep(3)
+            continue
         if r.status_code < 400:
             break
         last = "%d %s" % (r.status_code, r.text[:300])
@@ -172,6 +228,19 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
             requests.get("%s/api/nutanix/v3/subnets/list" % BASE,
                          auth=AUTH, headers=HEADERS, verify=False, timeout=20)
             continue
+        # A prior timed-out POST in this loop may have succeeded server-side; the
+        # re-POST then hits a duplicate-name rejection. Adopt the existing
+        # project instead of failing the whole deploy. PC 7.5 returns this as a
+        # 400 with reason DUPLICATE_ENTITY ("Project name X already exists.") —
+        # verified live on DM3-POC013 — so match on the body tokens, not just a
+        # 409/422/500 status.
+        if r.status_code in (400, 409, 422, 500) and any(
+            tok in r.text.upper() for tok in ("DUPLICATE", "ALREADY", "EXIST")
+        ):
+            existing = find_existing_project()
+            if existing:
+                print("  [recover] duplicate-name create — adopting uuid=%s" % existing)
+                return existing
         raise Exception("create project failed: %s" % last)
     if r is None or r.status_code >= 400:
         raise Exception("create project failed after %d retries: %s" % (CREATE_POLLS, last))
@@ -185,7 +254,8 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
     # MAX_POLLS=120 is ~60-120 s of real wall-clock without trusting sleep.
     MAX_POLLS = 120
     for poll in range(MAX_POLLS):
-        r = requests.get(
+        r = _retry(
+            requests.get,
             "%s/api/nutanix/v3/tasks/%s" % (BASE, task_uuid),
             auth=AUTH, headers=HEADERS, verify=False, timeout=20,
         )
@@ -199,7 +269,8 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
 
 
 def get_project_spec_version(project_uuid):
-    r = requests.get(
+    r = _retry(
+        requests.get,
         "%s/api/nutanix/v3/projects/%s" % (BASE, project_uuid),
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
     )
@@ -209,7 +280,8 @@ def get_project_spec_version(project_uuid):
 
 def get_directory_id():
     """Returns the first directory service ID. Legacy assumes [0]."""
-    r = requests.get(
+    r = _retry(
+        requests.get,
         "%s/api/iam/v4.0/authn/directory-services" % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
     )
@@ -231,7 +303,9 @@ def import_ldap_user(directory_id):
         "userType": "LDAP",
         "idpId": directory_id,
     }
-    r = requests.post(
+    # Idempotent (409 = already exists), so the blind `_retry` is safe here.
+    r = _retry(
+        requests.post,
         "%s/api/iam/v4.0/authn/users" % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=30,
         data=json.dumps(body),
@@ -249,7 +323,8 @@ def get_user_uuid(username):
     target = username.lower()
     page = 0
     while True:
-        r = requests.get(
+        r = _retry(
+            requests.get,
             "%s/api/iam/v4.0/authn/users" % BASE,
             auth=AUTH, headers=HEADERS, verify=False, timeout=20,
             params={"$limit": 100, "$page": page},
@@ -269,7 +344,8 @@ def get_user_uuid(username):
 
 
 def get_project_admin_role_uuid():
-    r = requests.get(
+    r = _retry(
+        requests.get,
         "%s/api/iam/v4.0/authz/roles?$filter=startswith(displayName,'Project')&$select=displayName,extId"
         % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
@@ -460,7 +536,10 @@ def add_user_as_project_admin(project_uuid, account_uuid, primary_uuid,
             ],
         },
     }
-    r = requests.put(
+    # operation:ADD is a no-op when the user/ACP already exist, so re-issuing on
+    # a transient blip is safe.
+    r = _retry(
+        requests.put,
         "%s/api/nutanix/v3/projects_internal/%s" % (BASE, project_uuid),
         auth=AUTH, headers=HEADERS, verify=False, timeout=60,
         data=json.dumps(payload),

@@ -38,6 +38,11 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- `Setup production project` install task no longer fails the whole deploy on a
+  transient API blip (issue #28: a `ReadTimeout` mid-task). Idempotent lookups
+  now retry on network errors and 5xx, and the project-create POST recovers from
+  a timed-out-but-succeeded create by adopting the existing project instead of
+  erroring on the duplicate name.
 - Stage 12 (`create-vm`) auto-play now builds the 2-NIC VM on HPoCs whose
   routable subnet is named `secondary-<cluster>` (e.g. `secondary-DM3-POC013`)
   rather than bare `secondary`. The act matched the name strictly, so it found
