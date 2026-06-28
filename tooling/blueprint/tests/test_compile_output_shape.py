@@ -163,6 +163,25 @@ def test_install_runbook_has_at_least_10_tasks(compiled_bp: dict):
     )
 
 
+def test_disable_ec_runs_before_node_removal(compiled_bp: dict):
+    """EC-X on the Files container blocks remove-node's precheck, so
+    `Disable erasure coding` must come before `Remove 4th host on HPoC`
+    in the runbook (issue #7). If the order flips, node removal stalls
+    on a 4-node Files HPoC."""
+    names: list = []
+    for pkg in (
+        compiled_bp.get("spec", {}).get("resources", {}).get("package_definition_list", [])
+    ):
+        rb = pkg.get("options", {}).get("install_runbook")
+        if isinstance(rb, dict):
+            names.extend(t.get("name") for t in rb.get("task_definition_list", []))
+    assert "Disable erasure coding" in names, "Disable erasure coding task missing"
+    assert "Remove 4th host on HPoC" in names, "Remove 4th host task missing"
+    assert names.index("Disable erasure coding") < names.index("Remove 4th host on HPoC"), (
+        "Disable erasure coding must precede Remove 4th host on HPoC"
+    )
+
+
 # ─── substrate: boot disk grown ───────────────────────────────────────────
 
 
