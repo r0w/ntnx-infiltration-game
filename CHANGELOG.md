@@ -43,8 +43,18 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
   after `Get Cluster`, before the parallel block. An AD failure can no longer
   abort the install after the destructive node shrink has started, so the
   cluster is never left half-shrunk; the operator just re-launches.
+- Install runbook gained a `Disable erasure coding` step (hpoc-only) that runs
+  before `Remove 4th host on HPoC`. A 4-node HPoC with Nutanix Files enables
+  EC-X on the Files container, which needs 4 nodes and so blocked the node
+  removal; the deploy now supports that pre-canned HPoC layout.
 
 ### Fixed
+
+- `Remove 4th host on HPoC` no longer stalls when the cluster has Nutanix Files
+  with EC-X. The remove-node precheck fails until erasure-coding strips are
+  un-coded, so the step now retries that precheck (after `Disable erasure
+  coding` flips EC off) until Curator has finished, instead of treating the
+  first precheck failure as terminal.
 
 - AD endpoint username now defaults to UPN (`administrator@ntnxlab.local`)
   instead of `NTNXLAB\administrator`. The endpoint dials WinRM Basic auth, which

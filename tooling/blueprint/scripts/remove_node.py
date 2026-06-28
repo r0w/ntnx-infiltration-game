@@ -9,9 +9,15 @@ Two early-exit cases that print and return 0:
   1. CLUSTER_PROFILE='other' — never touch a non-hpoc cluster's hardware.
   2. No '-4' host present (already trimmed by an earlier launch).
 
-The poll loop is bounded by POLL_ITERATIONS — each iteration does a fresh
-/hosts GET and the network round-trip is the natural rate limiter
-(time.sleep is banned in the Calm escript sandbox).
+remove-node returns 202 + a task that runs prechecks first. With Nutanix
+Files + EC-X still present, those prechecks fail ("not enough NODES to
+meet Erasure Code settings") until Curator finishes un-coding the strips
+that `Disable erasure coding` (the task before this one) freed up. Rather
+than guess that drain time, we re-POST on every EC precheck failure until
+it passes, or hit a long cap. Any non-EC failure is fatal right away.
+
+Poll loops are iteration-bounded (each GET's round-trip is the rate
+limiter — time.sleep is unreliable in the Calm escript sandbox).
 
 Calm injects @@{PC_IP}@@, @@{PC_USERNAME}@@, @@{PC_PASSWORD}@@,
 @@{Game.CLUSTERUUID}@@ (set by upstream Get Cluster),
@@ -32,7 +38,11 @@ PC_PASSWORD = '@@{PC_PASSWORD}@@'
 CLUSTER_UUID = '@@{Game.CLUSTERUUID}@@'
 CLUSTER_PROFILE = '@@{CLUSTER_PROFILE}@@'
 
-BASE = "https://%s:9440/api/clustermgmt/v4.0" % PC_IP
+PC_BASE = "https://%s:9440" % PC_IP
+BASE = "%s/api/clustermgmt/v4.0" % PC_BASE
+# remove-node is driven on v4.2 (the version whose precheck reports the
+# EC-X blocker we retry on); the host list stays on v4.0 (unchanged).
+REMOVE_BASE = "%s/api/clustermgmt/v4.2" % PC_BASE
 AUTH = (PC_USERNAME, PC_PASSWORD)
 HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
@@ -46,6 +56,15 @@ FAST_POLL_ITERS = 30          # ~30 s
 SLOW_POLL_ITERS = 160         # 160 × 15 s = 40 min
 SLOW_POLL_INTERVAL_SEC = 15
 
+# remove-node precheck retry: the task FAILs within a couple seconds on an
+# EC-X block, so a short task-poll catches it; if it's still RUNNING past
+# that window the precheck passed and the shrink is underway. On an EC
+# failure we wait EC_RETRY_GAP_SEC and re-POST, up to EC_RETRY_ATTEMPTS
+# times (~30 min of Curator drain headroom).
+TASK_PRECHECK_ITERS = 12      # ~12 task GETs (~10-20 s) to catch a fast FAIL
+EC_RETRY_ATTEMPTS = 60
+EC_RETRY_GAP_SEC = 30
+
 
 def list_hosts():
     r = requests.get(
@@ -54,6 +73,70 @@ def list_hosts():
     )
     r.raise_for_status()
     return r.json().get('data') or []
+
+
+def _task_failure_text(task_data):
+    """Concatenate the human-readable error text from a failed task so we
+    can tell an EC-X precheck block apart from a real failure."""
+    parts = [task_data.get('legacyErrorMessage') or '']
+    for m in (task_data.get('errorMessages') or []):
+        if isinstance(m, dict):
+            parts.append(m.get('message') or '')
+        else:
+            parts.append(str(m))
+    return ' '.join(parts)
+
+
+def _is_ec_block(text):
+    t = (text or '').lower()
+    return 'erasure code' in t or 'erasure coding' in t
+
+
+def attempt_remove(node_uuid):
+    """POST remove-node and watch its task long enough to classify the
+    precheck outcome. Returns one of:
+      'started'    — precheck passed, removal underway (or task already done)
+      'ec_blocked' — precheck FAILed on the EC-X requirement (retryable)
+      'failed'     — POST rejected or precheck FAILed for another reason
+    """
+    body = {"nodeUuids": [node_uuid]}
+    r = requests.post(
+        "%s/config/clusters/%s/$actions/remove-node" % (REMOVE_BASE, CLUSTER_UUID),
+        auth=AUTH, headers=HEADERS, verify=False, timeout=60,
+        json=body,
+    )
+    if r.status_code >= 400:
+        print("[FAIL] remove-node POST: %d %s" % (r.status_code, r.text[:300]))
+        return 'failed'
+
+    task_ext_id = (r.json().get('data') or {}).get('extId')
+    if not task_ext_id:
+        # No task to inspect — assume accepted and let the /hosts poll judge.
+        print("  remove-node accepted (HTTP %d, no task ref) — polling hosts" % r.status_code)
+        return 'started'
+
+    task_url = "%s/api/prism/v4.2/config/tasks/%s" % (PC_BASE, task_ext_id)
+    for _ in range(TASK_PRECHECK_ITERS):
+        try:
+            tr = requests.get(task_url, auth=AUTH, headers=HEADERS, verify=False, timeout=30)
+            data = tr.json().get('data') or {}
+        except Exception as e:
+            print("  task poll error: %s — retrying" % str(e)[:120])
+            continue
+        status = data.get('status')
+        if status in ('FAILED', 'CANCELED', 'CANCELLED'):
+            text = _task_failure_text(data)
+            if _is_ec_block(text):
+                print("  remove-node precheck blocked by EC-X: %s" % text.strip()[:200])
+                return 'ec_blocked'
+            print("[FAIL] remove-node task %s: %s" % (status, text.strip()[:300]))
+            return 'failed'
+        if status == 'SUCCEEDED':
+            return 'started'
+        # Still RUNNING/QUEUED — prechecks run first, so surviving this window
+        # means they passed and the shrink is underway.
+    print("  remove-node task still running past precheck window — shrink underway")
+    return 'started'
 
 
 def main():
@@ -84,16 +167,33 @@ def main():
     print("Removing host=%s ext_id=%s from cluster=%s ..." %
           (target.get('hostName'), node_uuid, CLUSTER_UUID))
 
-    body = {"nodeUuids": [node_uuid]}
-    r = requests.post(
-        "%s/config/clusters/%s/$actions/remove-node" % (BASE, CLUSTER_UUID),
-        auth=AUTH, headers=HEADERS, verify=False, timeout=60,
-        json=body,
+    # Re-launch during an in-progress shrink: host-4 is still listed but
+    # already on its way out — don't re-POST, just poll it to completion.
+    already_leaving = (
+        target.get('nodeStatus') in ('TO_BE_REMOVED', 'OK_TO_BE_REMOVED')
+        or target.get('maintenanceState') == 'in_maintenance'
     )
-    if r.status_code >= 400:
-        print("[FAIL] remove-node POST: %d %s" % (r.status_code, r.text[:300]))
-        return 1
-    print("  remove-node action accepted (HTTP %d), polling for removal..." % r.status_code)
+    if already_leaving:
+        print("  host-4 already %s/%s — removal in progress, polling..." %
+              (target.get('nodeStatus'), target.get('maintenanceState')))
+    else:
+        # Retry the remove-node POST while the precheck keeps failing on
+        # EC-X (Curator still dis-encoding). Any other failure is fatal.
+        for attempt in range(EC_RETRY_ATTEMPTS):
+            outcome = attempt_remove(node_uuid)
+            if outcome == 'started':
+                break
+            if outcome == 'failed':
+                return 1
+            # ec_blocked — let Curator drain more strips, then retry.
+            print("  EC strips not fully undone yet (attempt %d/%d) — waiting %ds"
+                  % (attempt + 1, EC_RETRY_ATTEMPTS, EC_RETRY_GAP_SEC))
+            time.sleep(EC_RETRY_GAP_SEC)
+        else:
+            print("[FAIL] remove-node precheck still EC-blocked after %d attempts — "
+                  "Curator hasn't finished dis-encoding. Re-launch to resume." % EC_RETRY_ATTEMPTS)
+            return 1
+        print("  remove-node precheck passed, polling for removal...")
 
     # Two-phase polling:
     #   Phase 1 — fast for ~30 s (catches NORMAL → TO_BE_REMOVED quickly)

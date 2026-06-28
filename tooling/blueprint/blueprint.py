@@ -236,6 +236,16 @@ class GameContent(Package):
             # state so a verify failure never ships a game on a broken
             # cluster.
             with branch(p0):
+                # An HPoC with Nutanix Files has EC-X on the Files
+                # container, which needs 4 nodes — so it blocks the
+                # node removal below. Flip EC OFF first; the removal
+                # then retries its precheck until Curator finishes
+                # dis-encoding. Idempotent, hpoc-gated (skips on other).
+                CalmTask.Exec.escript.py3(
+                    name="Disable erasure coding",
+                    filename=os.path.join("scripts", "disable_erasure_coding.py"),
+                    target=ref(Game),
+                )
                 # DESTRUCTIVE — shrinks 4→3 nodes. Early in the branch
                 # so the rest of it runs against the final cluster
                 # shape. Idempotent (skip if no -4 host); gated by
