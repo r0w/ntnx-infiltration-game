@@ -1845,7 +1845,9 @@ a.terminal-link:visited {
    the row width. */
 .admin-fail-chip {
   display: block;
-  max-width: 260px;
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 420px;
   margin-top: 4px;
   padding: 1px 6px;
   overflow: hidden;
@@ -1860,13 +1862,22 @@ a.terminal-link:visited {
   font-size: 11px;
   text-align: left;
 }
-.admin-fail-chip:hover {
+.admin-fail-chip:hover,
+.admin-fail-chip:focus-visible {
   border-color: var(--yellow);
   background: rgba(255, 213, 128, 0.12);
+  outline: none;
 }
+.admin-fail-age {
+  font-weight: 600;
+}
+/* log-excerpt treatment: the yellow stays on the rail, the message itself
+   reads in the normal fg — a long detail in solid yellow is unreadable. */
 .admin-fail-prose {
   margin: 12px 0 0;
-  color: var(--yellow);
+  padding-left: 10px;
+  border-left: 2px solid var(--yellow);
+  color: var(--fg);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

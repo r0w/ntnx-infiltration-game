@@ -664,7 +664,10 @@ function AdminDashboard({
                             onClick={() => setFailTarget(e)}
                             title="last failed check — click for full detail"
                           >
+                            {/* age leads so the ellipsis can't truncate it —
+                                it's the triage signal (stuck 15m ≠ just failed) */}
                             <span aria-hidden>⚠</span>{' '}
+                            <span className="admin-fail-age">{fmtAgeShort(e.lastFail.at)}</span> ·{' '}
                             {splitCheckDetail(e.lastFail.detail).prose || 'check failed'}
                           </button>
                         )}
@@ -888,7 +891,7 @@ function AdminDashboard({
             <Modal
               title={
                 <>
-                  <span className="c-yellow">⚠</span> last check fail
+                  <span className="c-yellow">⚠</span> last failed check
                 </>
               }
               onClose={() => setFailTarget(null)}
@@ -1138,6 +1141,11 @@ function splitCheckDetail(detail: string | null): { prose: string; json: string 
     }
   }
   return { prose: detail, json: null };
+}
+
+/** Terse variant for the fail chip: "42s" / "12m" / "2h05". */
+function fmtAgeShort(ts: number): string {
+  return fmtAge(ts).replace(' ago', '');
 }
 
 function fmtAge(ts: number): string {
