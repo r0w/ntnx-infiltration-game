@@ -58,6 +58,26 @@ CREATE TABLE IF NOT EXISTS stage_history (
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
+-- Append-only log of every check attempt (stage_history above keeps only the
+-- LATEST state per stage — this keeps the trail). Backs the /admin Logs tab:
+-- who attempted what, when, and what the check said. Grows with play; an
+-- event's worth is a few hundred rows, no pruning needed.
+CREATE TABLE IF NOT EXISTS check_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  stage_name TEXT NOT NULL,
+  status TEXT NOT NULL,           -- 'passed' | 'failed'
+  checked_at INTEGER NOT NULL,
+  duration_ms INTEGER,
+  detail TEXT,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_check_attempts_at ON check_attempts(checked_at DESC);
+-- session_id index keeps ON DELETE CASCADE from scanning the whole log on
+-- every session delete.
+CREATE INDEX IF NOT EXISTS idx_check_attempts_session ON check_attempts(session_id);
+
 CREATE TABLE IF NOT EXISTS cluster_cache (
   session_id TEXT NOT NULL,
   entity_kind TEXT NOT NULL,

@@ -1840,6 +1840,102 @@ a.terminal-link:visited {
   opacity: 0.4;
   cursor: not-allowed;
 }
+/* last-fail chip under the stage name in the Users table — compact one-liner,
+   click opens the detail modal. Truncates so a verbose detail can't blow up
+   the row width. */
+.admin-fail-chip {
+  display: block;
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 420px;
+  margin-top: 4px;
+  padding: 1px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: rgba(255, 213, 128, 0.06);
+  color: var(--yellow);
+  border: 1px solid rgba(255, 213, 128, 0.25);
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+}
+.admin-fail-chip:hover,
+.admin-fail-chip:focus-visible {
+  border-color: var(--yellow);
+  background: rgba(255, 213, 128, 0.12);
+  outline: none;
+}
+.admin-fail-age {
+  font-weight: 600;
+}
+/* log-excerpt treatment: the yellow stays on the rail, the message itself
+   reads in the normal fg — a long detail in solid yellow is unreadable. */
+.admin-fail-prose {
+  margin: 12px 0 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--yellow);
+  color: var(--fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.admin-logs-filter {
+  font-family: inherit;
+  font-size: 12px;
+  background: rgba(124, 220, 254, 0.03);
+  color: var(--fg);
+  border: 1px solid #1b232b;
+  border-radius: 4px;
+  padding: 6px 10px;
+  width: 320px;
+  margin-right: 14px;
+}
+.admin-logs-filter:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.admin-logs-count {
+  margin-left: 14px;
+}
+/* trigram deep-link into the Logs tab — looks like the plain trigram text,
+   reveals itself on hover */
+.admin-trigram-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
+.admin-trigram-link:hover,
+.admin-trigram-link:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+
+/* Logs tab detail cell — cap + ellipsis so one verbose API error doesn't
+   stretch the whole table; full text lives in the title tooltip. */
+.admin-td-detail {
+  max-width: 520px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.admin-fail-json {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  max-height: 260px;
+  overflow: auto;
+  background: rgba(124, 220, 254, 0.04);
+  border: 1px solid #1b232b;
+  border-radius: 3px;
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .admin-back-link {
   margin: 16px 0 0;
   text-align: center;

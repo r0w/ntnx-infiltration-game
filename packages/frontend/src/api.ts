@@ -239,6 +239,21 @@ export interface AdminUserEntry {
   finishedAt: number | null;
   lastActivityAt: number | null;
   locale: string;
+  /** Last failed check on the stage being played; null once it passes. */
+  lastFail: { stage: string; detail: string | null; at: number } | null;
+}
+
+/** One row of the append-only check-attempt log (admin Logs tab). */
+export interface AdminAttemptEntry {
+  id: number;
+  sessionId: string;
+  trigram: string | null;
+  username: string | null;
+  stageName: string;
+  status: 'passed' | 'failed';
+  checkedAt: number;
+  durationMs: number | null;
+  detail: string | null;
 }
 
 export interface AdminUsersPayload {
@@ -383,6 +398,8 @@ export const api = {
     post<{ ok: true }>('/admin/login', { password }),
   adminUsers: (password: string) =>
     adminGet<AdminUsersPayload>('/admin/users', password),
+  adminAttempts: (password: string) =>
+    adminGet<{ entries: AdminAttemptEntry[] }>('/admin/attempts', password),
   adminDelete: (password: string, sessionId: string) =>
     adminDel<{ ok: true; sessionId: string }>(`/admin/users/${sessionId}`, password),
   adminSkipCurrentStage: (password: string, sessionId: string) =>

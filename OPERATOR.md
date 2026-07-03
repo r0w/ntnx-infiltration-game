@@ -181,6 +181,12 @@ Players need:
 
 ## Recovery scenarios
 
+**A player is stuck and you don't know why** - `/admin > Users`: stuck
+players sort to the top with a yellow chip showing what their last
+check found (e.g. `VM 'abc-vm' has 1 NIC(s) (expected 2)`). Click the
+chip for the full detail, or the trigram for their attempt history in
+`/admin > Logs`.
+
 **Player gets stuck on a check that should pass** - the check may have
 captured an ID that no longer exists (e.g. they deleted + recreated a
 VM). Tell them to refresh the page; the engine puts them in recovery
@@ -196,7 +202,7 @@ build). Stage 21 (`create-approval-policy`) won't be playable until
 you activate the policy engine manually via Prism Central → Settings
 → Calm. Mark stage 21 `inactive` in `/admin` if you don't want to wait.
 
-**A player wants to restart from scratch** - `/admin > Sessions`,
+**A player wants to restart from scratch** - `/admin > Users`,
 delete their session. Cluster resources they created (VM, project
 membership, etc.) stay but they can re-run the stages with the same
 trigram (idempotent acts re-create or skip).

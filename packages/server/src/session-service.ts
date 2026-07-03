@@ -17,6 +17,7 @@ import { ActionRegistry, StageRunner, resolveKey } from '@ntnx-game/engine';
 import { withMockOverlay, withVariableInterpolation } from '@ntnx-game/nutanix';
 import type { DisabledStage, MessageUnit } from '@ntnx-game/shared';
 import {
+  AttemptQueries,
   ClusterCacheQueries,
   ClusterConfigQueries,
   GateUnlockQueries,
@@ -137,6 +138,7 @@ export class SessionService {
   readonly sessions: SessionQueries;
   readonly variables: VariableQueries;
   readonly history: HistoryQueries;
+  readonly attempts: AttemptQueries;
   readonly clusterCache: ClusterCacheQueries;
   readonly clusterConfig: ClusterConfigQueries;
   readonly mockOverlay: MockOverlayQueries;
@@ -179,6 +181,7 @@ export class SessionService {
     this.sessions = new SessionQueries(deps.db);
     this.variables = new VariableQueries(deps.db);
     this.history = new HistoryQueries(deps.db);
+    this.attempts = new AttemptQueries(deps.db);
     this.clusterCache = new ClusterCacheQueries(deps.db);
     this.clusterConfig = new ClusterConfigQueries(deps.db);
     this.mockOverlay = new MockOverlayQueries(deps.db);
@@ -1203,6 +1206,7 @@ export class SessionService {
       for (const name of stage.invalidates) ctx.vars.delete(name);
     }
     this.history.record(session.id, stage.name, r.pass ? 'passed' : 'failed', Date.now() - start, r.detail ?? null);
+    this.attempts.record(session.id, stage.name, r.pass ? 'passed' : 'failed', Date.now() - start, r.detail ?? null);
     if (r.pass) this.sessions.updateCurrentStage(session.id, stage.name);
     return { kind: 'units', stageName: stage.name, units, actions, check: checkResult, disabledStages, typingSpeedMs };
   }

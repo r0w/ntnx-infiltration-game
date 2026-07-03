@@ -3,7 +3,7 @@ import type { Database } from 'bun:sqlite';
 import type { CapabilityFlag, NutanixClient } from '@ntnx-game/engine';
 import { probeCapabilities, type CapabilityProbeDetail } from '@ntnx-game/nutanix';
 import { HttpError, type SessionService } from '../session-service';
-import { SessionQueries, ScoreboardPeerQueries, type AdminSessionRow, type ScoreboardPeerRow } from '../db/queries';
+import { AttemptQueries, SessionQueries, ScoreboardPeerQueries, type AdminSessionRow, type AttemptRow, type ScoreboardPeerRow } from '../db/queries';
 import type { LoadedPack } from '../pack-loader';
 import { analyzeDeps, cascadeDisable, type BrokenStage } from '../dep-analysis';
 import { probeClusterConfig } from '../cluster-config-probe';
@@ -54,9 +54,17 @@ export interface AdminClusterConfigPayload {
   };
 }
 
-export interface AdminUserEntry extends AdminSessionRow {
+export interface AdminUserEntry
+  extends Omit<AdminSessionRow, 'lastFailStage' | 'lastFailDetail' | 'lastFailAt'> {
   /** Name of the stage the player is ABOUT to play (i.e. after currentStage). */
   nextStageName: string | null;
+  /**
+   * Last failed check on a stage still ahead of the player, so the operator
+   * can see what's missing without walking over. null once the stage passes
+   * (the history row flips to 'passed') or when the player moved past it
+   * (admin skip).
+   */
+  lastFail: { stage: string; detail: string | null; at: number } | null;
   totalStages: number;
   /** Stages this cluster will let a fresh session actually play (raw pack
    *  total minus stages filtered for cluster reasons — capability missing,
@@ -174,6 +182,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     throw err;
   });
   const sessions = new SessionQueries(deps.db);
+  const attempts = new AttemptQueries(deps.db);
   const totalStages = deps.pack.stages.length;
   // Position of each stage in the effective pack order — used to answer
   // "next stage after N" and "has session arrived at stage X?" without
@@ -217,15 +226,28 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       deps.clusterProfile,
     );
     const entries: AdminUserEntry[] = rows.map((row) => {
+      const { lastFailStage, lastFailDetail, lastFailAt, ...rest } = row;
       let nextStageName: string | null = null;
       if (row.finishedAt === null) {
         const curIdx = positionOf(row.currentStage);
         const nextIdx = curIdx + 1;
         nextStageName = nextIdx < effective.length ? (effective[nextIdx]?.name ?? null) : null;
       }
+      // Surface the fail only while its stage is still ahead of the player.
+      // Position-based (not `=== nextStageName`): per-session disabled stages
+      // can sit between currentStage and the one actually being played. An
+      // admin skip lands currentStage ON the failed stage → hidden.
+      const lastFail =
+        row.finishedAt === null &&
+        lastFailStage !== null &&
+        lastFailAt !== null &&
+        positionOf(lastFailStage) > positionOf(row.currentStage)
+          ? { stage: lastFailStage, detail: lastFailDetail, at: lastFailAt }
+          : null;
       return {
-        ...row,
+        ...rest,
         nextStageName,
+        lastFail,
         totalStages,
         effectiveTotalStages,
       };
@@ -236,6 +258,15 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       totalStages,
       entries,
     });
+  });
+
+  // Append-only trail of check attempts (newest first) — the Logs tab.
+  // stage_history keeps only each stage's latest state; this keeps the story.
+  router.get('/attempts', (c) => {
+    const raw = Number(c.req.query('limit') ?? 200);
+    const limit = Number.isFinite(raw) ? Math.min(Math.max(Math.trunc(raw), 1), 1000) : 200;
+    const entries: AttemptRow[] = attempts.listRecent(deps.pack.manifest.id, limit);
+    return c.json({ entries });
   });
 
   router.delete('/users/:id', (c) => {
