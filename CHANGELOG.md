@@ -15,11 +15,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
-- The `/admin` Users tab shows each player's last failed check, so the operator
-  can see what's missing and help without leaving the page.
-- Stuck players sort to the top of the `/admin` Users tab, and the browser tab
-  title shows how many are blocked.
-- New `/admin` Logs tab lists every check attempt (pass and fail) as it happens.
+- Operator QoL: `/admin` shows each player's last failed check, plus a Logs tab of all attempts.
 - Admin footer showing the running version, branch, and commit, with a changelog
   modal listing the latest GitHub Releases.
 - `GET /api/version` endpoint exposing the build-stamped version, git sha, branch,
