@@ -182,6 +182,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     throw err;
   });
   const sessions = new SessionQueries(deps.db);
+  const attempts = new AttemptQueries(deps.db);
   const totalStages = deps.pack.stages.length;
   // Position of each stage in the effective pack order — used to answer
   // "next stage after N" and "has session arrived at stage X?" without
@@ -264,7 +265,6 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   router.get('/attempts', (c) => {
     const raw = Number(c.req.query('limit') ?? 200);
     const limit = Number.isFinite(raw) ? Math.min(Math.max(Math.trunc(raw), 1), 1000) : 200;
-    const attempts = new AttemptQueries(deps.db);
     const entries: AttemptRow[] = attempts.listRecent(deps.pack.manifest.id, limit);
     return c.json({ entries });
   });

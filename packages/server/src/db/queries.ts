@@ -581,6 +581,7 @@ export class AttemptQueries {
     const rows = this.db
       .prepare(
         `SELECT
+           a.id AS id,
            a.session_id AS session_id,
            a.stage_name AS stage_name,
            a.status AS status,
@@ -598,6 +599,7 @@ export class AttemptQueries {
          LIMIT $limit`,
       )
       .all({ $packId: packId, $limit: limit }) as Array<{
+        id: number;
         session_id: string;
         stage_name: string;
         status: string;
@@ -608,6 +610,7 @@ export class AttemptQueries {
         username_var: string | null;
       }>;
     return rows.map((r) => ({
+      id: r.id,
       sessionId: r.session_id,
       trigram: parseJsonString(r.trigram_var),
       username: parseJsonString(r.username_var),
@@ -621,6 +624,7 @@ export class AttemptQueries {
 }
 
 export interface AttemptRow {
+  id: number;
   sessionId: string;
   trigram: string | null;
   username: string | null;

@@ -1254,8 +1254,8 @@ function LogsTab({
           </tr>
         </thead>
         <tbody>
-          {visible.map((a, i) => (
-            <tr key={`${a.sessionId}-${a.checkedAt}-${i}`}>
+          {visible.map((a) => (
+            <tr key={a.id}>
               <td className="c-dim">{fmtAge(a.checkedAt)}</td>
               <td className="admin-td-trigram">
                 {a.trigram ?? <span className="c-dim">—</span>}

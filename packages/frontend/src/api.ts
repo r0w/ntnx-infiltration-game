@@ -245,6 +245,7 @@ export interface AdminUserEntry {
 
 /** One row of the append-only check-attempt log (admin Logs tab). */
 export interface AdminAttemptEntry {
+  id: number;
   sessionId: string;
   trigram: string | null;
   username: string | null;
