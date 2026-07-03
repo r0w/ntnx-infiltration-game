@@ -428,15 +428,6 @@ function AdminDashboard({
           <button
             type="button"
             role="tab"
-            aria-selected={tab === 'logs'}
-            className={`admin-tab ${tab === 'logs' ? 'admin-tab-active' : ''}`}
-            onClick={() => setTab('logs')}
-          >
-            logs
-          </button>
-          <button
-            type="button"
-            role="tab"
             aria-selected={tab === 'pack'}
             className={`admin-tab ${tab === 'pack' ? 'admin-tab-active' : ''}`}
             onClick={() => setTab('pack')}
@@ -465,6 +456,15 @@ function AdminDashboard({
             onClick={() => setTab('scoreboard')}
           >
             scoreboard
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'logs'}
+            className={`admin-tab ${tab === 'logs' ? 'admin-tab-active' : ''}`}
+            onClick={() => setTab('logs')}
+          >
+            logs
           </button>
         </nav>
 
@@ -1164,11 +1164,47 @@ function PackEditor({
  * retries, wrong turns, and the moment a stage finally passed.
  */
 function LogsTab({ attempts }: { attempts: AdminAttemptEntry[] | null }) {
+  const [query, setQuery] = useState('');
+  const [failsOnly, setFailsOnly] = useState(false);
   if (attempts === null) return <div className="admin-empty">loading…</div>;
   if (attempts.length === 0) {
     return <div className="admin-empty">no check attempts yet.</div>;
   }
+  const q = query.trim().toLowerCase();
+  const visible = attempts.filter((a) => {
+    if (failsOnly && a.status !== 'failed') return false;
+    if (!q) return true;
+    return [a.trigram, a.username, a.stageName, a.detail].some(
+      (f) => f && f.toLowerCase().includes(q),
+    );
+  });
   return (
+    <>
+      <div className="admin-users-toolbar">
+        <input
+          type="search"
+          className="admin-logs-filter"
+          placeholder="filter by trigram, stage, or message…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <label className="admin-users-toggle">
+          <input
+            type="checkbox"
+            checked={failsOnly}
+            onChange={(e) => setFailsOnly(e.target.checked)}
+          />
+          <span>fails only</span>
+        </label>
+        {visible.length !== attempts.length && (
+          <span className="c-dim admin-logs-count">
+            {visible.length} / {attempts.length} attempts
+          </span>
+        )}
+      </div>
+      {visible.length === 0 ? (
+        <div className="admin-empty">no attempts match the filter.</div>
+      ) : (
     <div className="admin-table-wrap">
       <table className="admin-table">
         <thead>
@@ -1181,7 +1217,7 @@ function LogsTab({ attempts }: { attempts: AdminAttemptEntry[] | null }) {
           </tr>
         </thead>
         <tbody>
-          {attempts.map((a, i) => (
+          {visible.map((a, i) => (
             <tr key={`${a.sessionId}-${a.checkedAt}-${i}`}>
               <td className="c-dim">{fmtAge(a.checkedAt)}</td>
               <td className="admin-td-trigram">
@@ -1203,6 +1239,8 @@ function LogsTab({ attempts }: { attempts: AdminAttemptEntry[] | null }) {
         </tbody>
       </table>
     </div>
+      )}
+    </>
   );
 }
 

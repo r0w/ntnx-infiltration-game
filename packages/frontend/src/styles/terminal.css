@@ -1881,6 +1881,25 @@ a.terminal-link:visited {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.admin-logs-filter {
+  font-family: inherit;
+  font-size: 12px;
+  background: rgba(124, 220, 254, 0.03);
+  color: var(--fg);
+  border: 1px solid #1b232b;
+  border-radius: 4px;
+  padding: 6px 10px;
+  width: 320px;
+  margin-right: 14px;
+}
+.admin-logs-filter:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.admin-logs-count {
+  margin-left: 14px;
+}
+
 /* Logs tab detail cell — cap + ellipsis so one verbose API error doesn't
    stretch the whole table; full text lives in the title tooltip. */
 .admin-td-detail {
