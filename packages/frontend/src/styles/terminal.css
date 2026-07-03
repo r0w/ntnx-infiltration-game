@@ -1881,6 +1881,13 @@ a.terminal-link:visited {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* Logs tab detail cell — cap + ellipsis so one verbose API error doesn't
+   stretch the whole table; full text lives in the title tooltip. */
+.admin-td-detail {
+  max-width: 520px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .admin-fail-json {
   margin: 10px 0 0;
   padding: 10px 12px;

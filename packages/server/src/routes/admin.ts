@@ -3,7 +3,7 @@ import type { Database } from 'bun:sqlite';
 import type { CapabilityFlag, NutanixClient } from '@ntnx-game/engine';
 import { probeCapabilities, type CapabilityProbeDetail } from '@ntnx-game/nutanix';
 import { HttpError, type SessionService } from '../session-service';
-import { SessionQueries, ScoreboardPeerQueries, type AdminSessionRow, type ScoreboardPeerRow } from '../db/queries';
+import { AttemptQueries, SessionQueries, ScoreboardPeerQueries, type AdminSessionRow, type AttemptRow, type ScoreboardPeerRow } from '../db/queries';
 import type { LoadedPack } from '../pack-loader';
 import { analyzeDeps, cascadeDisable, type BrokenStage } from '../dep-analysis';
 import { probeClusterConfig } from '../cluster-config-probe';
@@ -257,6 +257,16 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       totalStages,
       entries,
     });
+  });
+
+  // Append-only trail of check attempts (newest first) — the Logs tab.
+  // stage_history keeps only each stage's latest state; this keeps the story.
+  router.get('/attempts', (c) => {
+    const raw = Number(c.req.query('limit') ?? 200);
+    const limit = Number.isFinite(raw) ? Math.min(Math.max(Math.trunc(raw), 1), 1000) : 200;
+    const attempts = new AttemptQueries(deps.db);
+    const entries: AttemptRow[] = attempts.listRecent(deps.pack.manifest.id, limit);
+    return c.json({ entries });
   });
 
   router.delete('/users/:id', (c) => {

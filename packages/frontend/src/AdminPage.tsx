@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   api,
+  type AdminAttemptEntry,
   type AdminClusterConfigPayload,
   type AdminClusterStatusPayload,
   type AdminGateEntry,
@@ -14,7 +15,7 @@ import {
 import { ConfirmModal, Modal } from './Modal';
 import { VersionFooter } from './VersionFooter';
 
-type AdminTab = 'users' | 'pack' | 'cluster' | 'scoreboard';
+type AdminTab = 'users' | 'logs' | 'pack' | 'cluster' | 'scoreboard';
 
 const STORAGE_KEY = 'ntnx-infiltration-admin-pw';
 
@@ -118,12 +119,13 @@ function AdminDashboard({
   // the right section. Unknown / missing → users (safe default).
   const navigate = useNavigate();
   const { tab: tabParam } = useParams<{ tab?: string }>();
-  const VALID_TABS = ['users', 'pack', 'cluster', 'scoreboard'] as const;
+  const VALID_TABS = ['users', 'logs', 'pack', 'cluster', 'scoreboard'] as const;
   const tab: AdminTab = (VALID_TABS as readonly string[]).includes(tabParam ?? '')
     ? (tabParam as AdminTab)
     : 'users';
   const setTab = (next: AdminTab) => navigate(`/admin/${next}`);
   const [entries, setEntries] = useState<AdminUserEntry[] | null>(null);
+  const [attempts, setAttempts] = useState<AdminAttemptEntry[] | null>(null);
   const [gates, setGates] = useState<AdminGateEntry[] | null>(null);
   const [lunch, setLunch] = useState<AdminLunchStatus | null>(null);
   const [lunchBusy, setLunchBusy] = useState(false);
@@ -184,8 +186,9 @@ function AdminDashboard({
 
   const refresh = useCallback(async () => {
     try {
-      const [usersPayload, gatesPayload, packPayload, lunchPayload, selfPayload, peersPayload] = await Promise.all([
+      const [usersPayload, attemptsPayload, gatesPayload, packPayload, lunchPayload, selfPayload, peersPayload] = await Promise.all([
         api.adminUsers(password),
+        api.adminAttempts(password),
         api.adminGates(password),
         api.adminPack(password),
         api.adminLunchStatus(password),
@@ -193,6 +196,7 @@ function AdminDashboard({
         api.adminPeers(password),
       ]);
       setEntries(usersPayload.entries);
+      setAttempts(attemptsPayload.entries);
       setGates(gatesPayload.entries);
       setPackStages(packPayload.stages);
       setPackBrokenCount(packPayload.brokenCount);
@@ -223,6 +227,16 @@ function AdminDashboard({
     const id = window.setInterval(() => void refresh(), 5000);
     return () => window.clearInterval(id);
   }, [refresh]);
+
+  // Stuck-player count in the tab title — the operator usually has /admin
+  // in a background tab while helping someone.
+  useEffect(() => {
+    const stuck = (entries ?? []).filter((e) => e.lastFail !== null).length;
+    document.title = stuck > 0 ? `(${stuck}⚠) NIG - admin` : 'NIG - admin';
+    return () => {
+      document.title = 'NIG - admin';
+    };
+  }, [entries]);
 
   const toggleLunch = async () => {
     if (!lunch) return;
@@ -410,6 +424,15 @@ function AdminDashboard({
             onClick={() => setTab('users')}
           >
             users
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'logs'}
+            className={`admin-tab ${tab === 'logs' ? 'admin-tab-active' : ''}`}
+            onClick={() => setTab('logs')}
+          >
+            logs
           </button>
           <button
             type="button"
@@ -602,9 +625,16 @@ function AdminDashboard({
       ) : tab === 'users' && entries ? (
         (() => {
           const hiddenCount = entries.filter((e) => e.trigram === null).length;
-          const visible = showAnonymousUsers
+          const filtered = showAnonymousUsers
             ? entries
             : entries.filter((e) => e.trigram !== null);
+          // Stuck players first, longest-stuck on top — the triage order.
+          // The rest keeps the server's newest-session-first order.
+          const visible = [...filtered].sort((a, b) => {
+            if (!!a.lastFail !== !!b.lastFail) return a.lastFail ? -1 : 1;
+            if (a.lastFail && b.lastFail) return a.lastFail.at - b.lastFail.at;
+            return 0;
+          });
           return (
             <>
               <div className="admin-users-toolbar">
@@ -748,6 +778,9 @@ function AdminDashboard({
           );
         })()
       ) : null}
+      {tab === 'logs' && (
+        <LogsTab attempts={attempts} />
+      )}
       {tab === 'pack' && (
         <PackEditor
           stages={packStages}
@@ -1119,6 +1152,54 @@ function PackEditor({
               </tr>
             );
           })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * Logs tab: the append-only check-attempt trail, newest first. Where the
+ * Users tab answers "who is stuck NOW", this answers "what happened" —
+ * retries, wrong turns, and the moment a stage finally passed.
+ */
+function LogsTab({ attempts }: { attempts: AdminAttemptEntry[] | null }) {
+  if (attempts === null) return <div className="admin-empty">loading…</div>;
+  if (attempts.length === 0) {
+    return <div className="admin-empty">no check attempts yet.</div>;
+  }
+  return (
+    <div className="admin-table-wrap">
+      <table className="admin-table">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Trigram</th>
+            <th>Stage</th>
+            <th>Result</th>
+            <th>Detail</th>
+          </tr>
+        </thead>
+        <tbody>
+          {attempts.map((a, i) => (
+            <tr key={`${a.sessionId}-${a.checkedAt}-${i}`}>
+              <td className="c-dim">{fmtAge(a.checkedAt)}</td>
+              <td className="admin-td-trigram">
+                {a.trigram ?? <span className="c-dim">—</span>}
+              </td>
+              <td>{a.stageName}</td>
+              <td>
+                {a.status === 'passed' ? (
+                  <span className="c-green">✓ pass</span>
+                ) : (
+                  <span className="c-yellow">⚠ fail</span>
+                )}
+              </td>
+              <td className="admin-td-detail" title={a.detail ?? ''}>
+                {splitCheckDetail(a.detail).prose || <span className="c-dim">—</span>}
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>

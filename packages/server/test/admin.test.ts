@@ -13,6 +13,7 @@ import {
   type StageDefinition,
 } from '@ntnx-game/engine';
 import {
+  AttemptQueries,
   ClusterCacheQueries,
   HistoryQueries,
   MockOverlayQueries,
@@ -280,6 +281,57 @@ describe('GET /api/admin/users', () => {
     expect(body.entries[0].finishedAt).not.toBeNull();
     expect(body.entries[0].nextStageName).toBeNull();
     expect(body.entries[0].pin).toBe('9999');
+  });
+});
+
+describe('GET /api/admin/attempts', () => {
+  test('without header → 401', async () => {
+    const r = await router(freshDb()).request('/attempts');
+    expect(r.status).toBe(401);
+  });
+
+  test('returns attempts newest-first with trigram joined, scoped to pack', async () => {
+    const db = freshDb();
+    seedSession(db, { id: 'sess-a', trigram: 'AAA', pin: '1111', currentStage: 'login' });
+    seedSession(db, { id: 'sess-x', trigram: 'XXX', pin: '2222', packId: 'other-pack' });
+    const attempts = new AttemptQueries(db);
+    attempts.record('sess-a', 'intro', 'failed', 120, 'missing NIC');
+    attempts.record('sess-a', 'intro', 'passed', 90, 'all good');
+    attempts.record('sess-x', 'intro', 'failed', 50, 'invisible (other pack)');
+    const r = await router(db).request('/attempts', {
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { entries: Array<{ trigram: string | null; status: string; detail: string | null }> };
+    expect(body.entries).toHaveLength(2);
+    // Same-millisecond inserts fall back to id DESC — newest insert first.
+    expect(body.entries[0].status).toBe('passed');
+    expect(body.entries[1].status).toBe('failed');
+    expect(body.entries.every((e) => e.trigram === 'AAA')).toBe(true);
+  });
+
+  test('respects ?limit=', async () => {
+    const db = freshDb();
+    seedSession(db, { id: 'sess-l', trigram: 'LIM', pin: '1111' });
+    const attempts = new AttemptQueries(db);
+    for (let i = 0; i < 5; i++) attempts.record('sess-l', 'intro', 'failed', 10, `try ${i}`);
+    const r = await router(db).request('/attempts?limit=2', {
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    const body = (await r.json()) as { entries: unknown[] };
+    expect(body.entries).toHaveLength(2);
+  });
+
+  test('session delete cascades its attempts', async () => {
+    const db = freshDb();
+    seedSession(db, { id: 'sess-c', trigram: 'CAS', pin: '1111' });
+    new AttemptQueries(db).record('sess-c', 'intro', 'failed', 10, 'x');
+    await router(db).request('/users/sess-c', {
+      method: 'DELETE',
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    const left = db.prepare('SELECT COUNT(*) AS n FROM check_attempts').get() as { n: number };
+    expect(left.n).toBe(0);
   });
 });
 

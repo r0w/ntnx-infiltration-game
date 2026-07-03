@@ -549,6 +549,88 @@ export class HistoryQueries {
   }
 }
 
+/** Append-only trail of check attempts — see schema.sql `check_attempts`. */
+export class AttemptQueries {
+  constructor(private readonly db: Database) {}
+
+  record(
+    sessionId: string,
+    stageName: string,
+    status: 'passed' | 'failed',
+    durationMs: number | null,
+    detail: string | null,
+  ): void {
+    this.db
+      .prepare(
+        `INSERT INTO check_attempts (session_id, stage_name, status, checked_at, duration_ms, detail)
+         VALUES ($sid, $stage, $status, $ts, $dur, $detail)`,
+      )
+      .run({
+        $sid: sessionId,
+        $stage: stageName,
+        $status: status,
+        $ts: Date.now(),
+        $dur: durationMs,
+        $detail: detail,
+      });
+  }
+
+  /** Newest-first attempts for the pack, with the session's trigram/username
+   *  joined in so the admin Logs tab renders without a second lookup. */
+  listRecent(packId: string, limit: number): AttemptRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT
+           a.session_id AS session_id,
+           a.stage_name AS stage_name,
+           a.status AS status,
+           a.checked_at AS checked_at,
+           a.duration_ms AS duration_ms,
+           a.detail AS detail,
+           (SELECT value FROM session_variables
+              WHERE session_id = a.session_id AND name = 'Trigram') AS trigram_var,
+           (SELECT value FROM session_variables
+              WHERE session_id = a.session_id AND name = 'Username') AS username_var
+         FROM check_attempts a
+         JOIN sessions s ON s.id = a.session_id
+         WHERE s.pack_id = $packId
+         ORDER BY a.checked_at DESC, a.id DESC
+         LIMIT $limit`,
+      )
+      .all({ $packId: packId, $limit: limit }) as Array<{
+        session_id: string;
+        stage_name: string;
+        status: string;
+        checked_at: number;
+        duration_ms: number | null;
+        detail: string | null;
+        trigram_var: string | null;
+        username_var: string | null;
+      }>;
+    return rows.map((r) => ({
+      sessionId: r.session_id,
+      trigram: parseJsonString(r.trigram_var),
+      username: parseJsonString(r.username_var),
+      stageName: r.stage_name,
+      status: r.status as 'passed' | 'failed',
+      checkedAt: r.checked_at,
+      durationMs: r.duration_ms,
+      detail: r.detail,
+    }));
+  }
+}
+
+export interface AttemptRow {
+  sessionId: string;
+  trigram: string | null;
+  username: string | null;
+  stageName: string;
+  status: 'passed' | 'failed';
+  checkedAt: number;
+  durationMs: number | null;
+  detail: string | null;
+}
+
 export class ClusterCacheQueries {
   constructor(private readonly db: Database) {}
 
