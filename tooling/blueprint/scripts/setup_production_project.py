@@ -41,14 +41,9 @@ HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
 
 def _make_session():
-    """A Session that retries transient transport errors + 5xx via urllib3's
-    Retry adapter (issue #28) — verified to work, backoff included, in the Calm
-    escript sandbox.
-
-    Route ONLY idempotent calls through it. `allowed_methods` has to include POST
-    because our v3 `/list` reads are POSTs, so mutations (the project-create POST)
-    deliberately stay on plain `requests` — a retried-after-timeout create would
-    risk a duplicate (the create does its own explicit duplicate recovery)."""
+    """Retrying session for idempotent reads; mutations (the create
+    POST) stay on plain `requests` to avoid a retried-after-timeout duplicate.
+    POST is allowed because our v3 `/list` reads are POSTs."""
     retry = Retry(
         total=4, connect=4, read=4, backoff_factor=0.5,
         status_forcelist=(500, 502, 503, 504),
@@ -185,7 +180,7 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
     r = None
     for attempt in range(CREATE_POLLS):
         # Non-idempotent mutation: can't blind-retry (duplicate risk). On a
-        # transport blip, check if PC created it anyway before re-POSTing. #28.
+        # transport blip, check if PC created it anyway before re-POSTing.
         try:
             r = requests.post(
                 "%s/api/nutanix/v3/projects" % BASE,

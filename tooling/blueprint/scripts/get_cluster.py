@@ -15,9 +15,8 @@ headers = {
 
 
 def _make_session():
-    """A Session that retries transient transport errors + 5xx via urllib3's
-    Retry adapter (issue #28). This is the FIRST install task: a single blip
-    here would otherwise kill the whole deploy before CLUSTERUUID is set."""
+    """Retrying session — this is the first install task, so a single
+    blip here would otherwise kill the deploy before CLUSTERUUID is set."""
     retry = Retry(total=4, connect=4, read=4, backoff_factor=0.5,
                   status_forcelist=(500, 502, 503, 504), raise_on_status=False)
     s = requests.Session()

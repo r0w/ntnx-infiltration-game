@@ -56,10 +56,8 @@ HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
 
 def _make_session():
-    """A Session that retries transient transport errors + 5xx via urllib3's
-    Retry adapter (issue #28) — proven to work in the Calm escript sandbox.
-    Route ONLY idempotent calls through it (POST is allowed because our v3
-    `/list` reads are POSTs); mutations stay on plain `requests`."""
+    """Retrying session for idempotent reads; mutations use plain
+    `requests`. POST is allowed because our v3 `/list` reads are POSTs."""
     retry = Retry(total=4, connect=4, read=4, backoff_factor=0.5,
                   status_forcelist=(500, 502, 503, 504),
                   allowed_methods=frozenset(("GET", "POST", "PUT", "DELETE")),
