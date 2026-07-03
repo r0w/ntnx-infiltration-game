@@ -159,6 +159,36 @@ def test_create_project_recreates_after_error_state_dupe():
     assert ns["create_project"]("acc", "pri", "sec") == "proj-fresh"
 
 
+def test_create_project_survives_blip_during_recovery_lookup():
+    # create POST blips, and the recovery find_existing_project ALSO blips
+    # (persistent outage) — it must be swallowed so the loop retries the create
+    # rather than aborting. iter1: create raises + lookup raises -> continue;
+    # iter2: create 202 -> task SUCCEEDED.
+    fake_req = FakeReq(post=[
+        FakeRequestException("blip 1"),
+        FakeResp(202, {"status": {"execution_context": {"task_uuid": "t3"}}}),
+    ])
+    sess = FakeSession(
+        post=[FakeRequestException("lookup blip")],
+        get=[FakeResp(200, {"status": "SUCCEEDED",
+                            "entity_reference_list": [{"uuid": "proj-retry"}]})],
+    )
+    ns = _load(sess, fake_req)
+    assert ns["create_project"]("acc", "pri", "sec") == "proj-retry"
+
+
+def test_create_project_does_not_treat_not_found_as_duplicate():
+    # A 422 "subnet does not exist" must NOT be mistaken for a duplicate (the
+    # old "EXIST" token matched "does not exist") — it's a genuine failure.
+    ns = _load(FakeSession(), FakeReq(post=[
+        FakeResp(422, text='{"message":"Referenced subnet does not exist"}')]))
+    try:
+        ns["create_project"]("acc", "pri", "sec")
+        assert False, "expected a genuine failure, not duplicate-adoption"
+    except Exception as e:
+        assert "create project failed" in str(e)
+
+
 def test_create_project_raises_on_genuine_failure():
     # A 400 that isn't a duplicate and isn't a subnet-lag 404 is fatal.
     ns = _load(FakeSession(), FakeReq(post=[FakeResp(400, text="malformed body")]))

@@ -90,7 +90,7 @@ def find_existing_project():
         # doesn't 409 on duplicate name. Iteration-based (sandbox sleep is
         # unreliable); MAX_POLLS=30 ≈ 15-30 s real wall-clock.
         for _ in range(30):
-            chk = requests.post(
+            chk = _SESS.post(
                 "%s/api/nutanix/v3/projects/list" % BASE,
                 auth=AUTH, headers=HEADERS, verify=False, timeout=20,
                 data=json.dumps({"kind": "project", "filter": "name==%s" % PROJECT_NAME}),
@@ -150,6 +150,17 @@ def get_subnet_uuid(name):
     return None
 
 
+def _find_existing_safe():
+    """find_existing_project() but swallow a transient blip during the lookup
+    (return None) so create_project's loop retries instead of aborting — the
+    recovery lookup itself can hit the same outage that caused the create to
+    fail."""
+    try:
+        return find_existing_project()
+    except requests.RequestException:
+        return None
+
+
 def create_project(account_uuid, primary_uuid, secondary_uuid):
     body = {
         "metadata": {"kind": "project"},
@@ -190,7 +201,7 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
         except requests.RequestException as e:
             last = "transport error: %s" % str(e)[:200]
             print("  [warn] create POST blip (attempt %d/%d): %s" % (attempt + 1, CREATE_POLLS, last))
-            existing = find_existing_project()
+            existing = _find_existing_safe()
             if existing:
                 print("  [recover] created server-side despite the blip — adopting %s" % existing)
                 return existing
@@ -202,15 +213,15 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
         if r.status_code == 404 and "ENTITY_NOT_FOUND" in r.text:
             print("  [warn] subnet not yet resolvable by projects API "
                   "(attempt %d/%d) — waiting" % (attempt + 1, CREATE_POLLS))
-            requests.get("%s/api/nutanix/v3/subnets/list" % BASE,
-                         auth=AUTH, headers=HEADERS, verify=False, timeout=20)
+            _SESS.get("%s/api/nutanix/v3/subnets/list" % BASE,
+                      auth=AUTH, headers=HEADERS, verify=False, timeout=20)
             continue
         # Duplicate name = a prior timed-out POST actually succeeded. Adopt it
         # (PC 7.5 returns 400 + DUPLICATE_ENTITY, not 409 — match body tokens).
-        if r.status_code in (400, 409, 422, 500) and any(
-            tok in r.text.upper() for tok in ("DUPLICATE", "ALREADY", "EXIST")
+        if r.status_code in (400, 409, 422) and any(
+            tok in r.text.upper() for tok in ("DUPLICATE", "ALREADY")
         ):
-            existing = find_existing_project()
+            existing = _find_existing_safe()
             if existing:
                 print("  [recover] duplicate-name create — adopting %s" % existing)
                 return existing
