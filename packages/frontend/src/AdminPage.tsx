@@ -125,7 +125,6 @@ function AdminDashboard({
     : 'users';
   const setTab = (next: AdminTab) => navigate(`/admin/${next}`);
   const [entries, setEntries] = useState<AdminUserEntry[] | null>(null);
-  const [attempts, setAttempts] = useState<AdminAttemptEntry[] | null>(null);
   const [gates, setGates] = useState<AdminGateEntry[] | null>(null);
   const [lunch, setLunch] = useState<AdminLunchStatus | null>(null);
   const [lunchBusy, setLunchBusy] = useState(false);
@@ -194,9 +193,8 @@ function AdminDashboard({
 
   const refresh = useCallback(async () => {
     try {
-      const [usersPayload, attemptsPayload, gatesPayload, packPayload, lunchPayload, selfPayload, peersPayload] = await Promise.all([
+      const [usersPayload, gatesPayload, packPayload, lunchPayload, selfPayload, peersPayload] = await Promise.all([
         api.adminUsers(password),
-        api.adminAttempts(password),
         api.adminGates(password),
         api.adminPack(password),
         api.adminLunchStatus(password),
@@ -204,7 +202,6 @@ function AdminDashboard({
         api.adminPeers(password),
       ]);
       setEntries(usersPayload.entries);
-      setAttempts(attemptsPayload.entries);
       setGates(gatesPayload.entries);
       setPackStages(packPayload.stages);
       setPackBrokenCount(packPayload.brokenCount);
@@ -800,7 +797,7 @@ function AdminDashboard({
         })()
       ) : null}
       {tab === 'logs' && (
-        <LogsTab attempts={attempts} query={logsQuery} onQueryChange={setLogsQuery} />
+        <LogsTab password={password} query={logsQuery} onQueryChange={setLogsQuery} />
       )}
       {tab === 'pack' && (
         <PackEditor
@@ -1194,15 +1191,32 @@ function PackEditor({
  * retries, wrong turns, and the moment a stage finally passed.
  */
 function LogsTab({
-  attempts,
+  password,
   query,
   onQueryChange,
 }: {
-  attempts: AdminAttemptEntry[] | null;
+  password: string;
   query: string;
   onQueryChange: (q: string) => void;
 }) {
+  // The attempt log is only consumed here, so it's fetched + polled only
+  // while this tab is mounted — not in the dashboard-wide refresh.
+  const [attempts, setAttempts] = useState<AdminAttemptEntry[] | null>(null);
   const [failsOnly, setFailsOnly] = useState(false);
+  const fetchAttempts = useCallback(async () => {
+    try {
+      const payload = await api.adminAttempts(password);
+      setAttempts(payload.entries);
+    } catch {
+      // transient fetch error — keep the last list, next poll retries; auth
+      // failures are caught by the dashboard refresh which handles logout.
+    }
+  }, [password]);
+  useEffect(() => {
+    void fetchAttempts();
+    const id = window.setInterval(() => void fetchAttempts(), 5000);
+    return () => window.clearInterval(id);
+  }, [fetchAttempts]);
   if (attempts === null) return <div className="admin-empty">loading…</div>;
   if (attempts.length === 0) {
     return <div className="admin-empty">no check attempts yet.</div>;

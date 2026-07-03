@@ -74,6 +74,9 @@ CREATE TABLE IF NOT EXISTS check_attempts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_check_attempts_at ON check_attempts(checked_at DESC);
+-- session_id index keeps ON DELETE CASCADE from scanning the whole log on
+-- every session delete.
+CREATE INDEX IF NOT EXISTS idx_check_attempts_session ON check_attempts(session_id);
 
 CREATE TABLE IF NOT EXISTS cluster_cache (
   session_id TEXT NOT NULL,
