@@ -23,6 +23,7 @@ import urllib3
 import uuid
 
 import requests
+from requests.adapters import HTTPAdapter, Retry
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -39,13 +40,33 @@ AUTH = (PC_USERNAME, PC_PASSWORD)
 HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
 
+def _make_session():
+    """Retrying session for idempotent reads; mutations (the create
+    POST) stay on plain `requests` to avoid a retried-after-timeout duplicate.
+    POST is allowed because our v3 `/list` reads are POSTs."""
+    retry = Retry(
+        total=4, connect=4, read=4, backoff_factor=0.5,
+        status_forcelist=(500, 502, 503, 504),
+        allowed_methods=frozenset(("GET", "POST", "PUT", "DELETE")),
+        raise_on_status=False,
+    )
+    s = requests.Session()
+    adapter = HTTPAdapter(max_retries=retry)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+    return s
+
+
+_SESS = _make_session()
+
+
 def find_existing_project():
     """Return the uuid of the `production` project if it exists in a HEALTHY
     state. If the project exists but state == ERROR (e.g. previous deploy hit
     a Calm policy-engine-not-ready race during create), delete it and return
     None so the caller re-creates a clean one. Recreating without deleting
     would 409 on duplicate name."""
-    r = requests.post(
+    r = _SESS.post(
         "%s/api/nutanix/v3/projects/list" % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
         data=json.dumps({"kind": "project", "filter": "name==%s" % PROJECT_NAME}),
@@ -59,7 +80,7 @@ def find_existing_project():
     uuid = p['metadata']['uuid']
     if state == 'ERROR':
         print("  [recover] existing project %s in state=ERROR — deleting before recreate" % uuid)
-        dr = requests.delete(
+        dr = _SESS.delete(
             "%s/api/nutanix/v3/projects/%s" % (BASE, uuid),
             auth=AUTH, headers=HEADERS, verify=False, timeout=30,
         )
@@ -69,7 +90,7 @@ def find_existing_project():
         # doesn't 409 on duplicate name. Iteration-based (sandbox sleep is
         # unreliable); MAX_POLLS=30 ≈ 15-30 s real wall-clock.
         for _ in range(30):
-            chk = requests.post(
+            chk = _SESS.post(
                 "%s/api/nutanix/v3/projects/list" % BASE,
                 auth=AUTH, headers=HEADERS, verify=False, timeout=20,
                 data=json.dumps({"kind": "project", "filter": "name==%s" % PROJECT_NAME}),
@@ -81,7 +102,7 @@ def find_existing_project():
 
 
 def get_account_uuid():
-    r = requests.post(
+    r = _SESS.post(
         "%s/api/nutanix/v3/accounts/list" % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
         data=json.dumps({"kind": "account", "filter": "type==nutanix_pc"}),
@@ -108,7 +129,7 @@ def get_subnet_uuid(name):
     'secondary'" 3 s after Setup subnets confirmed it exists.
     """
     for attempt in range(6):  # 6 × 5 s = 30 s cap
-        r = requests.post(
+        r = _SESS.post(
             "%s/api/nutanix/v3/subnets/list" % BASE,
             auth=AUTH, headers=HEADERS, verify=False, timeout=20,
             data=json.dumps({"kind": "subnet", "length": 250}),
@@ -127,6 +148,17 @@ def get_subnet_uuid(name):
                   (name, attempt + 1))
             time.sleep(5)
     return None
+
+
+def _find_existing_safe():
+    """find_existing_project() but swallow a transient blip during the lookup
+    (return None) so create_project's loop retries instead of aborting — the
+    recovery lookup itself can hit the same outage that caused the create to
+    fail."""
+    try:
+        return find_existing_project()
+    except requests.RequestException:
+        return None
 
 
 def create_project(account_uuid, primary_uuid, secondary_uuid):
@@ -158,19 +190,44 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
     last = ""
     r = None
     for attempt in range(CREATE_POLLS):
-        r = requests.post(
-            "%s/api/nutanix/v3/projects" % BASE,
-            auth=AUTH, headers=HEADERS, verify=False, timeout=30,
-            data=json.dumps(body),
-        )
+        # Non-idempotent mutation: can't blind-retry (duplicate risk). On a
+        # transport blip, check if PC created it anyway before re-POSTing.
+        try:
+            r = requests.post(
+                "%s/api/nutanix/v3/projects" % BASE,
+                auth=AUTH, headers=HEADERS, verify=False, timeout=60,
+                data=json.dumps(body),
+            )
+        except requests.RequestException as e:
+            last = "transport error: %s" % str(e)[:200]
+            print("  [warn] create POST blip (attempt %d/%d): %s" % (attempt + 1, CREATE_POLLS, last))
+            existing = _find_existing_safe()
+            if existing:
+                print("  [recover] created server-side despite the blip — adopting %s" % existing)
+                return existing
+            time.sleep(3)
+            continue
         if r.status_code < 400:
             break
         last = "%d %s" % (r.status_code, r.text[:300])
         if r.status_code == 404 and "ENTITY_NOT_FOUND" in r.text:
             print("  [warn] subnet not yet resolvable by projects API "
                   "(attempt %d/%d) — waiting" % (attempt + 1, CREATE_POLLS))
-            requests.get("%s/api/nutanix/v3/subnets/list" % BASE,
-                         auth=AUTH, headers=HEADERS, verify=False, timeout=20)
+            _SESS.get("%s/api/nutanix/v3/subnets/list" % BASE,
+                      auth=AUTH, headers=HEADERS, verify=False, timeout=20)
+            continue
+        # Duplicate name = a prior timed-out POST actually succeeded. Adopt it
+        # (PC 7.5 returns 400 + DUPLICATE_ENTITY, not 409 — match body tokens).
+        if r.status_code in (400, 409, 422) and any(
+            tok in r.text.upper() for tok in ("DUPLICATE", "ALREADY")
+        ):
+            existing = _find_existing_safe()
+            if existing:
+                print("  [recover] duplicate-name create — adopting %s" % existing)
+                return existing
+            # find_existing_project deleted an ERROR-state dupe and returned
+            # None — loop to recreate a clean one rather than failing.
+            time.sleep(3)
             continue
         raise Exception("create project failed: %s" % last)
     if r is None or r.status_code >= 400:
@@ -185,7 +242,7 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
     # MAX_POLLS=120 is ~60-120 s of real wall-clock without trusting sleep.
     MAX_POLLS = 120
     for poll in range(MAX_POLLS):
-        r = requests.get(
+        r = _SESS.get(
             "%s/api/nutanix/v3/tasks/%s" % (BASE, task_uuid),
             auth=AUTH, headers=HEADERS, verify=False, timeout=20,
         )
@@ -199,7 +256,7 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
 
 
 def get_project_spec_version(project_uuid):
-    r = requests.get(
+    r = _SESS.get(
         "%s/api/nutanix/v3/projects/%s" % (BASE, project_uuid),
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
     )
@@ -209,7 +266,7 @@ def get_project_spec_version(project_uuid):
 
 def get_directory_id():
     """Returns the first directory service ID. Legacy assumes [0]."""
-    r = requests.get(
+    r = _SESS.get(
         "%s/api/iam/v4.0/authn/directory-services" % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
     )
@@ -231,7 +288,8 @@ def import_ldap_user(directory_id):
         "userType": "LDAP",
         "idpId": directory_id,
     }
-    r = requests.post(
+    # Idempotent (409 = already exists) — safe to retry.
+    r = _SESS.post(
         "%s/api/iam/v4.0/authn/users" % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=30,
         data=json.dumps(body),
@@ -249,7 +307,7 @@ def get_user_uuid(username):
     target = username.lower()
     page = 0
     while True:
-        r = requests.get(
+        r = _SESS.get(
             "%s/api/iam/v4.0/authn/users" % BASE,
             auth=AUTH, headers=HEADERS, verify=False, timeout=20,
             params={"$limit": 100, "$page": page},
@@ -269,7 +327,7 @@ def get_user_uuid(username):
 
 
 def get_project_admin_role_uuid():
-    r = requests.get(
+    r = _SESS.get(
         "%s/api/iam/v4.0/authz/roles?$filter=startswith(displayName,'Project')&$select=displayName,extId"
         % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
@@ -460,7 +518,8 @@ def add_user_as_project_admin(project_uuid, account_uuid, primary_uuid,
             ],
         },
     }
-    r = requests.put(
+    # operation:ADD is a no-op when already a member — safe to retry.
+    r = _SESS.put(
         "%s/api/nutanix/v3/projects_internal/%s" % (BASE, project_uuid),
         auth=AUTH, headers=HEADERS, verify=False, timeout=60,
         data=json.dumps(payload),
