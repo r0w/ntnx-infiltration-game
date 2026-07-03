@@ -217,7 +217,7 @@
         "displayName": "{Trigram}-auth",
         "role": "role-super-admin",
         "identities": [
-          { "identityFilter": { "user": { "uuid": { "anyof": ["{UserUUID}"] } } } }
+          { "identityFilter": { "user": { "uuid": { "anyof": ["user-{Trigram}-adm"] } } } }
         ],
         "entities": [{ "entityFilter": { "*": { "*": { "eq": "*" } } } }],
         "authorizationPolicyType": "USER_DEFINED"

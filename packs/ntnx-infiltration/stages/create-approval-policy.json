@@ -17,12 +17,13 @@
     "stage-021.line-11"
   ],
   "saveScore": false,
-  "requiresOnOther": ["ApprovalPolicy"],
   "check": {
     "fn": "CheckApprovalPolicy"
   },
   "needs": [
-    "ProtectionPolicyUUID",
     "Trigram"
+  ],
+  "requiresOnOther": [
+    "ApprovalPolicy"
   ]
 }

@@ -23,7 +23,6 @@ const STAGES_DIR = join(PACK_DIR, 'stages');
 const LOCALES_DIR = join(PACK_DIR, 'locales');
 
 type StageJson = {
-  id: number;
   name?: string;
   messages: string[];
   captures?: string[];
@@ -37,16 +36,15 @@ const ENV_SEEDED = new Set(['PC', 'PCUser', 'PCPassword', 'Vlanid', 'ImageURL'])
 // Known check → captured variable names. Derived from reading
 // packs/ntnx-infiltration/checks/index.ts — each check's `captured` return.
 // Kept as explicit mapping so the audit doesn't parse TypeScript.
+// Since issue #31, checks re-resolve entity UUIDs by trigram-prefixed name
+// at check time instead of trusting stored vars (which went stale when a
+// resource was re-created). Only genuinely historical state is captured:
+// HostUUID (live-migration compares current vs previous host) and VMUUID
+// (recovery-point action + incident-freeze invalidation).
 const CHECK_CAPTURES: Record<string, string[]> = {
-  CheckUser: ['UserUUID'],
-  CheckProject: ['ProjectUUID'],
-  CheckNetwork: ['NetworkUUID'],
-  CheckImage: ['ImageUUID'],
   CheckVM: ['VMUUID', 'HostUUID'],
   CheckLiveMigration: ['HostUUID'],
   CheckRestoreVM: ['VMUUID'],
-  CheckCat: ['CatUUID'],
-  CheckProtectionPolicy: ['ProtectionPolicyUUID'],
 };
 
 // Known check → consumed variable names. These are dependencies the check
@@ -57,8 +55,6 @@ const CHECK_CONSUMES: Record<string, string[]> = {
   // Stage-1 trigram is consumed implicitly by every name-based check via
   // getTrigram(ctx) — covered by the `{Trigram}` tokens in prose already.
   CheckLiveMigration: ['HostUUID'],
-  CheckCatVM: ['CatUUID'],
-  CheckApprovalPolicy: ['ProtectionPolicyUUID'],
   CheckUpdateBP: ['Vlanid'],
   CheckNewNode: ['NodeSerial'],
   CheckUpdates: ['NumberUpdates'],
@@ -68,6 +64,8 @@ const CHECK_CONSUMES: Record<string, string[]> = {
 // Variables that aren't referenced in prose but still useful to allow-list
 // (e.g. set indirectly or read by frontend only).
 const IGNORE_VARS = new Set([
+  // Computed at runtime by login's `computeGreeting` block, not a capture.
+  'Greeting',
   // Legacy / game-content placeholders not actually bound to anything yet.
   'EmailReport',
   'OldPC',
@@ -113,11 +111,24 @@ function loadCatalog(locale: string): Record<string, string> {
 
 function loadStages(): Stage[] {
   const catalog = loadCatalog('en');
+  // Stage order lives in pack.json's `stages[]` (the JSON files carry no id).
+  // Derive each stage's id from its position there — producer/consumer
+  // ordering and orphan detection depend on it.
+  const pack = JSON.parse(readFileSync(join(PACK_DIR, 'pack.json'), 'utf8')) as {
+    stages?: string[];
+  };
+  const order = new Map<string, number>();
+  (pack.stages ?? []).forEach((name, i) => order.set(name, i));
   const files = readdirSync(STAGES_DIR).filter((f) => f.endsWith('.json')).sort();
   const stages: Stage[] = [];
   for (const file of files) {
     const path = join(STAGES_DIR, file);
     const json = JSON.parse(readFileSync(path, 'utf8')) as StageJson;
+    const id = order.get(json.name ?? file.replace(/\.json$/, ''));
+    if (id === undefined) {
+      console.warn(`warning: ${file} not listed in pack.json stages[] — skipped`);
+      continue;
+    }
     const consumes = new Set<string>();
     const produces = new Set<string>();
     for (const key of json.messages) {
@@ -126,7 +137,10 @@ function loadStages(): Stage[] {
       for (const v of scanVarRefs(template)) consumes.add(v);
       for (const v of scanInputVars(template)) produces.add(v);
     }
-    for (const v of json.captures ?? []) produces.add(v);
+    // Note: deliberately NOT seeding `produces` from the file's existing
+    // `captures` — that made stale captures self-perpetuating across
+    // `--apply` runs. Produces derive only from prose `<input/>` tokens and
+    // the CHECK_CAPTURES map.
     if (json.check?.fn) {
       for (const v of CHECK_CAPTURES[json.check.fn] ?? []) produces.add(v);
       for (const v of CHECK_CONSUMES[json.check.fn] ?? []) consumes.add(v);
@@ -141,7 +155,7 @@ function loadStages(): Stage[] {
     const fn = json.check?.fn;
     const rehydratable = !!fn && (CHECK_CAPTURES[fn]?.length ?? 0) > 0;
     stages.push({
-      id: json.id,
+      id,
       name: json.name,
       file,
       json,
@@ -308,6 +322,7 @@ function reorderStage(s: Record<string, unknown>): Record<string, unknown> {
     'defaultColor',
     'messages',
     'saveScore',
+    'requiresOnOther',
     'typingSpeedMs',
     'silentOnSuccess',
     'waitForInputValue',

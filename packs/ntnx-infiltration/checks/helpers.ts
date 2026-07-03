@@ -132,34 +132,110 @@ export function localizedHint(
 }
 
 /**
- * Self-healing variable resolver: read `varName` from session vars first;
- * if missing/empty, look it up live on the cluster via `lookup` and persist
- * the recovered extId back to session vars (under `varName`, captured at
- * the current stage). Returns undefined when the resource isn't on the
- * cluster either — the caller decides whether to surface that as a check
- * failure or skip the assertion entirely.
- *
- * Why: stages capture UUIDs (NetworkUUID, ImageUUID, ProjectUUID, …) when
- * the upstream stage's check runs, but server restarts / DB migrations /
- * resumed sessions can leave a downstream check seeing an absent var even
- * though the resource exists. Re-discovering by name is invisible to the
- * player and avoids "run upstream stages first" diagnostics that confuse
- * the user when, from their POV, they DID run them.
+ * Resolve-by-name lookups (issue #31). Checks used to trust UUID vars
+ * captured once by upstream stages; if the player re-created the resource
+ * the stored UUID went stale and the check false-failed. The trigram-
+ * prefixed name is the real contract with the player, so consumers resolve
+ * it fresh at check time instead. Miss and transport errors both return
+ * undefined — the caller either skips the assertion or fails with a clear
+ * "resource not found" message when the binding is the point of the stage.
  */
-export async function recoverVar(
+export async function lookupSubnetUuid(
   ctx: CheckContext,
-  varName: string,
-  stageName: string,
-  lookup: () => Promise<string | undefined>,
+  name: string,
 ): Promise<string | undefined> {
-  const existing = ctx.vars.get(varName);
-  if (typeof existing === 'string' && existing.length > 0) return existing;
-  const recovered = await lookup();
-  if (recovered) {
-    ctx.vars.set(varName, recovered, stageName);
-    return recovered;
+  try {
+    const subnets = await listAll<{ extId?: string; name?: string }>(
+      ctx,
+      '/api/networking/v4.0/config/subnets',
+    );
+    return findByName(subnets, name)?.extId;
+  } catch {
+    return undefined;
   }
-  return undefined;
+}
+
+export async function lookupImageUuid(
+  ctx: CheckContext,
+  name: string,
+): Promise<string | undefined> {
+  try {
+    const images = await listAll<{ extId?: string; name?: string }>(
+      ctx,
+      '/api/vmm/v4.0/content/images',
+    );
+    return findByName(images, name)?.extId;
+  } catch {
+    return undefined;
+  }
+}
+
+/** v3 projects carry the name on spec/status/metadata depending on state. */
+export async function lookupProjectUuid(
+  ctx: CheckContext,
+  name: string,
+): Promise<string | undefined> {
+  try {
+    const projects = await listAllV3<{
+      spec?: { name?: string };
+      status?: { name?: string };
+      metadata?: { name?: string; uuid?: string };
+    }>(ctx, '/api/nutanix/v3/projects/list');
+    return projects.find(
+      (p) => p.spec?.name === name || p.status?.name === name || p.metadata?.name === name,
+    )?.metadata?.uuid;
+  } catch {
+    return undefined;
+  }
+}
+
+/** v4 models each category key:value pair as its own entity. */
+export async function lookupCategoryUuid(
+  ctx: CheckContext,
+  key: string,
+  value: string,
+): Promise<string | undefined> {
+  try {
+    const categories = await listAll<{ extId?: string; key?: string; value?: string }>(
+      ctx,
+      '/api/prism/v4.2/config/categories',
+    );
+    return categories.find((c) => c.key === key && c.value === value)?.extId;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function lookupProtectionPolicyUuid(
+  ctx: CheckContext,
+  name: string,
+): Promise<string | undefined> {
+  try {
+    const policies = await listAll<{ extId?: string; name?: string }>(
+      ctx,
+      '/api/datapolicies/v4.2/config/protection-policies',
+    );
+    return findByName(policies, name)?.extId;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Self-Service apps live on v3; name is on status or metadata. */
+export async function lookupAppUuid(
+  ctx: CheckContext,
+  name: string,
+): Promise<string | undefined> {
+  try {
+    const apps = await listAllV3<{
+      metadata?: { uuid?: string; name?: string };
+      status?: { name?: string };
+    }>(ctx, '/api/nutanix/v3/apps/list');
+    return apps.find((a) => a.status?.name === name || a.metadata?.name === name)?.metadata
+      ?.uuid;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Look up a PC user's uuid by username (case-insensitive) via v4 IAM.
