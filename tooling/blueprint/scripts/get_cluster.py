@@ -1,8 +1,8 @@
 #script
 
 import sys
-import time
 import requests
+from requests.adapters import HTTPAdapter, Retry
 
 pc_ip = '@@{PC_IP}@@'
 pc_user = '@@{PC_USERNAME}@@'
@@ -14,31 +14,25 @@ headers = {
 }
 
 
-def _retry(_fn, *args, **kwargs):
-    """Retry on transient transport errors + 5xx. First install task: a single
-    blip here would kill the deploy before CLUSTERUUID is set (issue #28)."""
-    attempts = kwargs.pop("_attempts", 5)
-    backoff = kwargs.pop("_backoff", 3)
-    last = "no attempt made"
-    for i in range(attempts):
-        try:
-            r = _fn(*args, **kwargs)
-        except requests.RequestException as e:
-            last = "network error: %s" % str(e)[:200]
-        else:
-            if r.status_code < 500:
-                return r
-            last = "%d %s" % (r.status_code, r.text[:200])
-        if i < attempts - 1:
-            print("  [retry %d/%d] %s" % (i + 1, attempts, last))
-            time.sleep(backoff)
-    raise Exception("request failed after %d attempts: %s" % (attempts, last))
+def _make_session():
+    """A Session that retries transient transport errors + 5xx via urllib3's
+    Retry adapter (issue #28). This is the FIRST install task: a single blip
+    here would otherwise kill the whole deploy before CLUSTERUUID is set."""
+    retry = Retry(total=4, connect=4, read=4, backoff_factor=0.5,
+                  status_forcelist=(500, 502, 503, 504), raise_on_status=False)
+    s = requests.Session()
+    adapter = HTTPAdapter(max_retries=retry)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+    return s
 
+
+_SESS = _make_session()
 
 url = "https://%s:9440/api/clustermgmt/v4.0/config/clusters" % pc_ip
 
-response = _retry(requests.get, url, headers=headers, verify=False,
-                  auth=(pc_user, pc_pwd), timeout=30)
+response = _SESS.get(url, headers=headers, verify=False,
+                     auth=(pc_user, pc_pwd), timeout=30)
 
 # Explicit auth / HTTP error handling — a wrong PC password otherwise blew up
 # downstream as a bare `KeyError: 'data'` (the 401 body has no 'data' key),

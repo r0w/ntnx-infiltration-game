@@ -15,10 +15,10 @@ Calm injects @@{PC_IP}@@, @@{PC_USERNAME}@@, @@{PC_PASSWORD}@@.
 
 import json
 import sys
-import time
 import urllib3
 
 import requests
+from requests.adapters import HTTPAdapter, Retry
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -31,25 +31,23 @@ AUTH = (PC_USERNAME, PC_PASSWORD)
 HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
 
-def _retry(_fn, *args, **kwargs):
-    """Retry on transient transport errors + 5xx (issue #28). User list only;
-    the per-user create stays single-shot."""
-    attempts = kwargs.pop("_attempts", 5)
-    backoff = kwargs.pop("_backoff", 3)
-    last = "no attempt made"
-    for i in range(attempts):
-        try:
-            r = _fn(*args, **kwargs)
-        except requests.RequestException as e:
-            last = "network error: %s" % str(e)[:200]
-        else:
-            if r.status_code < 500:
-                return r
-            last = "%d %s" % (r.status_code, r.text[:200])
-        if i < attempts - 1:
-            print("  [retry %d/%d] %s" % (i + 1, attempts, last))
-            time.sleep(backoff)
-    raise Exception("request failed after %d attempts: %s" % (attempts, last))
+def _make_session():
+    """A Session that retries transient transport errors + 5xx via urllib3's
+    Retry adapter (issue #28) — proven to work in the Calm escript sandbox.
+    Route ONLY idempotent calls through it (POST is allowed because our v3
+    `/list` reads are POSTs); mutations stay on plain `requests`."""
+    retry = Retry(total=4, connect=4, read=4, backoff_factor=0.5,
+                  status_forcelist=(500, 502, 503, 504),
+                  allowed_methods=frozenset(("GET", "POST", "PUT", "DELETE")),
+                  raise_on_status=False)
+    s = requests.Session()
+    adapter = HTTPAdapter(max_retries=retry)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+    return s
+
+
+_SESS = _make_session()
 
 USERS = [
     {
@@ -83,8 +81,7 @@ def list_existing_usernames():
     seen = set()
     page = 0
     while True:
-        r = _retry(
-            requests.get,
+        r = _SESS.get(
             "%s/api/iam/v4.0/authn/users?$page=%d&$limit=100" % (BASE, page),
             auth=AUTH, headers=HEADERS, verify=False, timeout=20,
         )

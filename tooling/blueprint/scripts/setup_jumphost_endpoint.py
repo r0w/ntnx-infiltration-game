@@ -17,11 +17,11 @@ Calm injects @@{PC_IP}@@, @@{PC_USERNAME}@@, @@{PC_PASSWORD}@@,
 
 import json
 import sys
-import time
 import urllib3
 import uuid
 
 import requests
+from requests.adapters import HTTPAdapter, Retry
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -41,31 +41,28 @@ AUTH = (PC_USERNAME, PC_PASSWORD)
 HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
 
-def _retry(_fn, *args, **kwargs):
-    """Retry on transient transport errors + 5xx (issue #28). Idempotent calls
-    only (list + stale-delete); the endpoint create stays single-shot."""
-    attempts = kwargs.pop("_attempts", 5)
-    backoff = kwargs.pop("_backoff", 3)
-    last = "no attempt made"
-    for i in range(attempts):
-        try:
-            r = _fn(*args, **kwargs)
-        except requests.RequestException as e:
-            last = "network error: %s" % str(e)[:200]
-        else:
-            if r.status_code < 500:
-                return r
-            last = "%d %s" % (r.status_code, r.text[:200])
-        if i < attempts - 1:
-            print("  [retry %d/%d] %s" % (i + 1, attempts, last))
-            time.sleep(backoff)
-    raise Exception("request failed after %d attempts: %s" % (attempts, last))
+def _make_session():
+    """A Session that retries transient transport errors + 5xx via urllib3's
+    Retry adapter (issue #28) — proven to work in the Calm escript sandbox.
+    Route ONLY idempotent calls through it (POST is allowed because our v3
+    `/list` reads are POSTs); mutations stay on plain `requests`."""
+    retry = Retry(total=4, connect=4, read=4, backoff_factor=0.5,
+                  status_forcelist=(500, 502, 503, 504),
+                  allowed_methods=frozenset(("GET", "POST", "PUT", "DELETE")),
+                  raise_on_status=False)
+    s = requests.Session()
+    adapter = HTTPAdapter(max_retries=retry)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+    return s
+
+
+_SESS = _make_session()
 
 
 def find_existing_endpoint():
     """Returns the uuid of `jumphost` if present, else None."""
-    r = _retry(
-        requests.post,
+    r = _SESS.post(
         "%s/api/nutanix/v3/endpoints/list" % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
         data=json.dumps({"kind": "endpoint", "filter": "name==%s" % ENDPOINT_NAME}),
@@ -86,8 +83,7 @@ def main():
     # Calm's hardcoded `python_remote` venv path on the target.
     stale = find_existing_endpoint()
     if stale:
-        d = _retry(
-            requests.delete,
+        d = _SESS.delete(
             "%s/api/nutanix/v3/endpoints/%s" % (BASE, stale),
             auth=AUTH, headers=HEADERS, verify=False, timeout=30,
         )

@@ -23,6 +23,7 @@ import urllib3
 import uuid
 
 import requests
+from requests.adapters import HTTPAdapter, Retry
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -39,27 +40,29 @@ AUTH = (PC_USERNAME, PC_PASSWORD)
 HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
 
-def _retry(_fn, *args, **kwargs):
-    """Retry a requests verb on transient transport errors + 5xx (issue #28).
-    Idempotent calls only — a retried-after-timeout mutation risks a duplicate;
-    the create POST does its own duplicate recovery. Mirrors
-    create_prod_vms._req_retry. `_attempts`/`_backoff` are popped from kwargs."""
-    attempts = kwargs.pop("_attempts", 5)
-    backoff = kwargs.pop("_backoff", 3)
-    last = "no attempt made"
-    for i in range(attempts):
-        try:
-            r = _fn(*args, **kwargs)
-        except requests.RequestException as e:
-            last = "network error: %s" % str(e)[:200]
-        else:
-            if r.status_code < 500:
-                return r
-            last = "%d %s" % (r.status_code, r.text[:200])
-        if i < attempts - 1:
-            print("  [retry %d/%d] %s" % (i + 1, attempts, last))
-            time.sleep(backoff)
-    raise Exception("request failed after %d attempts: %s" % (attempts, last))
+def _make_session():
+    """A Session that retries transient transport errors + 5xx via urllib3's
+    Retry adapter (issue #28) — verified to work, backoff included, in the Calm
+    escript sandbox.
+
+    Route ONLY idempotent calls through it. `allowed_methods` has to include POST
+    because our v3 `/list` reads are POSTs, so mutations (the project-create POST)
+    deliberately stay on plain `requests` — a retried-after-timeout create would
+    risk a duplicate (the create does its own explicit duplicate recovery)."""
+    retry = Retry(
+        total=4, connect=4, read=4, backoff_factor=0.5,
+        status_forcelist=(500, 502, 503, 504),
+        allowed_methods=frozenset(("GET", "POST", "PUT", "DELETE")),
+        raise_on_status=False,
+    )
+    s = requests.Session()
+    adapter = HTTPAdapter(max_retries=retry)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+    return s
+
+
+_SESS = _make_session()
 
 
 def find_existing_project():
@@ -68,8 +71,7 @@ def find_existing_project():
     a Calm policy-engine-not-ready race during create), delete it and return
     None so the caller re-creates a clean one. Recreating without deleting
     would 409 on duplicate name."""
-    r = _retry(
-        requests.post,
+    r = _SESS.post(
         "%s/api/nutanix/v3/projects/list" % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
         data=json.dumps({"kind": "project", "filter": "name==%s" % PROJECT_NAME}),
@@ -83,8 +85,7 @@ def find_existing_project():
     uuid = p['metadata']['uuid']
     if state == 'ERROR':
         print("  [recover] existing project %s in state=ERROR — deleting before recreate" % uuid)
-        dr = _retry(
-            requests.delete,
+        dr = _SESS.delete(
             "%s/api/nutanix/v3/projects/%s" % (BASE, uuid),
             auth=AUTH, headers=HEADERS, verify=False, timeout=30,
         )
@@ -106,8 +107,7 @@ def find_existing_project():
 
 
 def get_account_uuid():
-    r = _retry(
-        requests.post,
+    r = _SESS.post(
         "%s/api/nutanix/v3/accounts/list" % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
         data=json.dumps({"kind": "account", "filter": "type==nutanix_pc"}),
@@ -134,8 +134,7 @@ def get_subnet_uuid(name):
     'secondary'" 3 s after Setup subnets confirmed it exists.
     """
     for attempt in range(6):  # 6 × 5 s = 30 s cap
-        r = _retry(
-            requests.post,
+        r = _SESS.post(
             "%s/api/nutanix/v3/subnets/list" % BASE,
             auth=AUTH, headers=HEADERS, verify=False, timeout=20,
             data=json.dumps({"kind": "subnet", "length": 250}),
@@ -237,8 +236,7 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
     # MAX_POLLS=120 is ~60-120 s of real wall-clock without trusting sleep.
     MAX_POLLS = 120
     for poll in range(MAX_POLLS):
-        r = _retry(
-            requests.get,
+        r = _SESS.get(
             "%s/api/nutanix/v3/tasks/%s" % (BASE, task_uuid),
             auth=AUTH, headers=HEADERS, verify=False, timeout=20,
         )
@@ -252,8 +250,7 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
 
 
 def get_project_spec_version(project_uuid):
-    r = _retry(
-        requests.get,
+    r = _SESS.get(
         "%s/api/nutanix/v3/projects/%s" % (BASE, project_uuid),
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
     )
@@ -263,8 +260,7 @@ def get_project_spec_version(project_uuid):
 
 def get_directory_id():
     """Returns the first directory service ID. Legacy assumes [0]."""
-    r = _retry(
-        requests.get,
+    r = _SESS.get(
         "%s/api/iam/v4.0/authn/directory-services" % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
     )
@@ -287,8 +283,7 @@ def import_ldap_user(directory_id):
         "idpId": directory_id,
     }
     # Idempotent (409 = already exists) — safe to retry.
-    r = _retry(
-        requests.post,
+    r = _SESS.post(
         "%s/api/iam/v4.0/authn/users" % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=30,
         data=json.dumps(body),
@@ -306,8 +301,7 @@ def get_user_uuid(username):
     target = username.lower()
     page = 0
     while True:
-        r = _retry(
-            requests.get,
+        r = _SESS.get(
             "%s/api/iam/v4.0/authn/users" % BASE,
             auth=AUTH, headers=HEADERS, verify=False, timeout=20,
             params={"$limit": 100, "$page": page},
@@ -327,8 +321,7 @@ def get_user_uuid(username):
 
 
 def get_project_admin_role_uuid():
-    r = _retry(
-        requests.get,
+    r = _SESS.get(
         "%s/api/iam/v4.0/authz/roles?$filter=startswith(displayName,'Project')&$select=displayName,extId"
         % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
@@ -520,8 +513,7 @@ def add_user_as_project_admin(project_uuid, account_uuid, primary_uuid,
         },
     }
     # operation:ADD is a no-op when already a member — safe to retry.
-    r = _retry(
-        requests.put,
+    r = _SESS.put(
         "%s/api/nutanix/v3/projects_internal/%s" % (BASE, project_uuid),
         auth=AUTH, headers=HEADERS, verify=False, timeout=60,
         data=json.dumps(payload),

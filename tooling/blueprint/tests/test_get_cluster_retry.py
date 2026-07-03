@@ -1,20 +1,17 @@
 """Guards the retry wiring on get_cluster.py — the FIRST install task, where a
 single transient blip (a ReadTimeout, à la issue #28) used to kill the whole
-deploy before CLUSTERUUID was even set.
+deploy before CLUSTERUUID was set.
 
-get_cluster.py is a flat top-to-bottom escript (no main()), so we exec the
-source with the module-level imports / sys.exit removed and a fake `requests`
-injected, capturing stdout to assert it still emits CLUSTERUUID.
+Retry is now urllib3's Retry adapter on `_SESS` (proven to work in the Calm
+escript sandbox), so we assert OUR session config + that the flat top-to-bottom
+script still parses CLUSTERUUID from a `_SESS.get`. We exec the source with
+imports / sys.exit removed and a fake `_SESS` injected, capturing stdout.
 """
 import io
 from contextlib import redirect_stdout
 from pathlib import Path
 
 SCRIPT = Path(__file__).parent.parent / "scripts" / "get_cluster.py"
-
-
-class FakeRequestException(Exception):
-    pass
 
 
 class FakeResp:
@@ -28,9 +25,7 @@ class FakeResp:
         return self._payload
 
 
-class FakeRequests:
-    RequestException = FakeRequestException
-
+class FakeSession:
     def __init__(self, get_queue):
         self._q = list(get_queue)
         self.get_calls = 0
@@ -47,9 +42,10 @@ _AOS = {"data": [{"name": "DM3-POC013", "extId": "cluster-uuid-1",
                   "config": {"clusterFunction": ["AOS"]}}]}
 
 
-def _run(fake):
+def _run(fake_sess):
     src = SCRIPT.read_text()
-    drop = ("import requests", "import sys", "import time")
+    drop = ("import requests", "from requests.adapters import HTTPAdapter, Retry",
+            "import sys", "_SESS = _make_session()")
     body = "\n".join(
         l for l in src.splitlines()
         if l.strip() not in drop and not l.strip().startswith("sys.exit")
@@ -58,7 +54,7 @@ def _run(fake):
     class _Sys:
         def exit(self, *_):
             raise SystemExit
-    ns = {"requests": fake, "sys": _Sys(), "time": type("T", (), {"sleep": staticmethod(lambda _n: None)})()}
+    ns = {"_SESS": fake_sess, "sys": _Sys()}
     out = io.StringIO()
     try:
         with redirect_stdout(out):
@@ -69,13 +65,21 @@ def _run(fake):
 
 
 def test_get_cluster_happy_path():
-    out = _run(FakeRequests([FakeResp(200, _AOS)]))
+    fake = FakeSession([FakeResp(200, _AOS)])
+    out = _run(fake)
     assert "CLUSTERUUID=cluster-uuid-1" in out
     assert "CLUSTERNAME=DM3-POC013" in out
+    assert fake.get_calls == 1
 
 
-def test_get_cluster_retries_transient_blip():
-    fake = FakeRequests([FakeRequestException("read timed out"), FakeResp(200, _AOS)])
-    out = _run(fake)
-    assert fake.get_calls == 2
-    assert "CLUSTERUUID=cluster-uuid-1" in out
+def test_get_cluster_session_retry_config():
+    # Build the REAL session and assert OUR intended retry config.
+    src = SCRIPT.read_text()
+    body = "\n".join(l for l in src.splitlines() if not l.strip().startswith("sys.exit"))
+    # neutralise the actual network GET at the bottom by stopping before it
+    body = body.split("url = ")[0]
+    ns = {}
+    exec(compile(body, str(SCRIPT), "exec"), ns)
+    retry = ns["_SESS"].get_adapter("https://x").max_retries
+    assert 503 in retry.status_forcelist and 500 in retry.status_forcelist
+    assert retry.total >= 1
