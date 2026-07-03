@@ -59,10 +59,10 @@ export interface AdminUserEntry
   /** Name of the stage the player is ABOUT to play (i.e. after currentStage). */
   nextStageName: string | null;
   /**
-   * Last failed check on the stage the player is currently stuck on, so the
-   * operator can see what's missing without walking over. null once the
-   * stage passes (the history row flips to 'passed') or when the fail
-   * belongs to a stage the player already moved past (admin skip).
+   * Last failed check on a stage still ahead of the player, so the operator
+   * can see what's missing without walking over. null once the stage passes
+   * (the history row flips to 'passed') or when the player moved past it
+   * (admin skip).
    */
   lastFail: { stage: string; detail: string | null; at: number } | null;
   totalStages: number;
@@ -232,10 +232,15 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
         const nextIdx = curIdx + 1;
         nextStageName = nextIdx < effective.length ? (effective[nextIdx]?.name ?? null) : null;
       }
-      // Only surface the fail while the player is still ON that stage — an
-      // admin skip moves them past without rewriting the 'failed' row.
+      // Surface the fail only while its stage is still ahead of the player.
+      // Position-based (not `=== nextStageName`): per-session disabled stages
+      // can sit between currentStage and the one actually being played. An
+      // admin skip lands currentStage ON the failed stage → hidden.
       const lastFail =
-        lastFailStage !== null && lastFailAt !== null && lastFailStage === nextStageName
+        row.finishedAt === null &&
+        lastFailStage !== null &&
+        lastFailAt !== null &&
+        positionOf(lastFailStage) > positionOf(row.currentStage)
           ? { stage: lastFailStage, detail: lastFailDetail, at: lastFailAt }
           : null;
       return {

@@ -668,6 +668,9 @@ function AdminDashboard({
                                 it's the triage signal (stuck 15m ≠ just failed) */}
                             <span aria-hidden>⚠</span>{' '}
                             <span className="admin-fail-age">{fmtAgeShort(e.lastFail.at)}</span> ·{' '}
+                            {/* name the stage when it isn't the one shown above
+                                (disabled stages can sit in between) */}
+                            {e.lastFail.stage !== e.nextStageName && `${e.lastFail.stage}: `}
                             {splitCheckDetail(e.lastFail.detail).prose || 'check failed'}
                           </button>
                         )}

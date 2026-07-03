@@ -237,6 +237,22 @@ describe('GET /api/admin/users', () => {
     expect(body.entries[0].lastFail).toBeNull();
   });
 
+  test('fail past a per-session disabled stage → lastFail still surfaced', async () => {
+    const db = freshDb();
+    // 'intro' was disabled for this session (missing vars / capability), so
+    // the player is actually playing 'outro' even though nextStageName says
+    // 'intro'. The fail on 'outro' must still show.
+    seedSession(db, { id: 'sess-d', trigram: 'DIS', pin: '1234', currentStage: 'login' });
+    const history = new HistoryQueries(db);
+    history.record('sess-d', 'intro', 'disabled', null, 'missing upstream vars: Username');
+    history.record('sess-d', 'outro', 'failed', 90, 'Subnet not found.');
+    const r = await router(db).request('/users', {
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    const body = (await r.json()) as { entries: AdminUserEntry[] };
+    expect(body.entries[0].lastFail?.stage).toBe('outro');
+  });
+
   test('fail on a stage the player moved past (admin skip) → lastFail null', async () => {
     const db = freshDb();
     // Failed 'intro', then the operator skipped it: currentStage jumps to
