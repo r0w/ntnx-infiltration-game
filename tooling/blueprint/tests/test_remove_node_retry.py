@@ -111,3 +111,50 @@ def test_accepted_without_task_ref_means_started():
     fake = FakeRequests(FakeResp(202, {"data": {}}))
     ns = _load(fake)
     assert ns["attempt_remove"]("node-uuid") == "started"
+
+
+# ── node-count guard (main) — don't attempt a shrink below 4 nodes ───────────
+
+class _HostsResp:
+    status_code = 200
+
+    def __init__(self, hosts):
+        self._hosts = hosts
+
+    def json(self):
+        return {"data": self._hosts}
+
+    def raise_for_status(self):
+        pass
+
+
+class _HostsFake:
+    """GET -> a hosts payload; POST is tracked (must NOT fire when guarded)."""
+    def __init__(self, n_hosts):
+        # Include a stray '-4' so only the count guard (not the '-4' lookup) skips.
+        self._hosts = [{"hostName": "N-%d" % i, "extId": "h%d" % i}
+                       for i in range(1, n_hosts)]
+        self._hosts.append({"hostName": "N-4", "extId": "h4"})
+        self.post_calls = 0
+
+    def get(self, *a, **k):
+        return _HostsResp(self._hosts)
+
+    def post(self, *a, **k):
+        self.post_calls += 1
+        return FakeResp(202, {"data": {"extId": "t"}})
+
+
+def _load_main(fake):
+    ns = _load(fake)
+    ns["CLUSTER_PROFILE"] = "hpoc"
+    ns["CLUSTER_UUID"] = "cu-1"
+    return ns
+
+
+def test_main_skips_removal_below_4_nodes():
+    # 3-node cluster (with a stray '-4') must NOT POST a doomed remove-node.
+    fake = _HostsFake(3)
+    ns = _load_main(fake)
+    assert ns["main"]() == 0
+    assert fake.post_calls == 0

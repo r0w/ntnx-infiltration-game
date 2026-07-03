@@ -156,6 +156,12 @@ def main():
         return 2
 
     hosts = list_hosts()
+    # Only shrink if a 4th node exists to give up — removal must leave ≥3 (RF2
+    # floor). Guards a mis-shaped 3-node cluster with a stray '-4' host name.
+    if len(hosts) < 4:
+        print("[skip] cluster has %d node(s) (<4) — not removing any (a shrink "
+              "here would drop below the 3-node floor)" % len(hosts))
+        return 0
     target = next(
         (h for h in hosts if (h.get('hostName') or '').endswith('-4')),
         None,
