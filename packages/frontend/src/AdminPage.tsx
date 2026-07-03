@@ -151,6 +151,14 @@ function AdminDashboard({
   // Read-only dialog showing the full detail of a player's last failed
   // check — snapshot at click time, the 5 s auto-refresh doesn't mutate it.
   const [failTarget, setFailTarget] = useState<AdminUserEntry | null>(null);
+  // Logs-tab filter lives here (not in LogsTab) so the Users tab can deep-link
+  // into a player's attempt history: click a trigram → Logs pre-filtered.
+  const [logsQuery, setLogsQuery] = useState('');
+  const openLogsFor = (trigram: string) => {
+    setLogsQuery(trigram);
+    setFailTarget(null);
+    setTab('logs');
+  };
   // Toggle in the delete dialog — when on AND the session has a trigram, fire
   // /seed/cleanup-all/:trigram before the row delete so PC-side resources are
   // torn down too. Always resets to false when the dialog opens (cleanup-all
@@ -678,7 +686,20 @@ function AdminDashboard({
             <tbody>
               {visible.map((e) => (
                 <tr key={e.sessionId}>
-                  <td className="admin-td-trigram">{e.trigram ?? <span className="c-dim">—</span>}</td>
+                  <td className="admin-td-trigram">
+                    {e.trigram ? (
+                      <button
+                        type="button"
+                        className="admin-trigram-link"
+                        onClick={() => openLogsFor(e.trigram!)}
+                        title={`view ${e.trigram}'s check attempts in Logs`}
+                      >
+                        {e.trigram}
+                      </button>
+                    ) : (
+                      <span className="c-dim">—</span>
+                    )}
+                  </td>
                   <td>{e.username ?? <span className="c-dim">—</span>}</td>
                   <td className="admin-td-pin">{e.pin ?? <span className="c-dim">—</span>}</td>
                   <td>
@@ -779,7 +800,7 @@ function AdminDashboard({
         })()
       ) : null}
       {tab === 'logs' && (
-        <LogsTab attempts={attempts} />
+        <LogsTab attempts={attempts} query={logsQuery} onQueryChange={setLogsQuery} />
       )}
       {tab === 'pack' && (
         <PackEditor
@@ -950,6 +971,15 @@ function AdminDashboard({
                 {!prose && !json && <p className="c-dim">no detail recorded.</p>}
               </div>
               <div className="modal-actions">
+                {failTarget.trigram && (
+                  <button
+                    type="button"
+                    className="modal-btn"
+                    onClick={() => openLogsFor(failTarget.trigram!)}
+                  >
+                    view attempts
+                  </button>
+                )}
                 <button
                   type="button"
                   className="modal-btn"
@@ -1163,8 +1193,15 @@ function PackEditor({
  * Users tab answers "who is stuck NOW", this answers "what happened" —
  * retries, wrong turns, and the moment a stage finally passed.
  */
-function LogsTab({ attempts }: { attempts: AdminAttemptEntry[] | null }) {
-  const [query, setQuery] = useState('');
+function LogsTab({
+  attempts,
+  query,
+  onQueryChange,
+}: {
+  attempts: AdminAttemptEntry[] | null;
+  query: string;
+  onQueryChange: (q: string) => void;
+}) {
   const [failsOnly, setFailsOnly] = useState(false);
   if (attempts === null) return <div className="admin-empty">loading…</div>;
   if (attempts.length === 0) {
@@ -1186,7 +1223,7 @@ function LogsTab({ attempts }: { attempts: AdminAttemptEntry[] | null }) {
           className="admin-logs-filter"
           placeholder="filter by trigram, stage, or message…"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => onQueryChange(e.target.value)}
         />
         <label className="admin-users-toggle">
           <input
