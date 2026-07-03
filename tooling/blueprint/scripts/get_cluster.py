@@ -2,6 +2,7 @@
 
 import sys
 import requests
+from requests.adapters import HTTPAdapter, Retry
 
 pc_ip = '@@{PC_IP}@@'
 pc_user = '@@{PC_USERNAME}@@'
@@ -12,9 +13,25 @@ headers = {
     "Content-Type": "application/json",
 }
 
+
+def _make_session():
+    """Retrying session — this is the first install task, so a single
+    blip here would otherwise kill the deploy before CLUSTERUUID is set."""
+    retry = Retry(total=4, connect=4, read=4, backoff_factor=0.5,
+                  status_forcelist=(500, 502, 503, 504), raise_on_status=False)
+    s = requests.Session()
+    adapter = HTTPAdapter(max_retries=retry)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+    return s
+
+
+_SESS = _make_session()
+
 url = "https://%s:9440/api/clustermgmt/v4.0/config/clusters" % pc_ip
 
-response = requests.get(url, headers=headers, verify=False, auth=(pc_user, pc_pwd))
+response = _SESS.get(url, headers=headers, verify=False,
+                     auth=(pc_user, pc_pwd), timeout=30)
 
 # Explicit auth / HTTP error handling — a wrong PC password otherwise blew up
 # downstream as a bare `KeyError: 'data'` (the 401 body has no 'data' key),

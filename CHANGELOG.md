@@ -38,6 +38,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Deployment is resilient to transient Prism API blips: a single hiccup during
+  install no longer fails the whole deploy.
 - Stage 12 (`create-vm`) auto-play now builds the 2-NIC VM on HPoCs whose
   routable subnet is named `secondary-<cluster>` (e.g. `secondary-DM3-POC013`)
   rather than bare `secondary`. The act matched the name strictly, so it found
