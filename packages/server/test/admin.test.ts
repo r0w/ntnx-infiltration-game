@@ -208,6 +208,49 @@ describe('GET /api/admin/users', () => {
     expect(body.entries.map((e) => e.sessionId)).toEqual(['sess-mine']);
   });
 
+  test('failed check on the stage being played → lastFail surfaced', async () => {
+    const db = freshDb();
+    seedSession(db, { id: 'sess-f', trigram: 'FAI', pin: '1234', currentStage: 'login' });
+    // Player is playing 'intro' (login done) and just failed its check.
+    new HistoryQueries(db).record('sess-f', 'intro', 'failed', 120, "VM 'fai-vm' has 1 NIC(s) (expected 2).");
+    const r = await router(db).request('/users', {
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    const body = (await r.json()) as { entries: AdminUserEntry[] };
+    expect(body.entries[0].lastFail).toEqual({
+      stage: 'intro',
+      detail: "VM 'fai-vm' has 1 NIC(s) (expected 2).",
+      at: expect.any(Number),
+    });
+  });
+
+  test('stage passes → lastFail clears (history row flips to passed)', async () => {
+    const db = freshDb();
+    seedSession(db, { id: 'sess-p', trigram: 'PAS', pin: '1234', currentStage: 'login' });
+    const history = new HistoryQueries(db);
+    history.record('sess-p', 'intro', 'failed', 120, 'missing NIC');
+    history.record('sess-p', 'intro', 'passed', 80, 'all good');
+    const r = await router(db).request('/users', {
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    const body = (await r.json()) as { entries: AdminUserEntry[] };
+    expect(body.entries[0].lastFail).toBeNull();
+  });
+
+  test('fail on a stage the player moved past (admin skip) → lastFail null', async () => {
+    const db = freshDb();
+    // Failed 'intro', then the operator skipped it: currentStage jumps to
+    // 'intro' (playing 'outro') but the 'failed' row is never rewritten.
+    seedSession(db, { id: 'sess-s', trigram: 'SKP', pin: '1234', currentStage: 'intro' });
+    new HistoryQueries(db).record('sess-s', 'intro', 'failed', 120, 'missing NIC');
+    const r = await router(db).request('/users', {
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    const body = (await r.json()) as { entries: AdminUserEntry[] };
+    expect(body.entries[0].nextStageName).toBe('outro');
+    expect(body.entries[0].lastFail).toBeNull();
+  });
+
   test('finished session → nextStageName null, pin preserved', async () => {
     const db = freshDb();
     seedSession(db, {

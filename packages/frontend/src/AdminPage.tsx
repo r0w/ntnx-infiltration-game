@@ -11,7 +11,7 @@ import {
   type AdminPeerEntry,
   type AdminUserEntry,
 } from './api';
-import { ConfirmModal } from './Modal';
+import { ConfirmModal, Modal } from './Modal';
 import { VersionFooter } from './VersionFooter';
 
 type AdminTab = 'users' | 'pack' | 'cluster' | 'scoreboard';
@@ -146,6 +146,9 @@ function AdminDashboard({
   // Separate confirm dialog so a misclick can't bypass a player by accident.
   const [skipTarget, setSkipTarget] = useState<AdminUserEntry | null>(null);
   const [skippingId, setSkippingId] = useState<string | null>(null);
+  // Read-only dialog showing the full detail of a player's last failed
+  // check — snapshot at click time, the 5 s auto-refresh doesn't mutate it.
+  const [failTarget, setFailTarget] = useState<AdminUserEntry | null>(null);
   // Toggle in the delete dialog — when on AND the session has a trigram, fire
   // /seed/cleanup-all/:trigram before the row delete so PC-side resources are
   // torn down too. Always resets to false when the dialog opens (cleanup-all
@@ -652,7 +655,20 @@ function AdminDashboard({
                     {e.finishedAt !== null ? (
                       <span className="c-green">finished</span>
                     ) : (
-                      e.nextStageName ?? <span className="c-dim">pre-game</span>
+                      <>
+                        {e.nextStageName ?? <span className="c-dim">pre-game</span>}
+                        {e.lastFail && (
+                          <button
+                            type="button"
+                            className="admin-fail-chip"
+                            onClick={() => setFailTarget(e)}
+                            title="last failed check — click for full detail"
+                          >
+                            <span aria-hidden>⚠</span>{' '}
+                            {splitCheckDetail(e.lastFail.detail).prose || 'check failed'}
+                          </button>
+                        )}
+                      </>
                     )}
                   </td>
                   <td title={
@@ -865,6 +881,48 @@ function AdminDashboard({
           </p>
         </ConfirmModal>
       )}
+      {failTarget?.lastFail &&
+        (() => {
+          const { prose, json } = splitCheckDetail(failTarget.lastFail.detail);
+          return (
+            <Modal
+              title={
+                <>
+                  <span className="c-yellow">⚠</span> last check fail
+                </>
+              }
+              onClose={() => setFailTarget(null)}
+            >
+              <div className="modal-body">
+                <dl className="modal-meta">
+                  <dt>agent</dt>
+                  <dd>{failTarget.username ?? <span className="c-dim">—</span>}</dd>
+                  <dt>trigram</dt>
+                  <dd className="modal-trigram">
+                    {failTarget.trigram ?? <span className="c-dim">—</span>}
+                  </dd>
+                  <dt>stage</dt>
+                  <dd className="modal-trigram">{failTarget.lastFail.stage}</dd>
+                  <dt>when</dt>
+                  <dd className="c-dim">{fmtAge(failTarget.lastFail.at)}</dd>
+                </dl>
+                {prose && <p className="admin-fail-prose">{prose}</p>}
+                {json && <pre className="admin-fail-json">{json}</pre>}
+                {!prose && !json && <p className="c-dim">no detail recorded.</p>}
+              </div>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="modal-btn"
+                  onClick={() => setFailTarget(null)}
+                  autoFocus
+                >
+                  close
+                </button>
+              </div>
+            </Modal>
+          );
+        })()}
       {logoutPrompt && (
         <ConfirmModal
           title={<><span className="c-yellow">!</span> log out?</>}
@@ -1059,6 +1117,27 @@ function PackEditor({
       </table>
     </div>
   );
+}
+
+/**
+ * Split a check `detail` into prose + a pretty-printed JSON blob when the
+ * message embeds one (API error dumps). The table row shows the prose only;
+ * the detail modal shows both.
+ */
+function splitCheckDetail(detail: string | null): { prose: string; json: string | null } {
+  if (!detail) return { prose: '', json: null };
+  const start = detail.search(/[{[]/);
+  if (start >= 0) {
+    try {
+      const parsed: unknown = JSON.parse(detail.slice(start).trim());
+      if (typeof parsed === 'object' && parsed !== null) {
+        return { prose: detail.slice(0, start).trim(), json: JSON.stringify(parsed, null, 2) };
+      }
+    } catch {
+      // brace mid-prose, not a JSON tail — fall through to plain text
+    }
+  }
+  return { prose: detail, json: null };
 }
 
 function fmtAge(ts: number): string {

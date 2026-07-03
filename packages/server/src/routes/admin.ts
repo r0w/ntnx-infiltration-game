@@ -54,9 +54,17 @@ export interface AdminClusterConfigPayload {
   };
 }
 
-export interface AdminUserEntry extends AdminSessionRow {
+export interface AdminUserEntry
+  extends Omit<AdminSessionRow, 'lastFailStage' | 'lastFailDetail' | 'lastFailAt'> {
   /** Name of the stage the player is ABOUT to play (i.e. after currentStage). */
   nextStageName: string | null;
+  /**
+   * Last failed check on the stage the player is currently stuck on, so the
+   * operator can see what's missing without walking over. null once the
+   * stage passes (the history row flips to 'passed') or when the fail
+   * belongs to a stage the player already moved past (admin skip).
+   */
+  lastFail: { stage: string; detail: string | null; at: number } | null;
   totalStages: number;
   /** Stages this cluster will let a fresh session actually play (raw pack
    *  total minus stages filtered for cluster reasons — capability missing,
@@ -217,15 +225,23 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       deps.clusterProfile,
     );
     const entries: AdminUserEntry[] = rows.map((row) => {
+      const { lastFailStage, lastFailDetail, lastFailAt, ...rest } = row;
       let nextStageName: string | null = null;
       if (row.finishedAt === null) {
         const curIdx = positionOf(row.currentStage);
         const nextIdx = curIdx + 1;
         nextStageName = nextIdx < effective.length ? (effective[nextIdx]?.name ?? null) : null;
       }
+      // Only surface the fail while the player is still ON that stage — an
+      // admin skip moves them past without rewriting the 'failed' row.
+      const lastFail =
+        lastFailStage !== null && lastFailAt !== null && lastFailStage === nextStageName
+          ? { stage: lastFailStage, detail: lastFailDetail, at: lastFailAt }
+          : null;
       return {
-        ...row,
+        ...rest,
         nextStageName,
+        lastFail,
         totalStages,
         effectiveTotalStages,
       };

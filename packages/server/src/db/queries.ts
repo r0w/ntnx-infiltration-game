@@ -221,7 +221,16 @@ export class SessionQueries {
            (SELECT COUNT(*) FROM stage_history
               WHERE session_id = s.id AND status = 'disabled') AS stages_disabled,
            (SELECT MAX(checked_at) FROM stage_history
-              WHERE session_id = s.id) AS last_activity_at
+              WHERE session_id = s.id) AS last_activity_at,
+           (SELECT stage_name FROM stage_history
+              WHERE session_id = s.id AND status = 'failed'
+              ORDER BY checked_at DESC LIMIT 1) AS last_fail_stage,
+           (SELECT detail FROM stage_history
+              WHERE session_id = s.id AND status = 'failed'
+              ORDER BY checked_at DESC LIMIT 1) AS last_fail_detail,
+           (SELECT checked_at FROM stage_history
+              WHERE session_id = s.id AND status = 'failed'
+              ORDER BY checked_at DESC LIMIT 1) AS last_fail_at
          FROM sessions s
          WHERE s.pack_id = $packId
          ORDER BY s.started_at DESC`,
@@ -238,6 +247,9 @@ export class SessionQueries {
         stages_passed: number;
         stages_disabled: number;
         last_activity_at: number | null;
+        last_fail_stage: string | null;
+        last_fail_detail: string | null;
+        last_fail_at: number | null;
       }>;
     return rows.map((r) => ({
       sessionId: r.session_id,
@@ -251,6 +263,9 @@ export class SessionQueries {
       finishedAt: r.finished_at,
       lastActivityAt: r.last_activity_at,
       locale: r.locale,
+      lastFailStage: r.last_fail_stage,
+      lastFailDetail: r.last_fail_detail,
+      lastFailAt: r.last_fail_at,
     }));
   }
 
@@ -331,6 +346,12 @@ export interface AdminSessionRow extends ScoreboardRow {
   /** Captured PIN (plaintext in `session_variables`). Admin-only. */
   pin: string | null;
   locale: string;
+  /** Latest 'failed' stage_history row. Self-cleans on pass (the upsert
+   *  flips the row to 'passed'), but an admin-skip can leave a stale one —
+   *  the route only surfaces it when it matches the stage being played. */
+  lastFailStage: string | null;
+  lastFailDetail: string | null;
+  lastFailAt: number | null;
 }
 
 function parseJsonString(raw: string | null): string | null {

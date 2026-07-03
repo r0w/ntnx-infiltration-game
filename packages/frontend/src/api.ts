@@ -239,6 +239,8 @@ export interface AdminUserEntry {
   finishedAt: number | null;
   lastActivityAt: number | null;
   locale: string;
+  /** Last failed check on the stage being played; null once it passes. */
+  lastFail: { stage: string; detail: string | null; at: number } | null;
 }
 
 export interface AdminUsersPayload {
