@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   api,
+  type AdminAttemptEntry,
   type AdminClusterConfigPayload,
   type AdminClusterStatusPayload,
   type AdminGateEntry,
@@ -11,10 +12,10 @@ import {
   type AdminPeerEntry,
   type AdminUserEntry,
 } from './api';
-import { ConfirmModal } from './Modal';
+import { ConfirmModal, Modal } from './Modal';
 import { VersionFooter } from './VersionFooter';
 
-type AdminTab = 'users' | 'pack' | 'cluster' | 'scoreboard';
+type AdminTab = 'users' | 'logs' | 'pack' | 'cluster' | 'scoreboard';
 
 const STORAGE_KEY = 'ntnx-infiltration-admin-pw';
 
@@ -118,7 +119,7 @@ function AdminDashboard({
   // the right section. Unknown / missing → users (safe default).
   const navigate = useNavigate();
   const { tab: tabParam } = useParams<{ tab?: string }>();
-  const VALID_TABS = ['users', 'pack', 'cluster', 'scoreboard'] as const;
+  const VALID_TABS = ['users', 'logs', 'pack', 'cluster', 'scoreboard'] as const;
   const tab: AdminTab = (VALID_TABS as readonly string[]).includes(tabParam ?? '')
     ? (tabParam as AdminTab)
     : 'users';
@@ -146,6 +147,17 @@ function AdminDashboard({
   // Separate confirm dialog so a misclick can't bypass a player by accident.
   const [skipTarget, setSkipTarget] = useState<AdminUserEntry | null>(null);
   const [skippingId, setSkippingId] = useState<string | null>(null);
+  // Read-only dialog showing the full detail of a player's last failed
+  // check — snapshot at click time, the 5 s auto-refresh doesn't mutate it.
+  const [failTarget, setFailTarget] = useState<AdminUserEntry | null>(null);
+  // Logs-tab filter lives here (not in LogsTab) so the Users tab can deep-link
+  // into a player's attempt history: click a trigram → Logs pre-filtered.
+  const [logsQuery, setLogsQuery] = useState('');
+  const openLogsFor = (trigram: string) => {
+    setLogsQuery(trigram);
+    setFailTarget(null);
+    setTab('logs');
+  };
   // Toggle in the delete dialog — when on AND the session has a trigram, fire
   // /seed/cleanup-all/:trigram before the row delete so PC-side resources are
   // torn down too. Always resets to false when the dialog opens (cleanup-all
@@ -220,6 +232,16 @@ function AdminDashboard({
     const id = window.setInterval(() => void refresh(), 5000);
     return () => window.clearInterval(id);
   }, [refresh]);
+
+  // Stuck-player count in the tab title — the operator usually has /admin
+  // in a background tab while helping someone.
+  useEffect(() => {
+    const stuck = (entries ?? []).filter((e) => e.lastFail !== null).length;
+    document.title = stuck > 0 ? `(${stuck}⚠) NIG - admin` : 'NIG - admin';
+    return () => {
+      document.title = 'NIG - admin';
+    };
+  }, [entries]);
 
   const toggleLunch = async () => {
     if (!lunch) return;
@@ -440,6 +462,15 @@ function AdminDashboard({
           >
             scoreboard
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'logs'}
+            className={`admin-tab ${tab === 'logs' ? 'admin-tab-active' : ''}`}
+            onClick={() => setTab('logs')}
+          >
+            logs
+          </button>
         </nav>
 
         <span className="app-spacer" />
@@ -599,9 +630,16 @@ function AdminDashboard({
       ) : tab === 'users' && entries ? (
         (() => {
           const hiddenCount = entries.filter((e) => e.trigram === null).length;
-          const visible = showAnonymousUsers
+          const filtered = showAnonymousUsers
             ? entries
             : entries.filter((e) => e.trigram !== null);
+          // Stuck players first, longest-stuck on top — the triage order.
+          // The rest keeps the server's newest-session-first order.
+          const visible = [...filtered].sort((a, b) => {
+            if (!!a.lastFail !== !!b.lastFail) return a.lastFail ? -1 : 1;
+            if (a.lastFail && b.lastFail) return a.lastFail.at - b.lastFail.at;
+            return 0;
+          });
           return (
             <>
               <div className="admin-users-toolbar">
@@ -645,14 +683,46 @@ function AdminDashboard({
             <tbody>
               {visible.map((e) => (
                 <tr key={e.sessionId}>
-                  <td className="admin-td-trigram">{e.trigram ?? <span className="c-dim">—</span>}</td>
+                  <td className="admin-td-trigram">
+                    {e.trigram ? (
+                      <button
+                        type="button"
+                        className="admin-trigram-link"
+                        onClick={() => openLogsFor(e.trigram!)}
+                        title={`view ${e.trigram}'s check attempts in Logs`}
+                      >
+                        {e.trigram}
+                      </button>
+                    ) : (
+                      <span className="c-dim">—</span>
+                    )}
+                  </td>
                   <td>{e.username ?? <span className="c-dim">—</span>}</td>
                   <td className="admin-td-pin">{e.pin ?? <span className="c-dim">—</span>}</td>
                   <td>
                     {e.finishedAt !== null ? (
                       <span className="c-green">finished</span>
                     ) : (
-                      e.nextStageName ?? <span className="c-dim">pre-game</span>
+                      <>
+                        {e.nextStageName ?? <span className="c-dim">pre-game</span>}
+                        {e.lastFail && (
+                          <button
+                            type="button"
+                            className="admin-fail-chip"
+                            onClick={() => setFailTarget(e)}
+                            title="last failed check — click for full detail"
+                          >
+                            {/* age leads so the ellipsis can't truncate it —
+                                it's the triage signal (stuck 15m ≠ just failed) */}
+                            <span aria-hidden>⚠</span>{' '}
+                            <span className="admin-fail-age">{fmtAgeShort(e.lastFail.at)}</span> ·{' '}
+                            {/* name the stage when it isn't the one shown above
+                                (disabled stages can sit in between) */}
+                            {e.lastFail.stage !== e.nextStageName && `${e.lastFail.stage}: `}
+                            {splitCheckDetail(e.lastFail.detail).prose || 'check failed'}
+                          </button>
+                        )}
+                      </>
                     )}
                   </td>
                   <td title={
@@ -726,6 +796,9 @@ function AdminDashboard({
           );
         })()
       ) : null}
+      {tab === 'logs' && (
+        <LogsTab password={password} query={logsQuery} onQueryChange={setLogsQuery} />
+      )}
       {tab === 'pack' && (
         <PackEditor
           stages={packStages}
@@ -865,6 +938,57 @@ function AdminDashboard({
           </p>
         </ConfirmModal>
       )}
+      {failTarget?.lastFail &&
+        (() => {
+          const { prose, json } = splitCheckDetail(failTarget.lastFail.detail);
+          return (
+            <Modal
+              title={
+                <>
+                  <span className="c-yellow">⚠</span> last failed check
+                </>
+              }
+              onClose={() => setFailTarget(null)}
+            >
+              <div className="modal-body">
+                <dl className="modal-meta">
+                  <dt>agent</dt>
+                  <dd>{failTarget.username ?? <span className="c-dim">—</span>}</dd>
+                  <dt>trigram</dt>
+                  <dd className="modal-trigram">
+                    {failTarget.trigram ?? <span className="c-dim">—</span>}
+                  </dd>
+                  <dt>stage</dt>
+                  <dd className="modal-trigram">{failTarget.lastFail.stage}</dd>
+                  <dt>when</dt>
+                  <dd className="c-dim">{fmtAge(failTarget.lastFail.at)}</dd>
+                </dl>
+                {prose && <p className="admin-fail-prose">{prose}</p>}
+                {json && <pre className="admin-fail-json">{json}</pre>}
+                {!prose && !json && <p className="c-dim">no detail recorded.</p>}
+              </div>
+              <div className="modal-actions">
+                {failTarget.trigram && (
+                  <button
+                    type="button"
+                    className="modal-btn"
+                    onClick={() => openLogsFor(failTarget.trigram!)}
+                  >
+                    view attempts
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="modal-btn"
+                  onClick={() => setFailTarget(null)}
+                  autoFocus
+                >
+                  close
+                </button>
+              </div>
+            </Modal>
+          );
+        })()}
       {logoutPrompt && (
         <ConfirmModal
           title={<><span className="c-yellow">!</span> log out?</>}
@@ -1059,6 +1183,142 @@ function PackEditor({
       </table>
     </div>
   );
+}
+
+/**
+ * Logs tab: the append-only check-attempt trail, newest first. Where the
+ * Users tab answers "who is stuck NOW", this answers "what happened" —
+ * retries, wrong turns, and the moment a stage finally passed.
+ */
+function LogsTab({
+  password,
+  query,
+  onQueryChange,
+}: {
+  password: string;
+  query: string;
+  onQueryChange: (q: string) => void;
+}) {
+  // The attempt log is only consumed here, so it's fetched + polled only
+  // while this tab is mounted — not in the dashboard-wide refresh.
+  const [attempts, setAttempts] = useState<AdminAttemptEntry[] | null>(null);
+  const [failsOnly, setFailsOnly] = useState(false);
+  const fetchAttempts = useCallback(async () => {
+    try {
+      const payload = await api.adminAttempts(password);
+      setAttempts(payload.entries);
+    } catch {
+      // transient fetch error — keep the last list, next poll retries; auth
+      // failures are caught by the dashboard refresh which handles logout.
+    }
+  }, [password]);
+  useEffect(() => {
+    void fetchAttempts();
+    const id = window.setInterval(() => void fetchAttempts(), 5000);
+    return () => window.clearInterval(id);
+  }, [fetchAttempts]);
+  if (attempts === null) return <div className="admin-empty">loading…</div>;
+  if (attempts.length === 0) {
+    return <div className="admin-empty">no check attempts yet.</div>;
+  }
+  const q = query.trim().toLowerCase();
+  const visible = attempts.filter((a) => {
+    if (failsOnly && a.status !== 'failed') return false;
+    if (!q) return true;
+    return [a.trigram, a.username, a.stageName, a.detail].some(
+      (f) => f && f.toLowerCase().includes(q),
+    );
+  });
+  return (
+    <>
+      <div className="admin-users-toolbar">
+        <input
+          type="search"
+          className="admin-logs-filter"
+          placeholder="filter by trigram, stage, or message…"
+          value={query}
+          onChange={(e) => onQueryChange(e.target.value)}
+        />
+        <label className="admin-users-toggle">
+          <input
+            type="checkbox"
+            checked={failsOnly}
+            onChange={(e) => setFailsOnly(e.target.checked)}
+          />
+          <span>fails only</span>
+        </label>
+        {visible.length !== attempts.length && (
+          <span className="c-dim admin-logs-count">
+            {visible.length} / {attempts.length} attempts
+          </span>
+        )}
+      </div>
+      {visible.length === 0 ? (
+        <div className="admin-empty">no attempts match the filter.</div>
+      ) : (
+    <div className="admin-table-wrap">
+      <table className="admin-table">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Trigram</th>
+            <th>Stage</th>
+            <th>Result</th>
+            <th>Detail</th>
+          </tr>
+        </thead>
+        <tbody>
+          {visible.map((a) => (
+            <tr key={a.id}>
+              <td className="c-dim">{fmtAge(a.checkedAt)}</td>
+              <td className="admin-td-trigram">
+                {a.trigram ?? <span className="c-dim">—</span>}
+              </td>
+              <td>{a.stageName}</td>
+              <td>
+                {a.status === 'passed' ? (
+                  <span className="c-green">✓ pass</span>
+                ) : (
+                  <span className="c-yellow">⚠ fail</span>
+                )}
+              </td>
+              <td className="admin-td-detail" title={a.detail ?? ''}>
+                {splitCheckDetail(a.detail).prose || <span className="c-dim">—</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+      )}
+    </>
+  );
+}
+
+/**
+ * Split a check `detail` into prose + a pretty-printed JSON blob when the
+ * message embeds one (API error dumps). The table row shows the prose only;
+ * the detail modal shows both.
+ */
+function splitCheckDetail(detail: string | null): { prose: string; json: string | null } {
+  if (!detail) return { prose: '', json: null };
+  const start = detail.search(/[{[]/);
+  if (start >= 0) {
+    try {
+      const parsed: unknown = JSON.parse(detail.slice(start).trim());
+      if (typeof parsed === 'object' && parsed !== null) {
+        return { prose: detail.slice(0, start).trim(), json: JSON.stringify(parsed, null, 2) };
+      }
+    } catch {
+      // brace mid-prose, not a JSON tail — fall through to plain text
+    }
+  }
+  return { prose: detail, json: null };
+}
+
+/** Terse variant for the fail chip: "42s" / "12m" / "2h05". */
+function fmtAgeShort(ts: number): string {
+  return fmtAge(ts).replace(' ago', '');
 }
 
 function fmtAge(ts: number): string {
