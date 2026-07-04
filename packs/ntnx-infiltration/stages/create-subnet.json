@@ -22,9 +22,6 @@
   "check": {
     "fn": "CheckNetwork"
   },
-  "captures": [
-    "NetworkUUID"
-  ],
   "needs": [
     "Trigram"
   ]

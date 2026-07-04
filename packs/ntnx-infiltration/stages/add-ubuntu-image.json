@@ -16,9 +16,6 @@
   "check": {
     "fn": "CheckImage"
   },
-  "captures": [
-    "ImageUUID"
-  ],
   "needs": [
     "Trigram"
   ]

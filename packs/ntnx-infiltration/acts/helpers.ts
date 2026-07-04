@@ -11,6 +11,19 @@ export function getTrigram(ctx: ActContext): string | undefined {
 }
 
 /**
+ * Match the cluster's `secondary` subnet across naming conventions: some
+ * clusters name it bare `secondary`, others `secondary-<clusterName>` (e.g.
+ * `secondary-DM3-POC013`), and casing can vary. Mirrors the blueprint's
+ * `setup_subnets._is_secondary`. A strict `=== 'secondary'` here was the
+ * cause of the stage-12 VM getting only 1 NIC on HPoCs that ship the
+ * `secondary-<cluster>` form, which fails CheckVM (needs 2 NICs).
+ */
+export function isSecondarySubnet(name?: unknown): boolean {
+  const n = typeof name === 'string' ? name.toLowerCase() : '';
+  return n === 'secondary' || n.startsWith('secondary-');
+}
+
+/**
  * Read a session variable as a string or return undefined. Used for fields
  * like `ImageURL`, `Vlanid`, `Username` that acts pull from env-seeded vars
  * or from upstream stage captures.

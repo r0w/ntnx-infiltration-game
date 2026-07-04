@@ -143,4 +143,73 @@ push_bp() {
 push_bp CloneProd CloneProd
 push_bp NewblankVM BlankVM-source
 
+# 7. Set the CloneProd `pcUser` credential to the real PC admin creds.
+#    The source blueprint ships placeholder creds ({PC_USER}/{PC_PWD}) that
+#    the sed pass above rewrites to Calm macros. That path is fragile: it
+#    relies on calm-dsl round-tripping the plaintext secret on `create bp`,
+#    and a password containing a sed metachar (e.g. `/`) corrupts the
+#    substitution outright — either way the launched CloneProd app's install
+#    runbook 401s on its first authenticated call. Stage 35 used to make the
+#    player fix this by hand in the UI, where a typo can lock the admin
+#    account. Set it explicitly here once, via the v3 blueprints API (mirrors
+#    the auto-play act `actCloneAppBlueprint`), from the same PC creds Calm
+#    already injected above. The PUT only stores the secret on the BP (no
+#    login), so it can't lock anything. Best-effort: on failure we fall back
+#    to the old manual step (and the act re-patches the same cred at launch),
+#    so it must NOT abort the rest of the deploy.
+echo "[push_prereq_bps] patching CloneProd pcUser credential..."
+PC_IP="$PC_IP" PC_USER="$PC_USER" PC_PWD="$PC_PWD" python3 - <<'PY' || true
+import base64, json, os, ssl, sys, urllib.error, urllib.request
+
+PC_IP, PC_USER, PC_PWD = os.environ["PC_IP"], os.environ["PC_USER"], os.environ["PC_PWD"]
+BASE = f"https://{PC_IP}:9440"
+AUTH = "Basic " + base64.b64encode(f"{PC_USER}:{PC_PWD}".encode()).decode()
+CTX = ssl.create_default_context()
+CTX.check_hostname = False
+CTX.verify_mode = ssl.CERT_NONE
+
+def call(method, path, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(BASE + path, data=data, method=method)
+    req.add_header("Authorization", AUTH)
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, context=CTX, timeout=60) as r:
+            res = r.read().decode()
+            return json.loads(res) if res else None
+    except urllib.error.HTTPError as e:
+        # Surface the Nutanix error body — a bare "HTTP 400" hides the actual
+        # validation message and makes a failed deploy patch undebuggable.
+        try:
+            err = e.read().decode()
+        except Exception:
+            err = ""
+        raise RuntimeError(f"HTTP {e.code} {method} {path}: {err[:300]}") from e
+
+try:
+    lst = call("POST", "/api/nutanix/v3/blueprints/list",
+               {"length": 250, "filter": "name==CloneProd"})
+    ents = [e for e in lst.get("entities", [])
+            if e.get("status", {}).get("name") == "CloneProd"]
+    if not ents:
+        print("[push_prereq_bps] WARN CloneProd not found, skipping cred patch")
+        sys.exit(0)
+    uuid = ents[0]["metadata"]["uuid"]
+    full = call("GET", f"/api/nutanix/v3/blueprints/{uuid}")
+    creds = full.get("spec", {}).get("resources", {}).get("credential_definition_list", [])
+    pc = next((c for c in creds if c.get("name") == "pcUser"), None)
+    if pc is None:
+        print("[push_prereq_bps] WARN pcUser credential absent, skipping patch")
+        sys.exit(0)
+    pc["username"] = PC_USER
+    pc["secret"] = {"value": PC_PWD, "attrs": {"is_secret_modified": True}}
+    call("PUT", f"/api/nutanix/v3/blueprints/{uuid}",
+         {"api_version": full.get("api_version", "3.1"),
+          "metadata": full["metadata"], "spec": full["spec"]})
+    print(f"[push_prereq_bps] CloneProd pcUser credential patched (username={PC_USER})")
+except Exception as e:
+    print(f"[push_prereq_bps] WARN cred patch failed (non-fatal): {e}")
+    sys.exit(0)
+PY
+
 echo "[push_prereq_bps] both prereq BPs uploaded."

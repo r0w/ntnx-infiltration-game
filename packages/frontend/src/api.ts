@@ -239,6 +239,21 @@ export interface AdminUserEntry {
   finishedAt: number | null;
   lastActivityAt: number | null;
   locale: string;
+  /** Last failed check on the stage being played; null once it passes. */
+  lastFail: { stage: string; detail: string | null; at: number } | null;
+}
+
+/** One row of the append-only check-attempt log (admin Logs tab). */
+export interface AdminAttemptEntry {
+  id: number;
+  sessionId: string;
+  trigram: string | null;
+  username: string | null;
+  stageName: string;
+  status: 'passed' | 'failed';
+  checkedAt: number;
+  durationMs: number | null;
+  detail: string | null;
 }
 
 export interface AdminUsersPayload {
@@ -305,7 +320,17 @@ export interface AdminLunchStatus {
   affectedCount: number;
 }
 
+export interface VersionInfo {
+  version: string;
+  gitSha: string | null;
+  branch: string | null;
+  buildTime: string | null;
+  /** `owner/repo`, used to fetch GitHub Releases for the changelog modal. */
+  repo: string;
+}
+
 export const api = {
+  version: () => get<VersionInfo>('/version'),
   createSession: (req: CreateSessionRequest) =>
     post<CreateSessionResponse>('/session', req),
   getSession: (id: string) => get<SessionSnapshot>(`/session/${id}`),
@@ -373,6 +398,8 @@ export const api = {
     post<{ ok: true }>('/admin/login', { password }),
   adminUsers: (password: string) =>
     adminGet<AdminUsersPayload>('/admin/users', password),
+  adminAttempts: (password: string) =>
+    adminGet<{ entries: AdminAttemptEntry[] }>('/admin/attempts', password),
   adminDelete: (password: string, sessionId: string) =>
     adminDel<{ ok: true; sessionId: string }>(`/admin/users/${sessionId}`, password),
   adminSkipCurrentStage: (password: string, sessionId: string) =>
@@ -440,6 +467,8 @@ export const api = {
     adminPost<AdminClusterConfigPayload>('/admin/cluster-config/refresh', password),
   adminClusterStatus: (password: string) =>
     adminGet<AdminClusterStatusPayload>('/admin/cluster-status', password),
+  adminClusterVersions: (password: string) =>
+    adminGet<AdminClusterVersionsPayload>('/admin/cluster-versions', password),
   adminPeers: (password: string) =>
     adminGet<AdminPeersPayload>('/admin/peers', password),
   adminPeerAdd: (password: string, body: { label: string; baseUrl: string }) =>
@@ -475,6 +504,66 @@ export const api = {
     adminGet<{ flags: string[] }>('/admin/capabilities', password),
   adminCapabilitiesRefresh: (password: string) =>
     adminPost<AdminCapabilitiesRefreshPayload>('/admin/capabilities/refresh', password),
+  adminEmailConfig: (password: string) =>
+    adminGet<AdminEmailConfigPayload>('/admin/email-config', password),
+  adminEmailConfigSave: (
+    password: string,
+    body: {
+      mailtrapToken?: string | null;
+      fromEmail?: string | null;
+      fromName?: string | null;
+      vars?: Record<string, string>;
+    },
+  ) =>
+    fetch('/api/admin/email-config', {
+      method: 'PUT',
+      headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((res) => handle<AdminEmailConfigPayload>(res)),
+  adminEmailDomains: (password: string) =>
+    adminGet<{
+      domains: Array<{ domain: string; verified: boolean }>;
+      unauthorized?: boolean;
+      error?: string;
+    }>('/admin/email-domains', password),
+  adminEmailTemplates: (password: string) =>
+    adminGet<{ templates: AdminEmailTemplate[] }>('/admin/email-templates', password),
+  adminEmailTemplateSave: (
+    password: string,
+    id: string,
+    locale: string,
+    body: { subject: string; html: string },
+  ) =>
+    fetch(`/api/admin/email-templates/${id}/${locale}`, {
+      method: 'PUT',
+      headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((res) => handle<{ ok: true; overridden: boolean }>(res)),
+  adminEmailTemplateReset: (password: string, id: string, locale: string) =>
+    adminDel<{ ok: true }>(`/admin/email-templates/${id}/${locale}`, password),
+  adminEmailRoster: (password: string) =>
+    adminGet<{ entries: AdminEmailRosterEntry[] }>('/admin/email-roster', password),
+  adminEmailRosterAdd: (password: string, emails: string[]) =>
+    adminPost<{ added: number; skipped: number; entries: AdminEmailRosterEntry[] }>(
+      '/admin/email-roster',
+      password,
+      { emails },
+    ),
+  adminEmailRosterDelete: (password: string, id: number) =>
+    adminDel<{ ok: true; entries: AdminEmailRosterEntry[] }>(`/admin/email-roster/${id}`, password),
+  adminEmailSend: (
+    password: string,
+    body: {
+      templateId: string;
+      locale: string;
+      subject: string;
+      html: string;
+      vars: Record<string, string>;
+      mode: 'pending' | 'rows' | 'test';
+      rosterIds?: number[];
+      testAddress?: string;
+    },
+  ) => adminPost<AdminEmailSendPayload>('/admin/email-send', password, body),
 };
 
 export interface AdminCapabilitiesRefreshPayload {
@@ -488,6 +577,40 @@ export interface AdminCapabilitiesRefreshPayload {
     transportError?: boolean;
     transportCode?: string;
   }>;
+}
+
+export interface AdminEmailConfigPayload {
+  mailtrapToken: string;
+  fromEmail: string;
+  fromName: string;
+  vars: Record<string, string>;
+  /** PE cluster name probed live ('' when unknown) — default for {CLUSTER}/{PASSWORD}. */
+  clusterName: string;
+}
+
+export interface AdminEmailTemplate {
+  id: 'invitation-vdi' | 'summary';
+  locale: 'en' | 'fr' | 'de';
+  subject: string;
+  html: string;
+  variables: Record<string, string>;
+  overridden: boolean;
+}
+
+export interface AdminEmailRosterEntry {
+  id: number;
+  seat: number;
+  email: string;
+  addedAt: number;
+  /** templateId → sentAt of the last successful delivery. */
+  sent: Record<string, number>;
+}
+
+export interface AdminEmailSendPayload {
+  ok: boolean;
+  sent: number;
+  failed: number;
+  results: Array<{ to: string; seat: number; ok: boolean; error?: string }>;
 }
 
 export interface AdminPlannerConfigPayload {
@@ -515,4 +638,16 @@ export interface AdminClusterStatusPayload {
     /** Human-readable error if `state` is null and the probe failed. */
     error?: string;
   };
+}
+
+
+export interface AdminClusterVersionsPayload {
+  rows: Array<{
+    component: string;
+    version: string;
+    location?: string;
+    source: 'pc' | 'lcm';
+  }>;
+  /** Set when no source could answer (empty in mock mode, no error). */
+  error?: string;
 }
