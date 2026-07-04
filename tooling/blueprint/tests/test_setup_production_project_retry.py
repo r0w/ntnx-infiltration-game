@@ -177,6 +177,37 @@ def test_create_project_survives_blip_during_recovery_lookup():
     assert ns["create_project"]("acc", "pri", "sec") == "proj-retry"
 
 
+def test_create_project_retries_when_create_task_fails():
+    # Issue #41 (live on DM3-POC004, right after the 4→3 node removal): the
+    # POST is accepted but the intentful create task ends FAILED and leaves
+    # the project in state ERROR. The loop must purge the ERROR project (via
+    # the existing lookup) and re-create instead of raising.
+    # create#1 202 -> task FAILED -> lookup finds ERROR dupe, deletes it,
+    # settle poll sees it gone -> create#2 202 -> task SUCCEEDED.
+    fake_req = FakeReq(post=[
+        FakeResp(202, {"status": {"execution_context": {"task_uuid": "t-fail"}}}),
+        FakeResp(202, {"status": {"execution_context": {"task_uuid": "t-ok"}}}),
+    ])
+    err_list = FakeResp(200, {"entities": [
+        {"metadata": {"uuid": "p-err"}, "status": {"state": "ERROR"}}
+    ]})
+    empty_list = FakeResp(200, {"entities": []})
+    sess = FakeSession(
+        get=[
+            FakeResp(200, {"status": "FAILED",
+                           "entity_reference_list": [{"uuid": "p-err"}]}),
+            FakeResp(200, {"status": "SUCCEEDED",
+                           "entity_reference_list": [{"uuid": "proj-new2"}]}),
+        ],
+        post=[err_list, empty_list],
+        delete=[FakeResp(202)],
+    )
+    ns = _load(sess, fake_req)
+    assert ns["create_project"]("acc", "pri", "sec") == "proj-new2"
+    assert sess.delete.calls == 1
+    assert fake_req.post.calls == 2
+
+
 def test_create_project_does_not_treat_not_found_as_duplicate():
     # A 422 "subnet does not exist" must NOT be mistaken for a duplicate (the
     # old "EXIST" token matched "does not exist") — it's a genuine failure.
