@@ -467,6 +467,8 @@ export const api = {
     adminPost<AdminClusterConfigPayload>('/admin/cluster-config/refresh', password),
   adminClusterStatus: (password: string) =>
     adminGet<AdminClusterStatusPayload>('/admin/cluster-status', password),
+  adminClusterVersions: (password: string) =>
+    adminGet<AdminClusterVersionsPayload>('/admin/cluster-versions', password),
   adminPeers: (password: string) =>
     adminGet<AdminPeersPayload>('/admin/peers', password),
   adminPeerAdd: (password: string, body: { label: string; baseUrl: string }) =>
@@ -542,14 +544,16 @@ export interface AdminClusterStatusPayload {
     /** Human-readable error if `state` is null and the probe failed. */
     error?: string;
   };
-  versions: {
-    rows: Array<{
-      component: string;
-      version: string;
-      location?: string;
-      source: 'pc' | 'lcm';
-    }>;
-    /** Set when no source could answer (empty in mock mode, no error). */
-    error?: string;
-  };
+}
+
+
+export interface AdminClusterVersionsPayload {
+  rows: Array<{
+    component: string;
+    version: string;
+    location?: string;
+    source: 'pc' | 'lcm';
+  }>;
+  /** Set when no source could answer (empty in mock mode, no error). */
+  error?: string;
 }

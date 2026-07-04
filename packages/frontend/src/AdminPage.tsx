@@ -5,6 +5,7 @@ import {
   type AdminAttemptEntry,
   type AdminClusterConfigPayload,
   type AdminClusterStatusPayload,
+  type AdminClusterVersionsPayload,
   type AdminGateEntry,
   type AdminLunchStatus,
   type AdminPackStageEntry,
@@ -1414,6 +1415,9 @@ function ClusterConfigEditor({ password }: { password: string }) {
         <PlannerConfigEditor password={password} />
       </div>
       <div className="admin-cluster-col">
+        <ClusterVersions password={password} />
+      </div>
+      <div className="admin-cluster-col">
         <p className="admin-cluster-intro">
           <strong>Cached cluster snapshot</strong> · pre-loaded at boot to skip
           the slow discover-unconfigured-nodes / LCM-inventory queries inside
@@ -1495,10 +1499,10 @@ function ClusterConfigEditor({ password }: { password: string }) {
 }
 
 /**
- * Read-only live cluster status: IOps enablement + software versions.
- * Fetched on every Cluster tab open, no caching. Versions matter because
- * the "AOS + PC Demo - Latest" RX workload is managed elsewhere and can
- * drift from what OPERATOR.md expects.
+ * Read-only display of Prism Central product enablement (Intelligent
+ * Operations). Live-fetched on every Cluster tab open — no caching, the
+ * operator clicks Enable in Prism UI and wants to see the flip without
+ * restarting the backend.
  */
 function IntelligentOpsStatus({ password }: { password: string }) {
   const [data, setData] = useState<AdminClusterStatusPayload | null>(null);
@@ -1566,24 +1570,102 @@ function IntelligentOpsStatus({ password }: { password: string }) {
         )}
         {error && <div className="c-dim admin-cluster-iops-err">{error}</div>}
       </div>
-      <div className="admin-cluster-label admin-cluster-versions-title">
+    </div>
+  );
+}
+
+/**
+ * Live software inventory of the target (v3 clusters list + LCM). The
+ * "AOS + PC Demo - Latest" RX workload is managed elsewhere and drifts
+ * from OPERATOR.md, so the operator needs to see what actually runs.
+ * Nothing is stored — every open/refresh re-probes the PC.
+ */
+/** The components OPERATOR.md's prerequisites table talks about — always
+ *  visible; everything else collapses behind a toggle. */
+function isKeyComponent(component: string): boolean {
+  const c = component.toLowerCase();
+  return (
+    ['prism central', 'aos', 'ahv hypervisor', 'file server', 'self service'].includes(c) ||
+    c.startsWith('flow network')
+  );
+}
+
+function ClusterVersions({ password }: { password: string }) {
+  const [data, setData] = useState<AdminClusterVersionsPayload | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+
+  const load = useCallback(async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      setData(await api.adminClusterVersions(password));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [password]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <div className="admin-cluster-section">
+      <div className="admin-cluster-label">
         Software versions
         <span className="c-dim"> · live</span>
+        <button
+          type="button"
+          className="app-reset admin-cluster-iops-refresh"
+          onClick={() => void load()}
+          disabled={busy}
+          title="re-probe the cluster inventory"
+        >
+          {busy ? '…' : '↻'}
+        </button>
       </div>
-      {data.versions.rows.length === 0 ? (
+      {busy && !data ? (
+        <div className="admin-empty">loading versions…</div>
+      ) : err ? (
+        <div className="app-error">versions: {err}</div>
+      ) : !data || data.rows.length === 0 ? (
         <div className="c-dim admin-cluster-iops-err">
-          {data.versions.error ?? 'unavailable (mock mode)'}
+          {data?.error ?? 'unavailable (mock mode)'}
         </div>
       ) : (
-        <div className="admin-cluster-versions">
-          {data.versions.rows.map((r) => (
-            <div key={`${r.component}|${r.version}|${r.location ?? ''}`} className="admin-cluster-version-row">
-              <span>{r.component}</span>
-              <span className="c-green">{r.version}</span>
-              <span className="c-dim">{r.location ?? ''}</span>
-            </div>
-          ))}
-        </div>
+        (() => {
+          const key = data.rows.filter((r) => isKeyComponent(r.component));
+          const rest = data.rows.filter((r) => !isKeyComponent(r.component));
+          const rows = showAll ? [...key, ...rest] : key;
+          return (
+            <>
+              <div className="admin-cluster-versions">
+                {rows.map((r) => (
+                  <div
+                    key={`${r.component}|${r.version}|${r.location ?? ''}`}
+                    className={`admin-cluster-version-row${isKeyComponent(r.component) ? '' : ' admin-cluster-version-minor'}`}
+                  >
+                    <span>{r.component}</span>
+                    <span className="c-green">{r.version}</span>
+                    <span className="c-dim">{r.location ?? ''}</span>
+                  </div>
+                ))}
+              </div>
+              {rest.length > 0 && (
+                <button
+                  type="button"
+                  className="app-reset admin-cluster-versions-more"
+                  onClick={() => setShowAll((v) => !v)}
+                >
+                  {showAll ? '− hide' : `+ ${rest.length} more component${rest.length > 1 ? 's' : ''}`}
+                </button>
+              )}
+            </>
+          );
+        })()
       )}
     </div>
   );
