@@ -987,3 +987,115 @@ export class ScoreboardPeerQueries {
     return r.changes > 0;
   }
 }
+
+export interface EmailRosterRow {
+  id: number;
+  seat: number;
+  email: string;
+  addedAt: number;
+  /** templateId → sentAt (ms) of the last successful delivery. */
+  sent: Record<string, number>;
+}
+
+/**
+ * Participant roster for the /admin Emails tab. Seat = the participant's
+ * VDI account number ({ID} in templates), assigned lowest-free-first so a
+ * deleted participant frees their account for the next addition. Sends
+ * are one-shot per (participant, template type) — "pending" targeting
+ * means adding someone late never re-emails the room.
+ */
+export class EmailRosterQueries {
+  constructor(private readonly db: Database) {}
+
+  list(): EmailRosterRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT r.id, r.seat, r.email, r.added_at, s.template_id, s.sent_at
+           FROM email_roster r
+           LEFT JOIN email_sends s ON s.roster_id = r.id
+          ORDER BY r.seat ASC`,
+      )
+      .all() as Array<{
+        id: number;
+        seat: number;
+        email: string;
+        added_at: number;
+        template_id: string | null;
+        sent_at: number | null;
+      }>;
+    // One row per (entry, send); rows for the same seat are adjacent
+    // thanks to the ORDER BY, and Map preserves that order.
+    const byId = new Map<number, EmailRosterRow>();
+    for (const row of rows) {
+      let entry = byId.get(row.id);
+      if (!entry) {
+        entry = { id: row.id, seat: row.seat, email: row.email, addedAt: row.added_at, sent: {} };
+        byId.set(row.id, entry);
+      }
+      if (row.template_id !== null && row.sent_at !== null) {
+        entry.sent[row.template_id] = row.sent_at;
+      }
+    }
+    return [...byId.values()];
+  }
+
+  /** Add one address on the lowest free seat. Returns null on duplicate. */
+  add(email: string, now = Date.now()): EmailRosterRow | null {
+    const taken = (
+      this.db.prepare(`SELECT seat FROM email_roster ORDER BY seat ASC`).all() as Array<{
+        seat: number;
+      }>
+    ).map((r) => r.seat);
+    let seat = 1;
+    for (const t of taken) {
+      if (t === seat) seat++;
+      else if (t > seat) break;
+    }
+    try {
+      const r = this.db
+        .prepare(
+          `INSERT INTO email_roster (seat, email, added_at) VALUES ($s, $e, $at)
+           RETURNING id, seat, email, added_at`,
+        )
+        .get({ $s: seat, $e: email, $at: now }) as {
+          id: number; seat: number; email: string; added_at: number;
+        };
+      return { id: r.id, seat: r.seat, email: r.email, addedAt: r.added_at, sent: {} };
+    } catch (err) {
+      // Only the email-uniqueness violation means "already on the roster";
+      // anything else (SQLITE_BUSY, disk errors) must surface, not be
+      // reported to the operator as a benign skip.
+      if (err instanceof Error && err.message.includes('UNIQUE') && err.message.includes('email')) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  remove(id: number): boolean {
+    // No FK pragma in this DB — clean the send log by hand.
+    this.db.prepare(`DELETE FROM email_sends WHERE roster_id = $id`).run({ $id: id });
+    const r = this.db.prepare(`DELETE FROM email_roster WHERE id = $id`).run({ $id: id });
+    return r.changes > 0;
+  }
+
+  /** Roster entries with no successful delivery of this template yet. */
+  pendingFor(templateId: string): EmailRosterRow[] {
+    return this.list().filter((r) => r.sent[templateId] === undefined);
+  }
+
+  byIds(ids: number[]): EmailRosterRow[] {
+    const set = new Set(ids);
+    return this.list().filter((r) => set.has(r.id));
+  }
+
+  markSent(rosterId: number, templateId: string, now = Date.now()): void {
+    this.db
+      .prepare(
+        `INSERT INTO email_sends (roster_id, template_id, sent_at)
+         VALUES ($id, $t, $at)
+         ON CONFLICT(roster_id, template_id) DO UPDATE SET sent_at = excluded.sent_at`,
+      )
+      .run({ $id: rosterId, $t: templateId, $at: now });
+  }
+}

@@ -161,3 +161,26 @@ CREATE TABLE IF NOT EXISTS scoreboard_peers (
   enabled INTEGER NOT NULL DEFAULT 1,
   added_at INTEGER NOT NULL
 );
+
+-- Participant email roster (/admin Emails tab). Each entry binds an email
+-- address to a per-event seat number — the {ID} in the invitation, i.e.
+-- the "<CLUSTER>-User<ID>" VDI account handed to that participant. Seats
+-- are assigned lowest-free-first so deleting someone frees their VDI
+-- account for the next addition.
+CREATE TABLE IF NOT EXISTS email_roster (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  seat INTEGER NOT NULL UNIQUE,
+  email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  added_at INTEGER NOT NULL
+);
+
+-- One row per (participant, template type) successful delivery. Sending
+-- a template targets roster entries with no row here ("pending"), so
+-- adding a late participant never re-emails the rest of the room. Resend
+-- just refreshes sent_at.
+CREATE TABLE IF NOT EXISTS email_sends (
+  roster_id INTEGER NOT NULL,
+  template_id TEXT NOT NULL,
+  sent_at INTEGER NOT NULL,
+  PRIMARY KEY (roster_id, template_id)
+);

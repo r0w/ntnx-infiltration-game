@@ -504,6 +504,66 @@ export const api = {
     adminGet<{ flags: string[] }>('/admin/capabilities', password),
   adminCapabilitiesRefresh: (password: string) =>
     adminPost<AdminCapabilitiesRefreshPayload>('/admin/capabilities/refresh', password),
+  adminEmailConfig: (password: string) =>
+    adminGet<AdminEmailConfigPayload>('/admin/email-config', password),
+  adminEmailConfigSave: (
+    password: string,
+    body: {
+      mailtrapToken?: string | null;
+      fromEmail?: string | null;
+      fromName?: string | null;
+      vars?: Record<string, string>;
+    },
+  ) =>
+    fetch('/api/admin/email-config', {
+      method: 'PUT',
+      headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((res) => handle<AdminEmailConfigPayload>(res)),
+  adminEmailDomains: (password: string) =>
+    adminGet<{
+      domains: Array<{ domain: string; verified: boolean }>;
+      unauthorized?: boolean;
+      error?: string;
+    }>('/admin/email-domains', password),
+  adminEmailTemplates: (password: string) =>
+    adminGet<{ templates: AdminEmailTemplate[] }>('/admin/email-templates', password),
+  adminEmailTemplateSave: (
+    password: string,
+    id: string,
+    locale: string,
+    body: { subject: string; html: string },
+  ) =>
+    fetch(`/api/admin/email-templates/${id}/${locale}`, {
+      method: 'PUT',
+      headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((res) => handle<{ ok: true; overridden: boolean }>(res)),
+  adminEmailTemplateReset: (password: string, id: string, locale: string) =>
+    adminDel<{ ok: true }>(`/admin/email-templates/${id}/${locale}`, password),
+  adminEmailRoster: (password: string) =>
+    adminGet<{ entries: AdminEmailRosterEntry[] }>('/admin/email-roster', password),
+  adminEmailRosterAdd: (password: string, emails: string[]) =>
+    adminPost<{ added: number; skipped: number; entries: AdminEmailRosterEntry[] }>(
+      '/admin/email-roster',
+      password,
+      { emails },
+    ),
+  adminEmailRosterDelete: (password: string, id: number) =>
+    adminDel<{ ok: true; entries: AdminEmailRosterEntry[] }>(`/admin/email-roster/${id}`, password),
+  adminEmailSend: (
+    password: string,
+    body: {
+      templateId: string;
+      locale: string;
+      subject: string;
+      html: string;
+      vars: Record<string, string>;
+      mode: 'pending' | 'rows' | 'test';
+      rosterIds?: number[];
+      testAddress?: string;
+    },
+  ) => adminPost<AdminEmailSendPayload>('/admin/email-send', password, body),
 };
 
 export interface AdminCapabilitiesRefreshPayload {
@@ -517,6 +577,40 @@ export interface AdminCapabilitiesRefreshPayload {
     transportError?: boolean;
     transportCode?: string;
   }>;
+}
+
+export interface AdminEmailConfigPayload {
+  mailtrapToken: string;
+  fromEmail: string;
+  fromName: string;
+  vars: Record<string, string>;
+  /** PE cluster name probed live ('' when unknown) — default for {CLUSTER}/{PASSWORD}. */
+  clusterName: string;
+}
+
+export interface AdminEmailTemplate {
+  id: 'invitation-vdi' | 'summary';
+  locale: 'en' | 'fr' | 'de';
+  subject: string;
+  html: string;
+  variables: Record<string, string>;
+  overridden: boolean;
+}
+
+export interface AdminEmailRosterEntry {
+  id: number;
+  seat: number;
+  email: string;
+  addedAt: number;
+  /** templateId → sentAt of the last successful delivery. */
+  sent: Record<string, number>;
+}
+
+export interface AdminEmailSendPayload {
+  ok: boolean;
+  sent: number;
+  failed: number;
+  results: Array<{ to: string; seat: number; ok: boolean; error?: string }>;
 }
 
 export interface AdminPlannerConfigPayload {
