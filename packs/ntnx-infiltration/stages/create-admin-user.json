@@ -19,9 +19,6 @@
   "check": {
     "fn": "CheckUser"
   },
-  "captures": [
-    "UserUUID"
-  ],
   "needs": [
     "Trigram"
   ]

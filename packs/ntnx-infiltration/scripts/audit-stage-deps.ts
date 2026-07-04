@@ -23,7 +23,6 @@ const STAGES_DIR = join(PACK_DIR, 'stages');
 const LOCALES_DIR = join(PACK_DIR, 'locales');
 
 type StageJson = {
-  id: number;
   name?: string;
   messages: string[];
   captures?: string[];
@@ -37,16 +36,12 @@ const ENV_SEEDED = new Set(['PC', 'PCUser', 'PCPassword', 'Vlanid', 'ImageURL'])
 // Known check → captured variable names. Derived from reading
 // packs/ntnx-infiltration/checks/index.ts — each check's `captured` return.
 // Kept as explicit mapping so the audit doesn't parse TypeScript.
+// Since issue #31 checks resolve entities by name; only historical state
+// is captured (HostUUID: previous host, VMUUID: recovery point + incident).
 const CHECK_CAPTURES: Record<string, string[]> = {
-  CheckUser: ['UserUUID'],
-  CheckProject: ['ProjectUUID'],
-  CheckNetwork: ['NetworkUUID'],
-  CheckImage: ['ImageUUID'],
   CheckVM: ['VMUUID', 'HostUUID'],
   CheckLiveMigration: ['HostUUID'],
   CheckRestoreVM: ['VMUUID'],
-  CheckCat: ['CatUUID'],
-  CheckProtectionPolicy: ['ProtectionPolicyUUID'],
 };
 
 // Known check → consumed variable names. These are dependencies the check
@@ -57,8 +52,6 @@ const CHECK_CONSUMES: Record<string, string[]> = {
   // Stage-1 trigram is consumed implicitly by every name-based check via
   // getTrigram(ctx) — covered by the `{Trigram}` tokens in prose already.
   CheckLiveMigration: ['HostUUID'],
-  CheckCatVM: ['CatUUID'],
-  CheckApprovalPolicy: ['ProtectionPolicyUUID'],
   CheckUpdateBP: ['Vlanid'],
   CheckNewNode: ['NodeSerial'],
   CheckUpdates: ['NumberUpdates'],
@@ -68,6 +61,8 @@ const CHECK_CONSUMES: Record<string, string[]> = {
 // Variables that aren't referenced in prose but still useful to allow-list
 // (e.g. set indirectly or read by frontend only).
 const IGNORE_VARS = new Set([
+  // Computed at runtime by login's `computeGreeting` block, not a capture.
+  'Greeting',
   // Legacy / game-content placeholders not actually bound to anything yet.
   'EmailReport',
   'OldPC',
@@ -113,11 +108,24 @@ function loadCatalog(locale: string): Record<string, string> {
 
 function loadStages(): Stage[] {
   const catalog = loadCatalog('en');
+  // Stage order lives in pack.json's `stages[]` (the JSON files carry no id).
+  // Derive each stage's id from its position there — producer/consumer
+  // ordering and orphan detection depend on it.
+  const pack = JSON.parse(readFileSync(join(PACK_DIR, 'pack.json'), 'utf8')) as {
+    stages?: string[];
+  };
+  const order = new Map<string, number>();
+  (pack.stages ?? []).forEach((name, i) => order.set(name, i));
   const files = readdirSync(STAGES_DIR).filter((f) => f.endsWith('.json')).sort();
   const stages: Stage[] = [];
   for (const file of files) {
     const path = join(STAGES_DIR, file);
     const json = JSON.parse(readFileSync(path, 'utf8')) as StageJson;
+    const id = order.get(json.name ?? file.replace(/\.json$/, ''));
+    if (id === undefined) {
+      console.warn(`warning: ${file} not listed in pack.json stages[] — skipped`);
+      continue;
+    }
     const consumes = new Set<string>();
     const produces = new Set<string>();
     for (const key of json.messages) {
@@ -126,7 +134,8 @@ function loadStages(): Stage[] {
       for (const v of scanVarRefs(template)) consumes.add(v);
       for (const v of scanInputVars(template)) produces.add(v);
     }
-    for (const v of json.captures ?? []) produces.add(v);
+    // Produces derive from prose `<input/>` + CHECK_CAPTURES only — seeding
+    // from the file's own `captures` made stale captures self-perpetuating.
     if (json.check?.fn) {
       for (const v of CHECK_CAPTURES[json.check.fn] ?? []) produces.add(v);
       for (const v of CHECK_CONSUMES[json.check.fn] ?? []) consumes.add(v);
@@ -141,7 +150,7 @@ function loadStages(): Stage[] {
     const fn = json.check?.fn;
     const rehydratable = !!fn && (CHECK_CAPTURES[fn]?.length ?? 0) > 0;
     stages.push({
-      id: json.id,
+      id,
       name: json.name,
       file,
       json,
@@ -150,6 +159,9 @@ function loadStages(): Stage[] {
       rehydratable,
     });
   }
+  // Pack order, not filename order — "first producer wins" and the
+  // producer/consumer direction both depend on it.
+  stages.sort((a, b) => a.id - b.id);
   return stages;
 }
 
@@ -241,16 +253,25 @@ function printReport(r: Report): void {
  * itself, aren't seeded from env, and aren't in the ignore list. `captures`
  * = vars the stage produces (from `<input/>` + check captures). Empty
  * arrays are omitted to keep the JSON terse.
+ * `write=false` = dry-run (--check): report drift without touching files.
  */
-function applyMode(stages: Stage[]): void {
+function applyMode(stages: Stage[], write: boolean): number {
   const allProducers = new Set<string>();
-  for (const s of stages) for (const v of s.produces) allProducers.add(v);
+  const firstProducer = new Map<string, number>();
+  for (const s of stages) {
+    for (const v of s.produces) {
+      allProducers.add(v);
+      if (!firstProducer.has(v)) firstProducer.set(v, s.id);
+    }
+  }
 
   let updated = 0;
   for (const s of stages) {
     const selfProduced = new Set(s.produces);
     const needs = s.consumes
-      .filter((v) => !selfProduced.has(v))
+      // A re-capturer (live-migrate-vm reads then rewrites HostUUID) still
+      // needs the origin stage; only the origin drops the var from needs.
+      .filter((v) => !(selfProduced.has(v) && firstProducer.get(v) === s.id))
       .filter((v) => !ENV_SEEDED.has(v))
       .filter((v) => !IGNORE_VARS.has(v))
       // Only declare needs for vars we actually know are produced somewhere
@@ -283,14 +304,15 @@ function applyMode(stages: Stage[]): void {
       changed = true;
     }
     if (changed) {
-      writeFileSync(file, JSON.stringify(reorderStage(json), null, 2) + '\n', 'utf8');
+      if (write) writeFileSync(file, JSON.stringify(reorderStage(json), null, 2) + '\n', 'utf8');
       updated++;
       console.log(
         `${s.file}: needs=[${needs.join(',')}] captures=[${captures.join(',')}]`,
       );
     }
   }
-  console.log(`\nupdated ${updated} stage file(s).`);
+  console.log(`\n${write ? 'updated' : 'would update'} ${updated} stage file(s).`);
+  return updated;
 }
 
 /**
@@ -308,6 +330,7 @@ function reorderStage(s: Record<string, unknown>): Record<string, unknown> {
     'defaultColor',
     'messages',
     'saveScore',
+    'requiresOnOther',
     'typingSpeedMs',
     'silentOnSuccess',
     'waitForInputValue',
@@ -326,7 +349,15 @@ function main(): void {
   const stages = loadStages();
   const report = analyze(stages);
   if (args.has('--apply')) {
-    applyMode(stages);
+    applyMode(stages, true);
+    return;
+  }
+  if (args.has('--check')) {
+    const drift = applyMode(stages, false);
+    if (drift > 0) {
+      console.error(`${drift} stage file(s) out of date — run --apply`);
+      process.exit(1);
+    }
     return;
   }
   if (args.has('--json')) {

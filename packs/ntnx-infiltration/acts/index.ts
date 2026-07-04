@@ -733,28 +733,23 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
   // call so a previously-failed assignment can be retried, and skips when
   // the project is already correct. Best-effort: unavailable v3 → log +
   // continue (CheckVM also defaults to pass when v3 is unreachable).
-  // Prefer the captured var, else look the project up by name. Auto-play /
-  // fresh resume may not hold ProjectUUID in session, which used to silently
-  // skip the assignment (VM left ownerless → CheckVM fails).
-  const projVar = ctx.vars.get('ProjectUUID');
-  let projUuid: string | undefined =
-    typeof projVar === 'string' && projVar.length > 0 ? projVar : undefined;
-  if (!projUuid) {
-    try {
-      const projects = await ctx.nutanix.rest.request<{ entities?: AnyRec[] }>(
-        'POST',
-        '/api/nutanix/v3/projects/list',
-        { length: 250 },
-      );
-      projUuid = (projects?.entities ?? []).find(
-        (e) =>
-          e?.spec?.name === `${trigram}-proj` ||
-          e?.status?.name === `${trigram}-proj` ||
-          e?.metadata?.name === `${trigram}-proj`,
-      )?.metadata?.uuid;
-    } catch (err) {
-      ctx.logger.warn('actCreateVm: project lookup failed', { err: String(err).slice(0, 200) });
-    }
+  // Resolve the project by name — never from a stored var, which can go
+  // stale when the project is re-created (issue #31).
+  let projUuid: string | undefined;
+  try {
+    const projects = await ctx.nutanix.rest.request<{ entities?: AnyRec[] }>(
+      'POST',
+      '/api/nutanix/v3/projects/list',
+      { length: 250 },
+    );
+    projUuid = (projects?.entities ?? []).find(
+      (e) =>
+        e?.spec?.name === `${trigram}-proj` ||
+        e?.status?.name === `${trigram}-proj` ||
+        e?.metadata?.name === `${trigram}-proj`,
+    )?.metadata?.uuid;
+  } catch (err) {
+    ctx.logger.warn('actCreateVm: project lookup failed', { err: String(err).slice(0, 200) });
   }
   // Manage Ownership sets BOTH project + owner on the VM. Owner = theproject-
   // manager (a project member, added at create-project). Set both in one v3 PUT.
