@@ -1675,12 +1675,6 @@ a.terminal-link:visited {
     gap: 16px;
   }
 }
-.admin-cluster-intro {
-  color: #c4ced6;
-  font-size: 13px;
-  margin: 0 0 4px;
-  line-height: 1.5;
-}
 .admin-cluster-section {
   display: flex;
   flex-direction: column;
@@ -1710,10 +1704,44 @@ a.terminal-link:visited {
 }
 .admin-cluster-input { max-width: 240px; }
 .admin-planner-input { max-width: 380px; }
+/* Generic admin panel card — the Emails tab's console material promoted
+   to every tab. Eyebrow = RP codename, title = what the operator controls. */
+.admin-panel {
+  background: #0d1420;
+  border: 1px solid #1f2937;
+  border-radius: 6px;
+  padding: 16px 18px 18px;
+  min-width: 0;
+}
+.admin-panel-head { margin: 0 0 12px; }
+.admin-eyebrow {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--blue);
+  opacity: 0.8;
+}
+.admin-panel-title {
+  margin: 3px 0 4px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--fg);
+}
+.admin-panel-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--dim);
+  max-width: 72ch;
+}
 .admin-cluster-block {
-  margin-top: 6px;
-  padding-top: 12px;
-  border-top: 1px solid #1b232b;
+  background: #0d1420;
+  border: 1px solid #1f2937;
+  border-radius: 6px;
+  padding: 16px 18px 18px;
 }
 .admin-planner-reveal {
   background: transparent;
@@ -1752,6 +1780,172 @@ a.terminal-link:visited {
   margin-top: 6px;
 }
 .admin-peers-add-row .admin-cluster-input { max-width: none; flex: 1 1 auto; }
+/* Emails tab — the dispatch console. It borrows the material of the
+   briefings it sends: same night-blue card + border as the email
+   container, and the briefing purple marks everything that SENDS
+   (dispatch buttons, delivered stamps). Cyan stays for generic controls. */
+.admin-emails {
+  --em-purple: #8b74ff;      /* briefing #7855fa, lifted for dark-bg contrast */
+  --em-lilac: #c6befe;       /* the templates' own soft lilac */
+  --em-panel: #0d1420;
+  --em-border: #1f2937;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.admin-emails-panel {
+  background: var(--em-panel);
+  border: 1px solid var(--em-border);
+  border-radius: 6px;
+  padding: 16px 18px 18px;
+  min-width: 0;
+}
+.admin-emails-head { margin: 0 0 12px; }
+.admin-emails-eyebrow {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--em-lilac);
+  opacity: 0.8;
+}
+.admin-emails-title {
+  margin: 3px 0 4px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--fg);
+}
+.admin-emails-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--dim);
+  max-width: 72ch;
+}
+.admin-emails-channel { margin: 8px 0 0; font-size: 12px; }
+.admin-emails-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: #0b1020;
+  border: 1px solid var(--em-border);
+  border-radius: 4px;
+  padding: 2px 9px;
+  font-size: 12px;
+  color: #a5b4fc;
+  white-space: nowrap;
+}
+.admin-emails-chip b { color: var(--em-purple); }
+.admin-emails-sent { color: var(--em-purple); font-size: 12px; white-space: nowrap; }
+.admin-emails-config { max-width: 720px; }
+/* Top row: sender identity left, roster right — uses the page width. */
+.admin-emails-toprow {
+  display: grid;
+  grid-template-columns: minmax(320px, 460px) 1fr;
+  gap: 28px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .admin-emails-toprow { grid-template-columns: 1fr; }
+}
+.admin-emails-rosterblock { min-width: 0; }
+.admin-emails-compose-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
+}
+.admin-emails-compose-row .admin-cluster-input { min-width: 220px; }
+.admin-emails-var-input { max-width: 380px; }
+.admin-emails-subject { margin-top: 12px; }
+.admin-emails-subject-input { max-width: 560px; }
+.admin-emails-editor {
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  min-height: 480px;
+  /* The studio export is one long line — wrap it instead of h-scrolling. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  width: 100%;
+  margin-top: 10px;
+}
+.admin-emails-test-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.admin-emails-test-row .admin-cluster-input { max-width: none; flex: 1 1 auto; }
+.admin-emails-add-row { margin-top: 10px; max-width: 720px; }
+.admin-emails-domains {
+  font-size: 12px;
+  color: var(--dim);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.admin-emails-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.admin-emails-viewmodes { display: flex; gap: 4px; }
+.admin-emails-studio {
+  margin-top: 10px;
+  border: 1px solid #1b232b;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.admin-emails-roster-table { margin-top: 12px; }
+/* Per-type send buttons in the roster header — briefing purple, they SEND. */
+.admin-emails-send-btn {
+  margin-left: 10px;
+  background: rgba(139, 116, 255, 0.16);
+  border: 1px solid var(--em-purple);
+  color: #d9d2ff;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 3px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.admin-emails-send-btn:hover:not(:disabled) {
+  background: var(--em-purple);
+  color: #0b0f1a;
+}
+.admin-emails-send-btn:disabled {
+  background: transparent;
+  border-color: #1b232b;
+  color: var(--dim);
+  cursor: default;
+}
+/* Dry-run strip under the roster: its own template picker + address. */
+.admin-emails-dryrun {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #1b232b;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 720px;
+}
+.admin-emails-dryrun-select { flex: 0 0 auto; }
+.admin-emails-roster-table .admin-planner-reveal { margin-left: 10px; }
+.admin-emails-warn { font-size: 12px; margin: 8px 0 0; }
+.admin-emails-report { margin-top: 10px; font-size: 13px; }
+.admin-emails-report-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  max-height: 180px;
+  overflow-y: auto;
+}
 .admin-cluster-iops {
   font-size: 13px;
   display: flex;
@@ -2130,14 +2324,6 @@ a.terminal-link:visited {
 .modal-cascade-hint { font-size: 11px; line-height: 1.5; }
 
 /* ─── /admin gates section ────────────────────────────────────────── */
-.admin-section-title {
-  margin: 0 0 10px;
-  font-size: 11px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--dim);
-}
 .admin-gates {
   margin-bottom: 24px;
 }
@@ -2450,4 +2636,11 @@ a.terminal-link:visited {
 .terminal-input-hint {
   font-size: 11px;
   align-self: center;
+}
+.admin-emails-label-hint {
+  margin-left: 10px;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--dim);
+  font-size: 11px;
 }

@@ -15,6 +15,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- Participant emails are back: invite and thank your agents from the new `/admin` Emails tab.
 - The `/admin` Cluster tab shows the software versions the cluster actually runs (PC, AOS, Files, …).
 - Operator QoL: `/admin` shows each player's last failed check, plus a Logs tab of all attempts.
 - Admin footer showing the running version, branch, and commit, with a changelog
@@ -26,6 +27,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- Every `/admin` tab now uses the same card layout with clearer section headers.
 - Install runbook sets the `CloneProd` `pcUser` credential at deploy time, so
   stage 35 no longer asks the player to enter it (and can't lock the admin
   account on a typo).

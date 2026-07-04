@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   api,
@@ -6,6 +6,9 @@ import {
   type AdminClusterConfigPayload,
   type AdminClusterStatusPayload,
   type AdminClusterVersionsPayload,
+  type AdminEmailRosterEntry,
+  type AdminEmailSendPayload,
+  type AdminEmailTemplate,
   type AdminGateEntry,
   type AdminLunchStatus,
   type AdminPackStageEntry,
@@ -13,10 +16,14 @@ import {
   type AdminPeerEntry,
   type AdminUserEntry,
 } from './api';
+import { EMAIL_RE } from '@ntnx-game/shared';
 import { ConfirmModal, Modal } from './Modal';
+
+// GrapesJS studio — lazy so the ~1MB editor only loads when the Emails tab shows it.
+const EmailStudio = lazy(() => import('./EmailStudio'));
 import { VersionFooter } from './VersionFooter';
 
-type AdminTab = 'users' | 'logs' | 'pack' | 'cluster' | 'scoreboard';
+type AdminTab = 'users' | 'logs' | 'pack' | 'cluster' | 'emails' | 'scoreboard';
 
 const STORAGE_KEY = 'ntnx-infiltration-admin-pw';
 
@@ -109,6 +116,26 @@ function AdminLogin({ onLoggedIn }: { onLoggedIn: (pw: string) => void }) {
   );
 }
 
+
+/** Card header used across the admin tabs: RP eyebrow + plain title (+ short desc). */
+function PanelHead({
+  eyebrow,
+  title,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="admin-panel-head">
+      <span className="admin-eyebrow">{eyebrow}</span>
+      <h3 className="admin-panel-title">{title}</h3>
+      {children && <p className="admin-panel-desc">{children}</p>}
+    </div>
+  );
+}
+
 function AdminDashboard({
   password,
   onLogout,
@@ -120,7 +147,7 @@ function AdminDashboard({
   // the right section. Unknown / missing → users (safe default).
   const navigate = useNavigate();
   const { tab: tabParam } = useParams<{ tab?: string }>();
-  const VALID_TABS = ['users', 'logs', 'pack', 'cluster', 'scoreboard'] as const;
+  const VALID_TABS = ['users', 'logs', 'pack', 'cluster', 'emails', 'scoreboard'] as const;
   const tab: AdminTab = (VALID_TABS as readonly string[]).includes(tabParam ?? '')
     ? (tabParam as AdminTab)
     : 'users';
@@ -457,6 +484,15 @@ function AdminDashboard({
           <button
             type="button"
             role="tab"
+            aria-selected={tab === 'emails'}
+            className={`admin-tab ${tab === 'emails' ? 'admin-tab-active' : ''}`}
+            onClick={() => setTab('emails')}
+          >
+            emails
+          </button>
+          <button
+            type="button"
+            role="tab"
             aria-selected={tab === 'scoreboard'}
             className={`admin-tab ${tab === 'scoreboard' ? 'admin-tab-active' : ''}`}
             onClick={() => setTab('scoreboard')}
@@ -546,8 +582,8 @@ function AdminDashboard({
       )}
       {error && <div className="app-error">{error}</div>}
       {tab === 'users' && gates && gates.length > 0 && (
-        <section className="admin-gates">
-          <h2 className="admin-section-title">gates</h2>
+        <section className="admin-gates admin-panel">
+          <PanelHead eyebrow="checkpoints" title="Gates" />
           <div className="admin-gates-grid">
             {gates.map((g) => {
               const pct = g.totalActive > 0
@@ -642,7 +678,8 @@ function AdminDashboard({
             return 0;
           });
           return (
-            <>
+            <section className="admin-panel">
+              <PanelHead eyebrow="field ops" title="Agents" />
               <div className="admin-users-toolbar">
                 <label className="admin-users-toggle">
                   <input
@@ -793,23 +830,30 @@ function AdminDashboard({
           </table>
         </div>
               )}
-            </>
+            </section>
           );
         })()
       ) : null}
       {tab === 'logs' && (
-        <LogsTab password={password} query={logsQuery} onQueryChange={setLogsQuery} />
+        <section className="admin-panel">
+          <PanelHead eyebrow="comms log" title="Check attempts" />
+          <LogsTab password={password} query={logsQuery} onQueryChange={setLogsQuery} />
+        </section>
       )}
       {tab === 'pack' && (
-        <PackEditor
-          stages={packStages}
-          meta={packMeta}
-          busyId={packBusyId}
-          onTogglePackField={togglePackField}
-          onRequestDisable={requestDisable}
-        />
+        <section className="admin-panel">
+          <PanelHead eyebrow="mission plan" title="Stages" />
+          <PackEditor
+            stages={packStages}
+            meta={packMeta}
+            busyId={packBusyId}
+            onTogglePackField={togglePackField}
+            onRequestDisable={requestDisable}
+          />
+        </section>
       )}
       {tab === 'cluster' && <ClusterConfigEditor password={password} />}
+      {tab === 'emails' && <EmailsTab password={password} />}
       {tab === 'scoreboard' && <PeersEditor password={password} />}
       {packDisableTarget && (
         <ConfirmModal
@@ -1417,12 +1461,11 @@ function ClusterConfigEditor({ password }: { password: string }) {
       <div className="admin-cluster-col">
         <ClusterVersions password={password} />
       </div>
-      <div className="admin-cluster-col">
-        <p className="admin-cluster-intro">
-          <strong>Cached cluster snapshot</strong> · pre-loaded at boot to skip
-          the slow discover-unconfigured-nodes / LCM-inventory queries inside
-          checks. Operator edits are sticky (the boot probe never overwrites them).
-        </p>
+      <div className="admin-cluster-col admin-panel">
+        <PanelHead eyebrow="target cluster" title="Cached snapshot">
+          Pre-loaded at boot so checks skip the slow live queries. Operator
+          edits are sticky; the boot probe never overwrites them.
+        </PanelHead>
         {error && <div className="app-error">{error}</div>}
         <div className="admin-cluster-section">
           <label className="admin-cluster-label">
@@ -1539,7 +1582,7 @@ function IntelligentOpsStatus({ password }: { password: string }) {
   const stateLabel = state ?? 'unknown';
 
   return (
-    <div className="admin-cluster-section">
+    <div className="admin-cluster-section admin-cluster-block">
       <div className="admin-cluster-label">
         Intelligent Operations
         <span className="c-dim"> · live</span>
@@ -1613,7 +1656,7 @@ function ClusterVersions({ password }: { password: string }) {
   }, [load]);
 
   return (
-    <div className="admin-cluster-section">
+    <div className="admin-cluster-section admin-cluster-block">
       <div className="admin-cluster-label">
         Software versions
         <span className="c-dim"> · live</span>
@@ -1732,19 +1775,16 @@ function PlannerConfigEditor({ password }: { password: string }) {
 
   return (
     <div className="admin-cluster admin-cluster-block">
-      <p className="admin-cluster-intro">
-        <strong>Planner (secondary PC)</strong> · powers stages 31
-        <span className="c-dim"> (capacity-runway)</span> + 32
-        <span className="c-dim"> (resource-optimization)</span>. When all 3
-        fields are saved, the <code>PlannerCluster</code> capability flips
-        on for <em>new</em> sessions and the stages become playable. Leave
-        empty (or clear) to auto-skip them.{' '}
+      <PanelHead eyebrow="target cluster" title="Planner (secondary PC)">
+        Powers stages 31 <span className="c-dim">(capacity-runway)</span> + 32{' '}
+        <span className="c-dim">(resource-optimization)</span> on new sessions
+        once all 3 fields are saved; empty = auto-skip.{' '}
         {allSaved ? (
           <span className="c-green">● wired</span>
         ) : (
-          <span className="c-yellow">● not wired — stages 31/32 auto-skip</span>
+          <span className="c-yellow">● not wired · stages 31/32 auto-skip</span>
         )}
-      </p>
+      </PanelHead>
       {error && <div className="app-error">{error}</div>}
       <div className="admin-cluster-section">
         <label className="admin-cluster-label">Planner PC endpoint</label>
@@ -1812,6 +1852,843 @@ function PlannerConfigEditor({ password }: { password: string }) {
 }
 
 /**
+ * Emails tab — the dispatch console for participant emails (issue #30).
+ * Sender = Mailtrap Send API token + verified from-domain; recipients =
+ * seat-numbered roster where each template type goes out once per agent;
+ * body edited in the GrapesJS studio (EmailStudio) with source/preview
+ * views. Drafts and vars persist server-side per deployment on send.
+ */
+function EmailsTab({ password }: { password: string }) {
+  // Sender config (mirrors PlannerConfigEditor).
+  const [token, setToken] = useState('');
+  const [fromEmail, setFromEmail] = useState('');
+  const [fromName, setFromName] = useState('');
+  const [savedCfg, setSavedCfg] = useState<{
+    token: string;
+    fromEmail: string;
+    fromName: string;
+  } | null>(null);
+  const [showToken, setShowToken] = useState(false);
+  const [cfgSavedAt, setCfgSavedAt] = useState<number | null>(null);
+  const [domains, setDomains] = useState<Array<{ domain: string; verified: boolean }> | null>(
+    null,
+  );
+  const [domainsError, setDomainsError] = useState<string | null>(null);
+  // Verdict of the domains lookup, which doubles as a token check:
+  // 'invalid' = Mailtrap rejected the token (sending disabled),
+  // 'error' = probe failed for another reason (warn, don't block).
+  const [tokenStatus, setTokenStatus] = useState<
+    'unknown' | 'checking' | 'valid' | 'invalid' | 'error'
+  >('unknown');
+
+  // Composer.
+  const [templates, setTemplates] = useState<AdminEmailTemplate[] | null>(null);
+  const [savedVars, setSavedVars] = useState<Record<string, string>>({});
+  const [clusterName, setClusterName] = useState('');
+  const [selKey, setSelKey] = useState('');
+  const [subject, setSubject] = useState('');
+  const [html, setHtml] = useState('');
+  const [vars, setVars] = useState<Record<string, string>>({});
+  const [viewMode, setViewMode] = useState<'edit' | 'source'>('edit');
+  // Bumped on every template (re)load so the studio remounts with the fresh draft.
+  const [studioNonce, setStudioNonce] = useState(0);
+  // Synchronous mirror of `html` so handlers (send, dirty check) can read
+  // the draft right after a studio flush without waiting for a re-render.
+  const htmlRef = useRef('');
+  // Set by EmailStudio: synchronously exports the canvas into updateHtml.
+  const studioFlushRef = useRef<(() => void) | null>(null);
+  // Subject/html as loaded from the template — the dirty-draft baseline.
+  const loadedDraftRef = useRef<{ subject: string; html: string } | null>(null);
+  const [pendingSwitch, setPendingSwitch] = useState<{ key: string; thenSend: boolean } | null>(
+    null,
+  );
+
+  // Roster.
+  const [roster, setRoster] = useState<AdminEmailRosterEntry[] | null>(null);
+  const [addText, setAddText] = useState('');
+  const [testAddr, setTestAddr] = useState('');
+  const [sendReport, setSendReport] = useState<AdminEmailSendPayload | null>(null);
+  const [tplSavedAt, setTplSavedAt] = useState<number | null>(null);
+  const [confirmSend, setConfirmSend] = useState(false);
+
+  const [busy, setBusy] = useState<'load' | 'save' | 'savetpl' | 'send' | 'test' | 'roster' | null>(
+    'load',
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  const selTemplate = templates?.find((t) => `${t.id}.${t.locale}` === selKey) ?? null;
+
+  const updateHtml = useCallback((v: string) => {
+    htmlRef.current = v;
+    setHtml(v);
+  }, []);
+
+  const loadDomains = useCallback(async () => {
+    setTokenStatus('checking');
+    try {
+      const d = await api.adminEmailDomains(password);
+      setDomains(d.domains);
+      setDomainsError(d.error ?? null);
+      setTokenStatus(d.unauthorized ? 'invalid' : d.error ? 'error' : 'valid');
+    } catch (err) {
+      setDomainsError(err instanceof Error ? err.message : String(err));
+      setTokenStatus('error');
+    }
+  }, [password]);
+
+  const load = useCallback(async () => {
+    setBusy('load');
+    setError(null);
+    try {
+      const [cfg, tpl, ros] = await Promise.all([
+        api.adminEmailConfig(password),
+        api.adminEmailTemplates(password),
+        api.adminEmailRoster(password),
+      ]);
+      setToken(cfg.mailtrapToken);
+      setFromEmail(cfg.fromEmail);
+      // RP default: prefill the display name until the operator stores
+      // their own (shows as unsaved, one `save` click away).
+      setFromName(cfg.fromName || 'Tank The Operator');
+      setSavedCfg({ token: cfg.mailtrapToken, fromEmail: cfg.fromEmail, fromName: cfg.fromName });
+      setSavedVars(cfg.vars);
+      setClusterName(cfg.clusterName);
+      setTemplates(tpl.templates);
+      setRoster(ros.entries);
+      if (cfg.mailtrapToken) void loadDomains();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }, [password, loadDomains]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const saveCfg = async () => {
+    setBusy('save');
+    setError(null);
+    try {
+      const p = await api.adminEmailConfigSave(password, {
+        mailtrapToken: token.trim() || null,
+        fromEmail: fromEmail.trim() || null,
+        fromName: fromName.trim() || null,
+      });
+      setToken(p.mailtrapToken);
+      setFromEmail(p.fromEmail);
+      setFromName(p.fromName);
+      setSavedCfg({ token: p.mailtrapToken, fromEmail: p.fromEmail, fromName: p.fromName });
+      setCfgSavedAt(Date.now());
+      if (p.mailtrapToken) void loadDomains();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const applyTemplate = useCallback(
+    (key: string, tplList: AdminEmailTemplate[], saved: Record<string, string>, cluster: string) => {
+      setSelKey(key);
+      const t = tplList.find((t) => `${t.id}.${t.locale}` === key);
+      if (!t) return;
+      setSubject(t.subject);
+      updateHtml(t.html);
+      loadedDraftRef.current = { subject: t.subject, html: t.html };
+      // Priority: last-used value for this deployment, then the template
+      // default, then the derived ones — GAME_URL = this deployment's own
+      // origin, CLUSTER = the probed PE cluster name, PASSWORD = same as
+      // CLUSTER (the HPoC VDI accounts use the cluster name as password).
+      const resolved = Object.fromEntries(
+        Object.keys(t.variables).map((k) => [
+          k,
+          saved[k]?.trim()
+            ? saved[k]
+            : t.variables[k] ||
+              (k === 'GAME_URL' ? window.location.origin : k === 'CLUSTER' ? cluster : ''),
+        ]),
+      );
+      if ('PASSWORD' in resolved && !resolved.PASSWORD.trim()) {
+        resolved.PASSWORD = resolved.CLUSTER ?? '';
+      }
+      setVars(resolved);
+      setStudioNonce((n) => n + 1);
+      setSendReport(null);
+    },
+    [updateHtml],
+  );
+
+  const missingVars = Object.keys(vars).filter(
+    (k) => !vars[k].trim() && html.includes(`{${k}}`),
+  );
+
+  const wired = savedCfg !== null && savedCfg.token !== '' && savedCfg.fromEmail !== '';
+  // Hard-block sending only when Mailtrap explicitly rejected the token;
+  // a transient probe failure ('error') warns without blocking.
+  const canSend = wired && tokenStatus !== 'invalid';
+  // Email domains are case-insensitive — compare them that way.
+  const fromDomain = ((savedCfg?.fromEmail ?? '').split('@')[1] ?? '').toLowerCase();
+  const fromDomainUnverified =
+    tokenStatus === 'valid' &&
+    fromDomain !== '' &&
+    (domains ?? []).every((d) => !d.verified || d.domain.toLowerCase() !== fromDomain);
+  const cfgDirty =
+    savedCfg !== null &&
+    (token.trim() !== savedCfg.token ||
+      fromEmail.trim() !== savedCfg.fromEmail ||
+      fromName.trim() !== savedCfg.fromName);
+  const draftReady = selTemplate !== null && subject.trim() !== '' && html.trim() !== '';
+  // Note: html state can lag the studio by its 400ms debounce; the save /
+  // switch handlers flush before reading, this flag only gates buttons.
+  const draftDirty =
+    selTemplate !== null &&
+    loadedDraftRef.current !== null &&
+    (subject.trim() !== loadedDraftRef.current.subject ||
+      html !== loadedDraftRef.current.html);
+  const pendingFor = (tplType: string) =>
+    (roster ?? []).filter((r) => r.sent[tplType] === undefined);
+  const pending = selTemplate ? pendingFor(selTemplate.id) : [];
+
+  // Loading a template overwrites the draft; edits persist server-side
+  // only on send, so a dirty draft gets a discard confirmation first.
+  const requestTemplateChange = (key: string, thenSend = false) => {
+    if (!key || key === selKey) {
+      if (thenSend) setConfirmSend(true);
+      return;
+    }
+    studioFlushRef.current?.();
+    const loaded = loadedDraftRef.current;
+    const dirty =
+      selKey !== '' &&
+      loaded !== null &&
+      (subject !== loaded.subject || htmlRef.current !== loaded.html);
+    if (dirty) {
+      setPendingSwitch({ key, thenSend });
+      return;
+    }
+    applyTemplate(key, templates ?? [], savedVars, clusterName);
+    if (thenSend) setConfirmSend(true);
+  };
+
+  // Per-type send button in the roster header. If the composer holds a
+  // different type, load that type's template first (keeping the
+  // current locale) so the confirm modal always shows what goes out.
+  const requestSend = (tplType: 'invitation-vdi' | 'summary') => {
+    const locale = selTemplate?.locale ?? 'en';
+    const t =
+      templates?.find((t) => t.id === tplType && t.locale === locale) ??
+      templates?.find((t) => t.id === tplType);
+    if (!t) return;
+    requestTemplateChange(`${t.id}.${t.locale}`, true);
+  };
+  const verifiedDomains = (domains ?? []).filter((d) => d.verified);
+
+  const addToRoster = async () => {
+    const emails = addText
+      .split(/[\n,;\s]+/)
+      .map((e) => e.trim())
+      .filter(Boolean);
+    if (emails.length === 0) return;
+    setBusy('roster');
+    setError(null);
+    try {
+      const r = await api.adminEmailRosterAdd(password, emails);
+      setRoster(r.entries);
+      setAddText('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const deleteFromRoster = async (id: number) => {
+    setBusy('roster');
+    setError(null);
+    try {
+      const r = await api.adminEmailRosterDelete(password, id);
+      setRoster(r.entries);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const send = async (mode: 'pending' | 'rows' | 'test', rosterIds?: number[]) => {
+    if (!selTemplate) return;
+    // Pull any pending studio edits into the draft before reading it.
+    studioFlushRef.current?.();
+    setBusy(mode === 'test' ? 'test' : 'send');
+    setError(null);
+    setSendReport(null);
+    try {
+      const r = await api.adminEmailSend(password, {
+        templateId: selTemplate.id,
+        locale: selTemplate.locale,
+        subject: subject.trim(),
+        html: htmlRef.current,
+        vars,
+        mode,
+        ...(rosterIds ? { rosterIds } : {}),
+        ...(mode === 'test' ? { testAddress: testAddr.trim() } : {}),
+      });
+      setSendReport(r);
+      // A send-only Mailtrap token 401s on the accounts API but delivers
+      // fine — a successful dry run is proof enough to lift the block.
+      if (mode === 'test' && r.failed === 0 && tokenStatus === 'invalid') {
+        setTokenStatus('valid');
+      }
+      if (mode !== 'test') {
+        // Sends persist the draft + refresh the sent badges.
+        const [ros, tpl, cfg] = await Promise.all([
+          api.adminEmailRoster(password),
+          api.adminEmailTemplates(password),
+          api.adminEmailConfig(password),
+        ]);
+        setRoster(ros.entries);
+        setTemplates(tpl.templates);
+        setSavedVars(cfg.vars);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const saveTemplate = async () => {
+    if (!selTemplate) return;
+    studioFlushRef.current?.();
+    setBusy('savetpl');
+    setError(null);
+    try {
+      const draft = { subject: subject.trim(), html: htmlRef.current };
+      const r = await api.adminEmailTemplateSave(
+        password,
+        selTemplate.id,
+        selTemplate.locale,
+        draft,
+      );
+      loadedDraftRef.current = draft;
+      setTemplates(
+        (prev) =>
+          prev?.map((t) =>
+            t.id === selTemplate.id && t.locale === selTemplate.locale
+              ? { ...t, ...draft, overridden: r.overridden }
+              : t,
+          ) ?? null,
+      );
+      setTplSavedAt(Date.now());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const resetTemplate = async () => {
+    if (!selTemplate) return;
+    setBusy('save');
+    setError(null);
+    try {
+      await api.adminEmailTemplateReset(password, selTemplate.id, selTemplate.locale);
+      const tpl = await api.adminEmailTemplates(password);
+      setTemplates(tpl.templates);
+      applyTemplate(selKey, tpl.templates, savedVars, clusterName);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const TEMPLATE_LABELS: Record<string, string> = {
+    'invitation-vdi': 'invitation',
+    summary: 'summary',
+  };
+  // One option list shared by the dry-run and composer pickers.
+  const templateOptions = (templates ?? []).map((t) => (
+    <option key={`${t.id}.${t.locale}`} value={`${t.id}.${t.locale}`}>
+      {TEMPLATE_LABELS[t.id] ?? t.id} · {t.locale}
+      {t.overridden ? ' · edited' : ''}
+    </option>
+  ));
+
+  return (
+    <div className="admin-emails">
+      {error && <div className="app-error">{error}</div>}
+
+      <div className="admin-emails-toprow">
+            <div className="admin-cluster admin-emails-panel admin-emails-config">
+        <div className="admin-emails-head">
+          <span className="admin-emails-eyebrow">Uplink</span>
+          <h3 className="admin-emails-title">Sender identity</h3>
+          <p className="admin-emails-desc">
+            <a href="https://mailtrap.io" target="_blank" rel="noreferrer">
+              Mailtrap
+            </a>{' '}
+            Send API token + a from address on a verified domain.
+          </p>
+          <p className="admin-emails-channel">
+            {!wired ? (
+              <span className="c-yellow">● channel down · set the token and from address</span>
+            ) : tokenStatus === 'invalid' ? (
+              <span className="c-red">
+                ● Mailtrap rejected the token · sends disabled (a dry run can
+                prove a send-only token and re-open the channel)
+              </span>
+            ) : tokenStatus === 'checking' ? (
+              <span className="c-dim">● checking uplink…</span>
+            ) : tokenStatus === 'error' ? (
+              <span className="c-yellow">● uplink unverified · Mailtrap unreachable</span>
+            ) : fromDomainUnverified ? (
+              <span className="c-yellow">
+                ● channel open · but {fromDomain} is not a verified sending domain
+              </span>
+            ) : (
+              <span className="c-green">● channel open · sending as {savedCfg?.fromEmail}</span>
+            )}
+          </p>
+        </div>
+        <div className="admin-cluster-section">
+          <label className="admin-cluster-label">
+            Mailtrap API token
+            <button
+              type="button"
+              className="admin-planner-reveal"
+              onClick={() => setShowToken((s) => !s)}
+              title={showToken ? 'hide' : 'show'}
+            >
+              {showToken ? 'hide' : 'show'}
+            </button>
+          </label>
+          <input
+            type={showToken ? 'text' : 'password'}
+            className="admin-cluster-input admin-planner-input"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            disabled={busy !== null}
+            spellCheck={false}
+            autoComplete="new-password"
+          />
+        </div>
+        <div className="admin-cluster-section">
+          <label className="admin-cluster-label">From address</label>
+          <input
+            type="text"
+            className="admin-cluster-input admin-planner-input"
+            placeholder="tank@your-verified-domain.com"
+            value={fromEmail}
+            onChange={(e) => setFromEmail(e.target.value)}
+            disabled={busy !== null}
+            spellCheck={false}
+            autoComplete="off"
+          />
+          {verifiedDomains.length > 0 && (
+            <span className="admin-emails-domains">
+              verified: {verifiedDomains.map((d) => d.domain).join(', ')}
+              {verifiedDomains.map((d) => {
+                const suggestion = `tank@${d.domain}`;
+                return suggestion !== fromEmail.trim().toLowerCase() ? (
+                  <button
+                    key={d.domain}
+                    type="button"
+                    className="admin-planner-reveal"
+                    onClick={() => setFromEmail(suggestion)}
+                  >
+                    use {suggestion}
+                  </button>
+                ) : null;
+              })}
+            </span>
+          )}
+          {domainsError && (
+            <span className="c-yellow admin-emails-domains">
+              domain lookup failed: {domainsError}
+            </span>
+          )}
+        </div>
+        <div className="admin-cluster-section">
+          <label className="admin-cluster-label">From name (optional)</label>
+          <input
+            type="text"
+            className="admin-cluster-input admin-planner-input"
+            placeholder="Tank The Operator"
+            value={fromName}
+            onChange={(e) => setFromName(e.target.value)}
+            disabled={busy !== null}
+            spellCheck={false}
+            autoComplete="off"
+          />
+        </div>
+        <div className="admin-cluster-actions">
+          <button
+            type="button"
+            className="modal-btn modal-btn-danger"
+            disabled={busy !== null || !cfgDirty}
+            onClick={() => void saveCfg()}
+          >
+            {busy === 'save' ? 'saving…' : 'save'}
+          </button>
+          {cfgSavedAt && busy === null && (
+            <span className="c-green admin-cluster-saved">saved {fmtAge(cfgSavedAt)}</span>
+          )}
+        </div>
+      </div>
+        <div className="admin-emails-panel admin-emails-rosterblock">
+        <div className="admin-emails-head">
+          <span className="admin-emails-eyebrow">Manifest</span>
+          <h3 className="admin-emails-title">Agent roster</h3>
+          <p className="admin-emails-desc">
+            One seat = one VDI account; each briefing goes out <em>once</em>{' '}
+            per agent. Deleting frees the seat.
+          </p>
+        </div>
+        <div className="admin-emails-test-row admin-emails-add-row">
+          <input
+            type="text"
+            className="admin-cluster-input"
+            placeholder="add addresses (space / comma / newline separated)"
+            value={addText}
+            onChange={(e) => setAddText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void addToRoster();
+            }}
+            disabled={busy !== null}
+            spellCheck={false}
+          />
+          <button
+            type="button"
+            className="modal-btn"
+            disabled={busy !== null || addText.trim() === ''}
+            onClick={() => void addToRoster()}
+          >
+            {busy === 'roster' ? '…' : 'add'}
+          </button>
+        </div>
+        {roster && roster.some((r) => r.seat > 20) && (
+          <p className="admin-emails-warn c-yellow">
+            seats above 20 in use · those participants have no matching VDI
+            account.
+          </p>
+        )}
+        {roster && roster.length > 0 ? (
+          <div className="admin-table-wrap">
+            <table className="admin-table admin-emails-roster-table">
+              <thead>
+                <tr>
+                  <th>seat</th>
+                  <th>email</th>
+                  {(['invitation-vdi', 'summary'] as const).map((tplType) => {
+                    const count = pendingFor(tplType).length;
+                    return (
+                      <th key={tplType}>
+                        {TEMPLATE_LABELS[tplType]}
+                        <button
+                          type="button"
+                          className="admin-emails-send-btn"
+                          disabled={busy !== null || !canSend || count === 0}
+                          onClick={() => requestSend(tplType)}
+                          title={
+                            !canSend
+                              ? wired
+                                ? 'Mailtrap rejected the token'
+                                : 'configure the sender identity first'
+                              : count === 0
+                                ? `everyone already received the ${TEMPLATE_LABELS[tplType]}`
+                                : `send the ${TEMPLATE_LABELS[tplType]} to the ${count} participant(s) who did not get it yet`
+                          }
+                        >
+                          send to {count}
+                        </button>
+                      </th>
+                    );
+                  })}
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {roster.map((r) => (
+                  <tr key={r.id}>
+                    <td>
+                      <span className="admin-emails-chip">
+                        <b>{String(r.seat).padStart(2, '0')}</b>
+                        {(savedVars.CLUSTER?.trim() || clusterName) &&
+                          `${savedVars.CLUSTER?.trim() || clusterName}-User${String(r.seat).padStart(2, '0')}`}
+                      </span>
+                    </td>
+                    <td>{r.email}</td>
+                    {(['invitation-vdi', 'summary'] as const).map((tplType) => (
+                      <td key={tplType}>
+                        {r.sent[tplType] ? (
+                          <span
+                            className="admin-emails-sent"
+                            title={new Date(r.sent[tplType]).toLocaleString()}
+                          >
+                            ✓ sent {fmtAge(r.sent[tplType])}
+                          </span>
+                        ) : (
+                          <span className="c-dim">—</span>
+                        )}
+                        {selTemplate?.id === tplType && r.sent[tplType] !== undefined && (
+                          <button
+                            type="button"
+                            className="admin-planner-reveal"
+                            disabled={busy !== null || !canSend || !draftReady}
+                            onClick={() => void send('rows', [r.id])}
+                            title="resend the current draft to this participant only"
+                          >
+                            resend
+                          </button>
+                        )}
+                      </td>
+                    ))}
+                    <td>
+                      <button
+                        type="button"
+                        className="admin-planner-reveal"
+                        disabled={busy !== null}
+                        onClick={() => void deleteFromRoster(r.id)}
+                        title="remove from roster (frees the seat; forgets sent state)"
+                      >
+                        delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="c-dim admin-emails-warn">roster is empty — add participants above.</p>
+        )}
+        <div className="admin-emails-dryrun">
+          <label className="admin-cluster-label">
+            Dry run
+            <span className="admin-emails-label-hint">
+              pick a template, send it to one address; marks nobody as sent
+            </span>
+          </label>
+          <div className="admin-emails-test-row">
+            <select
+              className="admin-cluster-input admin-emails-dryrun-select"
+              value={selKey}
+              onChange={(e) => requestTemplateChange(e.target.value)}
+              disabled={busy !== null || templates === null}
+            >
+              <option value="">choose…</option>
+              {templateOptions}
+            </select>
+            <input
+              type="text"
+              className="admin-cluster-input"
+              placeholder="you@example.com"
+              value={testAddr}
+              onChange={(e) => setTestAddr(e.target.value)}
+              disabled={busy !== null}
+              spellCheck={false}
+            />
+            <button
+              type="button"
+              className="modal-btn"
+              disabled={
+                busy !== null || !canSend || !draftReady || !/^\S+@\S+\.\S+$/.test(testAddr.trim())
+              }
+              onClick={() => void send('test')}
+              title="send the selected template's current draft to this address only"
+            >
+              {busy === 'test' ? 'sending…' : 'send test'}
+            </button>
+          </div>
+        </div>
+        {sendReport && (
+          <div className="admin-emails-report">
+            <span className={sendReport.failed === 0 ? 'c-green' : 'c-yellow'}>
+              sent {sendReport.sent}, failed {sendReport.failed}
+            </span>
+            <ul className="admin-emails-report-list">
+              {sendReport.results.map((r) => (
+                <li key={r.to} className={r.ok ? 'c-green' : 'c-red'}>
+                  {r.ok ? '✓' : '✗'} {String(r.seat).padStart(2, '0')} · {r.to}
+                  {r.error ? ` — ${r.error}` : ''}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+      </div>
+
+      <div className="admin-emails-panel">
+        <div className="admin-emails-head">
+          <span className="admin-emails-eyebrow">Briefing room</span>
+          <h3 className="admin-emails-title">Edit templates</h3>
+          <p className="admin-emails-desc">
+            Sending happens from the manifest; save template (or sending)
+            keeps your edits as this deployment&apos;s version.
+          </p>
+        </div>
+        <div className="admin-emails-compose-row">
+          <div className="admin-cluster-section">
+            <label className="admin-cluster-label">Template</label>
+            <select
+              className="admin-cluster-input"
+              value={selKey}
+              onChange={(e) => requestTemplateChange(e.target.value)}
+              disabled={busy !== null || templates === null}
+            >
+              <option value="">choose…</option>
+              {templateOptions}
+            </select>
+          </div>
+          {Object.keys(vars).map((k) => (
+            <div className="admin-cluster-section" key={k}>
+              <label className="admin-cluster-label">{`{${k}}`}</label>
+              <input
+                type="text"
+                className="admin-cluster-input admin-emails-var-input"
+                value={vars[k]}
+                onChange={(e) => setVars((prev) => ({ ...prev, [k]: e.target.value }))}
+                disabled={busy !== null}
+                spellCheck={false}
+              />
+            </div>
+          ))}
+        </div>
+        {selTemplate && (
+          <>
+            <div className="admin-cluster-section admin-emails-subject">
+              <label className="admin-cluster-label">Subject</label>
+              <input
+                type="text"
+                className="admin-cluster-input admin-emails-subject-input"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                disabled={busy !== null}
+                spellCheck={false}
+              />
+            </div>
+            <div className="admin-emails-toolbar">
+              <div className="admin-emails-viewmodes" role="tablist">
+                {(['edit', 'source'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    role="tab"
+                    aria-selected={viewMode === m}
+                    className={`admin-tab ${viewMode === m ? 'admin-tab-active' : ''}`}
+                    onClick={() => {
+                      studioFlushRef.current?.();
+                      setViewMode(m);
+                    }}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="modal-btn"
+                disabled={busy !== null || !draftReady || !draftDirty}
+                onClick={() => void saveTemplate()}
+                title="store this draft as the deployment's template (sending does it too)"
+              >
+                {busy === 'savetpl' ? 'saving…' : 'save template'}
+              </button>
+              {tplSavedAt && busy === null && !draftDirty && (
+                <span className="c-green admin-cluster-saved">saved {fmtAge(tplSavedAt)}</span>
+              )}
+              {selTemplate.overridden && (
+                <button
+                  type="button"
+                  className="admin-planner-reveal"
+                  disabled={busy !== null}
+                  onClick={() => void resetTemplate()}
+                  title="discard this deployment's edits and reload the bundled template"
+                >
+                  reset to default
+                </button>
+              )}
+            </div>
+            {viewMode === 'edit' && (
+              <Suspense
+                fallback={<p className="c-dim admin-emails-warn">loading editor…</p>}
+              >
+                <EmailStudio
+                  key={`${selKey}:${studioNonce}`}
+                  html={html}
+                  onChange={updateHtml}
+                  flushRef={studioFlushRef}
+                />
+              </Suspense>
+            )}
+            {viewMode === 'source' && (
+              <textarea
+                className="admin-cluster-textarea admin-emails-editor"
+                value={html}
+                onChange={(e) => updateHtml(e.target.value)}
+                disabled={busy !== null}
+                spellCheck={false}
+              />
+            )}
+            {missingVars.length > 0 && (
+              <p className="admin-emails-warn c-yellow">
+                unfilled variable{missingVars.length === 1 ? '' : 's'}:{' '}
+                {missingVars.map((k) => `{${k}}`).join(', ')} — recipients would
+                see the raw token.
+              </p>
+            )}
+          </>
+        )}
+      </div>
+
+      {pendingSwitch && (
+        <ConfirmModal
+          title="discard draft edits"
+          confirmLabel="discard and switch"
+          danger
+          onConfirm={() => {
+            const p = pendingSwitch;
+            setPendingSwitch(null);
+            applyTemplate(p.key, templates ?? [], savedVars, clusterName);
+            if (p.thenSend) setConfirmSend(true);
+          }}
+          onCancel={() => setPendingSwitch(null)}
+        >
+          <p>
+            The current draft has unsent edits; loading another template
+            discards them. Continue?
+          </p>
+        </ConfirmModal>
+      )}
+      {confirmSend && selTemplate && (
+        <ConfirmModal
+          title="send emails"
+          confirmLabel={`send to ${pending.length}`}
+          danger
+          busy={busy === 'send'}
+          onConfirm={() => {
+            setConfirmSend(false);
+            void send('pending');
+          }}
+          onCancel={() => setConfirmSend(false)}
+        >
+          <p>
+            Send <strong>{TEMPLATE_LABELS[selTemplate.id] ?? selTemplate.id}</strong> (
+            {selTemplate.locale}) to the <strong>{pending.length}</strong>{' '}
+            participant{pending.length === 1 ? '' : 's'} who did not receive it
+            yet?
+          </p>
+        </ConfirmModal>
+      )}
+    </div>
+  );
+}
+
+/**
  * Operator-facing view of the Policy Engine state. Drives stage 21
  * (`create-approval-policy`) availability on shared clusters. When the
  * BP's `activate_policy_engine.py` couldn't bring the engine up in time
@@ -1865,11 +2742,10 @@ function PolicyEngineStatus({ password }: { password: string }) {
 
   return (
     <div className="admin-cluster admin-cluster-block">
-      <p className="admin-cluster-intro">
-        <strong>Policy Engine</strong> · powers stage 21
-        <span className="c-dim"> (create-approval-policy)</span> on shared
-        clusters. Activate in Prism if needed, then re-check here.
-      </p>
+      <PanelHead eyebrow="target cluster" title="Policy Engine">
+        Powers stage 21 <span className="c-dim">(create-approval-policy)</span>{' '}
+        on shared clusters. Activate in Prism if needed, then re-check here.
+      </PanelHead>
       <div className="admin-cluster-iops">
         state:{' '}
         {enabled === null ? (
@@ -1996,14 +2872,14 @@ function PeersEditor({ password }: { password: string }) {
   const selfLabelDirty = (selfLabel.trim() || null) !== selfLabelSaved;
 
   return (
-    <div className="admin-cluster">
-      <p className="admin-cluster-intro">
+    <div className="admin-cluster admin-panel">
+      <PanelHead eyebrow="network" title="Combined scoreboards">
         Clusters merged into the{' '}
         <Link to="/scoreboard?combined=1" target="_blank" rel="noreferrer">
           combined scoreboard
         </Link>
         . baseUrl example: <code>http://10.55.89.44:3000</code>.
-      </p>
+      </PanelHead>
       {error && <div className="app-error">{error}</div>}
 
       <div className="admin-cluster-section">
