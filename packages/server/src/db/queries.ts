@@ -1009,24 +1009,34 @@ export class EmailRosterQueries {
 
   list(): EmailRosterRow[] {
     const rows = this.db
-      .prepare(`SELECT id, seat, email, added_at FROM email_roster ORDER BY seat ASC`)
-      .all() as Array<{ id: number; seat: number; email: string; added_at: number }>;
-    const sends = this.db
-      .prepare(`SELECT roster_id, template_id, sent_at FROM email_sends`)
-      .all() as Array<{ roster_id: number; template_id: string; sent_at: number }>;
-    const byRoster = new Map<number, Record<string, number>>();
-    for (const s of sends) {
-      const m = byRoster.get(s.roster_id) ?? {};
-      m[s.template_id] = s.sent_at;
-      byRoster.set(s.roster_id, m);
+      .prepare(
+        `SELECT r.id, r.seat, r.email, r.added_at, s.template_id, s.sent_at
+           FROM email_roster r
+           LEFT JOIN email_sends s ON s.roster_id = r.id
+          ORDER BY r.seat ASC`,
+      )
+      .all() as Array<{
+        id: number;
+        seat: number;
+        email: string;
+        added_at: number;
+        template_id: string | null;
+        sent_at: number | null;
+      }>;
+    // One row per (entry, send); rows for the same seat are adjacent
+    // thanks to the ORDER BY, and Map preserves that order.
+    const byId = new Map<number, EmailRosterRow>();
+    for (const row of rows) {
+      let entry = byId.get(row.id);
+      if (!entry) {
+        entry = { id: row.id, seat: row.seat, email: row.email, addedAt: row.added_at, sent: {} };
+        byId.set(row.id, entry);
+      }
+      if (row.template_id !== null && row.sent_at !== null) {
+        entry.sent[row.template_id] = row.sent_at;
+      }
     }
-    return rows.map((r) => ({
-      id: r.id,
-      seat: r.seat,
-      email: r.email,
-      addedAt: r.added_at,
-      sent: byRoster.get(r.id) ?? {},
-    }));
+    return [...byId.values()];
   }
 
   /** Add one address on the lowest free seat. Returns null on duplicate. */

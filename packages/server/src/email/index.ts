@@ -180,6 +180,9 @@ export async function listMailtrapDomains(
     }
     if (!accRes.ok) return { domains: [], error: `accounts: HTTP ${accRes.status}` };
     const accounts = (await accRes.json()) as Array<{ id: number }>;
+    if (!Array.isArray(accounts)) {
+      return { domains: [], error: 'accounts: unexpected response shape' };
+    }
     // Accounts are independent — fetch in parallel so the shared timeout
     // bounds the slowest lookup, not the sum.
     const perAccount = await Promise.all(
@@ -195,8 +198,8 @@ export async function listMailtrapDomains(
             demo?: boolean;
             dns_records?: Array<{ status: string }>;
           }>;
-        };
-        return (body.data ?? [])
+        } | null;
+        return (body?.data ?? [])
           // demomailtrap.co & co: Mailtrap's sandbox domains only deliver
           // to the account owner — useless for real participant sends.
           .filter((d) => !d.demo)
