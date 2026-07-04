@@ -7,7 +7,12 @@ import { AttemptQueries, SessionQueries, ScoreboardPeerQueries, type AdminSessio
 import type { LoadedPack } from '../pack-loader';
 import { analyzeDeps, cascadeDisable, type BrokenStage } from '../dep-analysis';
 import { probeClusterConfig } from '../cluster-config-probe';
-import { probeIntelligentOps, type IntelligentOpsProbeResult } from '../cluster-status-probe';
+import {
+  probeIntelligentOps,
+  probeSoftwareVersions,
+  type IntelligentOpsProbeResult,
+  type SoftwareVersionsProbeResult,
+} from '../cluster-status-probe';
 import { consoleLogger } from '../logger';
 
 export interface AdminRoutesDeps {
@@ -42,6 +47,7 @@ export interface AdminRoutesDeps {
 
 export interface AdminClusterStatusPayload {
   intelligentOps: IntelligentOpsProbeResult;
+  versions: SoftwareVersionsProbeResult;
 }
 
 export interface AdminClusterConfigPayload {
@@ -793,18 +799,18 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   });
 
   // ─── live cluster status (no DB) ────────────────────────────────────
-  // Read-only probe of PC product enablement. Currently surfaces the
-  // Intelligent Operations state — no public API to flip it (PRI-55201
-  // on the v4 endpoint), so the response includes a deep-link to the
-  // Prism UI activation page. Hits the live PC on every call; intended
-  // frequency is "operator opens the Cluster tab", caching adds nothing.
+  // Read-only probes: IOps enablement + software versions. Hits the live
+  // PC on every call; frequency is "operator opens the Cluster tab".
   router.get('/cluster-status', async (c) => {
-    const intelligentOps = await probeIntelligentOps({
-      nutanix: deps.nutanix,
-      pcEndpoint: deps.pcEndpoint,
-      logger: consoleLogger,
-    });
-    const payload: AdminClusterStatusPayload = { intelligentOps };
+    const [intelligentOps, versions] = await Promise.all([
+      probeIntelligentOps({
+        nutanix: deps.nutanix,
+        pcEndpoint: deps.pcEndpoint,
+        logger: consoleLogger,
+      }),
+      probeSoftwareVersions({ nutanix: deps.nutanix, logger: consoleLogger }),
+    ]);
+    const payload: AdminClusterStatusPayload = { intelligentOps, versions };
     return c.json(payload);
   });
 

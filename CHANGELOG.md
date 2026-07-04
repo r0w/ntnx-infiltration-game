@@ -15,6 +15,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- The `/admin` Cluster tab shows the software versions the cluster actually runs (PC, AOS, Files, …).
 - Operator QoL: `/admin` shows each player's last failed check, plus a Logs tab of all attempts.
 - Admin footer showing the running version, branch, and commit, with a changelog
   modal listing the latest GitHub Releases.

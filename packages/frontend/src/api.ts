@@ -542,4 +542,14 @@ export interface AdminClusterStatusPayload {
     /** Human-readable error if `state` is null and the probe failed. */
     error?: string;
   };
+  versions: {
+    rows: Array<{
+      component: string;
+      version: string;
+      location?: string;
+      source: 'pc' | 'lcm';
+    }>;
+    /** Set when no source could answer (empty in mock mode, no error). */
+    error?: string;
+  };
 }
