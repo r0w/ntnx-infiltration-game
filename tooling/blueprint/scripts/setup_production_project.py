@@ -188,7 +188,6 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
     # POST + subnets GET is ~1-1.5 s, so ~25 polls ≈ 30 s.
     CREATE_POLLS = 25
     last = ""
-    r = None
     for attempt in range(CREATE_POLLS):
         # Non-idempotent mutation: can't blind-retry (duplicate risk). On a
         # transport blip, check if PC created it anyway before re-POSTing.
@@ -207,51 +206,67 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
                 return existing
             time.sleep(3)
             continue
-        if r.status_code < 400:
-            break
-        last = "%d %s" % (r.status_code, r.text[:300])
-        if r.status_code == 404 and "ENTITY_NOT_FOUND" in r.text:
-            print("  [warn] subnet not yet resolvable by projects API "
-                  "(attempt %d/%d) — waiting" % (attempt + 1, CREATE_POLLS))
-            _SESS.get("%s/api/nutanix/v3/subnets/list" % BASE,
-                      auth=AUTH, headers=HEADERS, verify=False, timeout=20)
-            continue
-        # Duplicate name = a prior timed-out POST actually succeeded. Adopt it
-        # (PC 7.5 returns 400 + DUPLICATE_ENTITY, not 409 — match body tokens).
-        if r.status_code in (400, 409, 422) and any(
-            tok in r.text.upper() for tok in ("DUPLICATE", "ALREADY")
-        ):
-            existing = _find_existing_safe()
-            if existing:
-                print("  [recover] duplicate-name create — adopting %s" % existing)
-                return existing
-            # find_existing_project deleted an ERROR-state dupe and returned
-            # None — loop to recreate a clean one rather than failing.
-            time.sleep(3)
-            continue
-        raise Exception("create project failed: %s" % last)
-    if r is None or r.status_code >= 400:
-        raise Exception("create project failed after %d retries: %s" % (CREATE_POLLS, last))
-    task_uuid = r.json()["status"]["execution_context"]["task_uuid"]
+        if r.status_code >= 400:
+            last = "%d %s" % (r.status_code, r.text[:300])
+            if r.status_code == 404 and "ENTITY_NOT_FOUND" in r.text:
+                print("  [warn] subnet not yet resolvable by projects API "
+                      "(attempt %d/%d) — waiting" % (attempt + 1, CREATE_POLLS))
+                _SESS.get("%s/api/nutanix/v3/subnets/list" % BASE,
+                          auth=AUTH, headers=HEADERS, verify=False, timeout=20)
+                continue
+            # Duplicate name = a prior timed-out POST actually succeeded. Adopt
+            # it (PC 7.5 returns 400 + DUPLICATE_ENTITY, not 409 — body tokens).
+            if r.status_code in (400, 409, 422) and any(
+                tok in r.text.upper() for tok in ("DUPLICATE", "ALREADY")
+            ):
+                existing = _find_existing_safe()
+                if existing:
+                    print("  [recover] duplicate-name create — adopting %s" % existing)
+                    return existing
+                # find_existing_project deleted an ERROR-state dupe and returned
+                # None — loop to recreate a clean one rather than failing.
+                time.sleep(3)
+                continue
+            raise Exception("create project failed: %s" % last)
+        # POST accepted — the intentful task can still FAIL on its own
+        # (issue #41: likely the v3 subnet-lag surfacing at task level).
+        task = _wait_create_task(r.json()["status"]["execution_context"]["task_uuid"])
+        if task.get("status") == "SUCCEEDED":
+            return task["entity_reference_list"][0]["uuid"]
+        last = "create task FAILED: %s" % str(task)[:300]
+        print("  [warn] create_project task FAILED (attempt %d/%d) — purging the "
+              "ERROR project and retrying" % (attempt + 1, CREATE_POLLS))
+        # The half-created project lands in state ERROR and would block the
+        # re-POST on duplicate name. The lookup deletes ERROR projects. Never
+        # adopt here: a lagging CREATING/COMPLETE state can't be trusted after
+        # a FAILED create task — if it still holds the name, the next POST
+        # duplicates and the dup branch re-runs the lookup until it's purged.
+        _find_existing_safe()
+        time.sleep(5)
+    raise Exception("create project failed after %d attempts: %s" % (CREATE_POLLS, last))
 
-    # Iteration-based, NOT wall-clock-based. The sandbox rewrites time.time()
-    # to a 1-incrementing counter and time.sleep() to a TCP-timeout that
-    # often returns instantly — a `deadline = time.time() + 60` loop blasts
-    # through 60 iterations in milliseconds and times out before PC finishes
-    # the project create task. Each /tasks GET takes ~0.5-1s naturally, so
-    # MAX_POLLS=120 is ~60-120 s of real wall-clock without trusting sleep.
+
+def _wait_create_task(task_uuid):
+    """Poll the intentful create task to a terminal state; returns the task
+    dict (SUCCEEDED or FAILED). Raises on timeout — outcome unknown, so the
+    caller must NOT retry the create (the project may still land).
+
+    Iteration-based, NOT wall-clock-based. The sandbox rewrites time.time()
+    to a 1-incrementing counter and time.sleep() to a TCP-timeout that
+    often returns instantly — a `deadline = time.time() + 60` loop blasts
+    through 60 iterations in milliseconds and times out before PC finishes
+    the project create task. Each /tasks GET takes ~0.5-1s naturally, so
+    MAX_POLLS=120 is ~60-120 s of real wall-clock without trusting sleep."""
     MAX_POLLS = 120
-    for poll in range(MAX_POLLS):
+    for _ in range(MAX_POLLS):
         r = _SESS.get(
             "%s/api/nutanix/v3/tasks/%s" % (BASE, task_uuid),
             auth=AUTH, headers=HEADERS, verify=False, timeout=20,
         )
         r.raise_for_status()
         task = r.json()
-        if task.get("status") == "SUCCEEDED":
-            return task["entity_reference_list"][0]["uuid"]
-        if task.get("status") == "FAILED":
-            raise Exception("project create task failed: %s" % task)
+        if task.get("status") in ("SUCCEEDED", "FAILED"):
+            return task
     raise Exception("project create task timed out after %d polls" % MAX_POLLS)
 
 
