@@ -15,7 +15,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
-- New `/admin` Emails tab: invite participants and send the lab summary (en/fr templates, in-place WYSIWYG editing with preview, per-seat VDI roster where each template goes out once per participant, per-deployment template edits, Mailtrap sender with verified-domain suggestions).
+- New `/admin` Emails tab: invite participants and send the lab summary (en/fr/de templates with infiltration-themed briefing, visual GrapesJS editor with source/preview, per-seat VDI roster where each template goes out once per participant with send buttons per type, auto-derived cluster/password defaults, per-deployment template edits, Mailtrap sender with token validation and verified-domain suggestions).
 - The `/admin` Cluster tab shows the software versions the cluster actually runs (PC, AOS, Files, …).
 - Operator QoL: `/admin` shows each player's last failed check, plus a Logs tab of all attempts.
 - Admin footer showing the running version, branch, and commit, with a changelog
