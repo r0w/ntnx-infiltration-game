@@ -132,51 +132,112 @@ export function localizedHint(
 }
 
 /**
- * Self-healing variable resolver: read `varName` from session vars first;
- * if missing/empty, look it up live on the cluster via `lookup` and persist
- * the recovered extId back to session vars (under `varName`, captured at
- * the current stage). Returns undefined when the resource isn't on the
- * cluster either — the caller decides whether to surface that as a check
- * failure or skip the assertion entirely.
- *
- * Why: stages capture UUIDs (NetworkUUID, ImageUUID, ProjectUUID, …) when
- * the upstream stage's check runs, but server restarts / DB migrations /
- * resumed sessions can leave a downstream check seeing an absent var even
- * though the resource exists. Re-discovering by name is invisible to the
- * player and avoids "run upstream stages first" diagnostics that confuse
- * the user when, from their POV, they DID run them.
+ * Resolve-by-name lookups (issue #31): the trigram-prefixed name is the
+ * contract, stored UUIDs go stale when a resource is re-created.
+ * Miss returns undefined; transport errors throw — don't conflate them.
  */
-export async function recoverVar(
+export async function lookupSubnetUuid(
   ctx: CheckContext,
-  varName: string,
-  stageName: string,
-  lookup: () => Promise<string | undefined>,
+  name: string,
 ): Promise<string | undefined> {
-  const existing = ctx.vars.get(varName);
-  if (typeof existing === 'string' && existing.length > 0) return existing;
-  const recovered = await lookup();
-  if (recovered) {
-    ctx.vars.set(varName, recovered, stageName);
-    return recovered;
-  }
-  return undefined;
+  const subnets = await listAll<{ extId?: string; name?: string }>(
+    ctx,
+    '/api/networking/v4.0/config/subnets',
+  );
+  return findByName(subnets, name)?.extId;
 }
 
-/** Look up a PC user's uuid by username (case-insensitive) via v4 IAM.
- *  Returns undefined on miss/error so callers can degrade gracefully. */
+export async function lookupImageUuid(
+  ctx: CheckContext,
+  name: string,
+): Promise<string | undefined> {
+  const images = await listAll<{ extId?: string; name?: string }>(
+    ctx,
+    '/api/vmm/v4.0/content/images',
+  );
+  return findByName(images, name)?.extId;
+}
+
+/** v3 projects carry the name on spec/status/metadata depending on state. */
+export async function lookupProjectUuid(
+  ctx: CheckContext,
+  name: string,
+): Promise<string | undefined> {
+  const projects = await listAllV3<{
+    spec?: { name?: string };
+    status?: { name?: string };
+    metadata?: { name?: string; uuid?: string };
+  }>(ctx, '/api/nutanix/v3/projects/list');
+  return projects.find(
+    (p) => p?.spec?.name === name || p?.status?.name === name || p?.metadata?.name === name,
+  )?.metadata?.uuid;
+}
+
+/** v4 models each category key:value pair as its own entity. */
+export async function lookupCategoryUuid(
+  ctx: CheckContext,
+  key: string,
+  value: string,
+): Promise<string | undefined> {
+  const categories = await listAll<{ extId?: string; key?: string; value?: string }>(
+    ctx,
+    '/api/prism/v4.2/config/categories',
+  );
+  return categories.find((c) => c?.key === key && c?.value === value)?.extId;
+}
+
+export async function lookupProtectionPolicyUuid(
+  ctx: CheckContext,
+  name: string,
+): Promise<string | undefined> {
+  const policies = await listAll<{ extId?: string; name?: string }>(
+    ctx,
+    '/api/datapolicies/v4.2/config/protection-policies',
+  );
+  return findByName(policies, name)?.extId;
+}
+
+/** Self-Service apps live on v3; name is on status or metadata. */
+export async function lookupAppUuid(
+  ctx: CheckContext,
+  name: string,
+): Promise<string | undefined> {
+  const apps = await listAllV3<{
+    metadata?: { uuid?: string; name?: string };
+    status?: { name?: string };
+  }>(ctx, '/api/nutanix/v3/apps/list');
+  return apps.find((a) => a?.status?.name === name || a?.metadata?.name === name)?.metadata
+    ?.uuid;
+}
+
+/** For secondary assertions: transport error → `{failed: true}` (skip,
+ *  logged), answer → `{uuid, failed: false}` with undefined = real miss. */
+export async function lookupOrSkip(
+  ctx: CheckContext,
+  what: string,
+  lookup: () => Promise<string | undefined>,
+): Promise<{ uuid?: string; failed: boolean }> {
+  try {
+    return { uuid: await lookup(), failed: false };
+  } catch (err) {
+    ctx.logger.warn(`${what} lookup failed — skipping the assertion`, {
+      err: nutanixErrorDetail(err).slice(0, 200),
+    });
+    return { failed: true };
+  }
+}
+
+/** PC user uuid by username (case-insensitive) via v4 IAM.
+ *  Miss → undefined, transport error → throw. */
 export async function lookupUserUuid(
   ctx: CheckContext,
   name: string,
 ): Promise<string | undefined> {
-  try {
-    const users = await listAll<{ extId?: string; username?: string }>(
-      ctx,
-      '/api/iam/v4.0/authn/users',
-    );
-    return users.find((u) => (u.username ?? '').toLowerCase() === name.toLowerCase())?.extId;
-  } catch {
-    return undefined;
-  }
+  const users = await listAll<{ extId?: string; username?: string }>(
+    ctx,
+    '/api/iam/v4.0/authn/users',
+  );
+  return users.find((u) => (u?.username ?? '').toLowerCase() === name.toLowerCase())?.extId;
 }
 
 /**

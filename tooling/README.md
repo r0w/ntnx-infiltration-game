@@ -13,7 +13,7 @@ tooling/
 ├── blueprint/                             ← Calm Blueprint source + tooling
 │   ├── blueprint.py                       (calm-dsl)
 │   ├── patch_escript.py                   (post-compile passes)
-│   ├── compile.sh / launch.py / monitor.py
+│   ├── compile.sh / monitor.py
 │   ├── scripts/ prereqs/ specs/
 │   ├── tests/                             (pytest)
 │   └── docs/                              (historical phase notes)
@@ -83,9 +83,9 @@ Quick chronology:
 - **Change the live BP** → edit `blueprint/blueprint.py` or scripts under
   `blueprint/scripts/`, `PATCH=1 ./compile.sh blueprint.py`, commit, tag.
   CI's `release.yml` pipeline ships the patched JSON as a release asset.
-- **Test a launch before tagging** → `./.venv/bin/python launch.py` with PC
-  creds in env (`PC_ENDPOINT`, `PC_USER`, `PC_PASSWORD`). Add
-  `GHCR_TOKEN=<token>` only if testing against a private container image.
+- **Test a launch before tagging** → the headless deploy kit (private
+  docs repo `tooling/deploy/`, via the `deploy-game` skill) imports +
+  activates + launches `blueprint.patched.json` against a PC.
 - **Understand a launch failure** → `blueprint/docs/HISTORY-SPIKE.md`
   (per-phase validated states + each task's role) and the `__install__`
   body of `blueprint/blueprint.py`. Cycle errors specifically →

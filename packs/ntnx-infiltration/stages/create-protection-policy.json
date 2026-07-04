@@ -21,9 +21,6 @@
   "check": {
     "fn": "CheckProtectionPolicy"
   },
-  "captures": [
-    "ProtectionPolicyUUID"
-  ],
   "needs": [
     "Trigram"
   ]

@@ -13,6 +13,7 @@ import {
   type StageDefinition,
 } from '@ntnx-game/engine';
 import {
+  AttemptQueries,
   ClusterCacheQueries,
   HistoryQueries,
   MockOverlayQueries,
@@ -27,6 +28,7 @@ import {
   type AdminUserEntry,
 } from '../src/routes/admin';
 import { SessionService } from '../src/session-service';
+import { EMAIL_TEMPLATES } from '../src/email';
 import type { LoadedPack } from '../src/pack-loader';
 
 const SCHEMA = readFileSync(
@@ -208,6 +210,65 @@ describe('GET /api/admin/users', () => {
     expect(body.entries.map((e) => e.sessionId)).toEqual(['sess-mine']);
   });
 
+  test('failed check on the stage being played → lastFail surfaced', async () => {
+    const db = freshDb();
+    seedSession(db, { id: 'sess-f', trigram: 'FAI', pin: '1234', currentStage: 'login' });
+    // Player is playing 'intro' (login done) and just failed its check.
+    new HistoryQueries(db).record('sess-f', 'intro', 'failed', 120, "VM 'fai-vm' has 1 NIC(s) (expected 2).");
+    const r = await router(db).request('/users', {
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    const body = (await r.json()) as { entries: AdminUserEntry[] };
+    expect(body.entries[0].lastFail).toEqual({
+      stage: 'intro',
+      detail: "VM 'fai-vm' has 1 NIC(s) (expected 2).",
+      at: expect.any(Number),
+    });
+  });
+
+  test('stage passes → lastFail clears (history row flips to passed)', async () => {
+    const db = freshDb();
+    seedSession(db, { id: 'sess-p', trigram: 'PAS', pin: '1234', currentStage: 'login' });
+    const history = new HistoryQueries(db);
+    history.record('sess-p', 'intro', 'failed', 120, 'missing NIC');
+    history.record('sess-p', 'intro', 'passed', 80, 'all good');
+    const r = await router(db).request('/users', {
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    const body = (await r.json()) as { entries: AdminUserEntry[] };
+    expect(body.entries[0].lastFail).toBeNull();
+  });
+
+  test('fail past a per-session disabled stage → lastFail still surfaced', async () => {
+    const db = freshDb();
+    // 'intro' was disabled for this session (missing vars / capability), so
+    // the player is actually playing 'outro' even though nextStageName says
+    // 'intro'. The fail on 'outro' must still show.
+    seedSession(db, { id: 'sess-d', trigram: 'DIS', pin: '1234', currentStage: 'login' });
+    const history = new HistoryQueries(db);
+    history.record('sess-d', 'intro', 'disabled', null, 'missing upstream vars: Username');
+    history.record('sess-d', 'outro', 'failed', 90, 'Subnet not found.');
+    const r = await router(db).request('/users', {
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    const body = (await r.json()) as { entries: AdminUserEntry[] };
+    expect(body.entries[0].lastFail?.stage).toBe('outro');
+  });
+
+  test('fail on a stage the player moved past (admin skip) → lastFail null', async () => {
+    const db = freshDb();
+    // Failed 'intro', then the operator skipped it: currentStage jumps to
+    // 'intro' (playing 'outro') but the 'failed' row is never rewritten.
+    seedSession(db, { id: 'sess-s', trigram: 'SKP', pin: '1234', currentStage: 'intro' });
+    new HistoryQueries(db).record('sess-s', 'intro', 'failed', 120, 'missing NIC');
+    const r = await router(db).request('/users', {
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    const body = (await r.json()) as { entries: AdminUserEntry[] };
+    expect(body.entries[0].nextStageName).toBe('outro');
+    expect(body.entries[0].lastFail).toBeNull();
+  });
+
   test('finished session → nextStageName null, pin preserved', async () => {
     const db = freshDb();
     seedSession(db, {
@@ -221,6 +282,57 @@ describe('GET /api/admin/users', () => {
     expect(body.entries[0].finishedAt).not.toBeNull();
     expect(body.entries[0].nextStageName).toBeNull();
     expect(body.entries[0].pin).toBe('9999');
+  });
+});
+
+describe('GET /api/admin/attempts', () => {
+  test('without header → 401', async () => {
+    const r = await router(freshDb()).request('/attempts');
+    expect(r.status).toBe(401);
+  });
+
+  test('returns attempts newest-first with trigram joined, scoped to pack', async () => {
+    const db = freshDb();
+    seedSession(db, { id: 'sess-a', trigram: 'AAA', pin: '1111', currentStage: 'login' });
+    seedSession(db, { id: 'sess-x', trigram: 'XXX', pin: '2222', packId: 'other-pack' });
+    const attempts = new AttemptQueries(db);
+    attempts.record('sess-a', 'intro', 'failed', 120, 'missing NIC');
+    attempts.record('sess-a', 'intro', 'passed', 90, 'all good');
+    attempts.record('sess-x', 'intro', 'failed', 50, 'invisible (other pack)');
+    const r = await router(db).request('/attempts', {
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { entries: Array<{ trigram: string | null; status: string; detail: string | null }> };
+    expect(body.entries).toHaveLength(2);
+    // Same-millisecond inserts fall back to id DESC — newest insert first.
+    expect(body.entries[0].status).toBe('passed');
+    expect(body.entries[1].status).toBe('failed');
+    expect(body.entries.every((e) => e.trigram === 'AAA')).toBe(true);
+  });
+
+  test('respects ?limit=', async () => {
+    const db = freshDb();
+    seedSession(db, { id: 'sess-l', trigram: 'LIM', pin: '1111' });
+    const attempts = new AttemptQueries(db);
+    for (let i = 0; i < 5; i++) attempts.record('sess-l', 'intro', 'failed', 10, `try ${i}`);
+    const r = await router(db).request('/attempts?limit=2', {
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    const body = (await r.json()) as { entries: unknown[] };
+    expect(body.entries).toHaveLength(2);
+  });
+
+  test('session delete cascades its attempts', async () => {
+    const db = freshDb();
+    seedSession(db, { id: 'sess-c', trigram: 'CAS', pin: '1111' });
+    new AttemptQueries(db).record('sess-c', 'intro', 'failed', 10, 'x');
+    await router(db).request('/users/sess-c', {
+      method: 'DELETE',
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    const left = db.prepare('SELECT COUNT(*) AS n FROM check_attempts').get() as { n: number };
+    expect(left.n).toBe(0);
   });
 });
 
@@ -630,6 +742,43 @@ describe('GET /api/admin/cluster-status', () => {
             ],
           } as unknown as T;
         }
+        if (path === '/api/nutanix/v3/clusters/list') {
+          return {
+            entities: [
+              {
+                status: {
+                  name: 'PC',
+                  resources: {
+                    config: { build: { version: '7.5.1' }, service_list: ['PRISM_CENTRAL'] },
+                  },
+                },
+              },
+              {
+                status: {
+                  name: 'DM3-POC004',
+                  resources: { config: { build: { version: '7.5.1' }, service_list: ['AOS'] } },
+                },
+              },
+            ],
+          } as unknown as T;
+        }
+        if (path.startsWith('/api/lifecycle/v4.2/resources/entities')) {
+          return {
+            data: [
+              // Duplicate PC row must be skipped (clusters list already covers it).
+              { entityType: 'SOFTWARE', entityModel: 'PC', entityVersion: '7.5.1' },
+              {
+                entityType: 'SOFTWARE',
+                entityModel: 'Files',
+                entityVersion: '5.2.0',
+                locationInfo: { locationName: 'DM3-POC004' },
+              },
+              // Firmware and version-less rows are ignored.
+              { entityType: 'FIRMWARE', entityModel: 'NIC X550T', entityVersion: '0x18a5' },
+              { entityType: 'SOFTWARE', entityModel: 'Foundation' },
+            ],
+          } as unknown as T;
+        }
         throw new Error(`unexpected path: ${path}`);
       },
     };
@@ -651,9 +800,74 @@ describe('GET /api/admin/cluster-status', () => {
     expect(body.intelligentOps.enableUrl).toBe(
       'https://10.8.16.7:9440/dm/settings/prism_ops',
     );
-    expect(calls.length).toBe(2);
-    expect(calls[0]!.path).toBe('/api/prism/v4.2/config/domain-managers');
-    expect(calls[1]!.path).toContain('/api/prism/v4.2/management/domain-managers/pc-uuid-1/products');
+    const paths = calls.map((x) => x.path);
+    expect(paths).toContain('/api/prism/v4.2/config/domain-managers');
+    expect(paths.some((p) => p.includes('/domain-managers/pc-uuid-1/products'))).toBe(true);
+  });
+
+  test('GET /cluster-versions (live) → PC/AOS from v3 clusters + LCM inventory, deduped + sorted', async () => {
+    const liveNutanix: NutanixClient = {
+      mode: 'live',
+      async request<T>(_method: string, path: string): Promise<T> {
+        if (path === '/api/nutanix/v3/clusters/list') {
+          return {
+            entities: [
+              {
+                status: {
+                  name: 'PC',
+                  resources: {
+                    config: { build: { version: '7.5.1' }, service_list: ['PRISM_CENTRAL'] },
+                  },
+                },
+              },
+              {
+                status: {
+                  name: 'DM3-POC004',
+                  resources: { config: { build: { version: '7.5.1' }, service_list: ['AOS'] } },
+                },
+              },
+            ],
+          } as unknown as T;
+        }
+        if (path.startsWith('/api/lifecycle/v4.2/resources/entities')) {
+          return {
+            data: [
+              // Duplicate PC row must be skipped (clusters list already covers it).
+              { entityType: 'SOFTWARE', entityModel: 'PC', entityVersion: '7.5.1' },
+              {
+                entityType: 'SOFTWARE',
+                entityModel: 'Files',
+                entityVersion: '5.2.0',
+                locationInfo: { locationName: 'DM3-POC004' },
+              },
+              // Firmware and version-less rows are ignored.
+              { entityType: 'FIRMWARE', entityModel: 'NIC X550T', entityVersion: '0x18a5' },
+              { entityType: 'SOFTWARE', entityModel: 'Foundation' },
+            ],
+          } as unknown as T;
+        }
+        throw new Error(`unexpected path: ${path}`);
+      },
+    };
+    const db = freshDb();
+    const pack = fakePack();
+    const service = makeService(db, pack);
+    const r = buildAdminRoutes({
+      db, pack, adminPassword: ADMIN_PW, service, nutanix: liveNutanix,
+      clusterProfile: 'hpoc', pcEndpoint: 'https://10.8.16.7:9440',
+    });
+    const res = await r.request('/cluster-versions', {
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      rows: Array<{ component: string; version: string; location?: string; source: string }>;
+    };
+    expect(body.rows).toEqual([
+      { component: 'Prism Central', version: '7.5.1', location: 'PC', source: 'pc' },
+      { component: 'AOS', version: '7.5.1', location: 'DM3-POC004', source: 'pc' },
+      { component: 'Files', version: '5.2.0', location: 'DM3-POC004', source: 'lcm' },
+    ]);
   });
 
   test('live mode + product missing → state=null with explanatory error, deep-link still built', async () => {
@@ -780,5 +994,321 @@ describe('lunch lock (pack-wide pause)', () => {
     expect((await r.request('/lunch')).status).toBe(401);
     expect((await r.request('/lunch/lock', { method: 'POST' })).status).toBe(401);
     expect((await r.request('/lunch/unlock', { method: 'POST' })).status).toBe(401);
+  });
+});
+
+describe('email participant routes', () => {
+  const AUTH = { 'X-Admin-Password': ADMIN_PW };
+  const JSON_AUTH = { ...AUTH, 'Content-Type': 'application/json' };
+
+  /** Router with a stubbed Mailtrap call recording every send. */
+  function emailRouter(db: Database, sendResult: { ok: boolean; error?: string } = { ok: true }) {
+    const calls: Array<{ to: string; subject: string; html: string }> = [];
+    const pack = fakePack();
+    const service = makeService(db, pack);
+    const r = buildAdminRoutes({
+      db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix,
+      clusterProfile: 'hpoc', pcEndpoint: '',
+      sendEmail: async (args) => {
+        calls.push({ to: args.to, subject: args.subject, html: args.html });
+        return sendResult;
+      },
+    });
+    return { r, calls, service };
+  }
+
+  const wireSender = async (r: ReturnType<typeof emailRouter>['r']) => {
+    await r.request('/email-config', {
+      method: 'PUT',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ mailtrapToken: 'tok', fromEmail: 'tank@ntnx.ch' }),
+    });
+  };
+
+  const addRoster = (r: ReturnType<typeof emailRouter>['r'], emails: string[]) =>
+    r.request('/email-roster', {
+      method: 'POST',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ emails }),
+    });
+
+  const sendBody = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      templateId: 'invitation-vdi',
+      locale: 'en',
+      subject: 'briefing {ID} on {CLUSTER}',
+      html: '<b>agent {ID} on {CLUSTER}</b>',
+      vars: { CLUSTER: 'DM3-POC004' },
+      mode: 'pending',
+      ...over,
+    });
+
+  test('config: empty by default, PUT persists, empty string clears', async () => {
+    const { r } = emailRouter(freshDb());
+    let res = await r.request('/email-config', { headers: AUTH });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      mailtrapToken: '', fromEmail: '', fromName: '', vars: {}, clusterName: '',
+    });
+
+    res = await r.request('/email-config', {
+      method: 'PUT',
+      headers: JSON_AUTH,
+      body: JSON.stringify({
+        mailtrapToken: 'tok', fromEmail: 'a@b.co', fromName: 'N', vars: { CLUSTER: 'X' },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const saved = (await res.json()) as { mailtrapToken: string; vars: Record<string, string> };
+    expect(saved.mailtrapToken).toBe('tok');
+    expect(saved.vars).toEqual({ CLUSTER: 'X' });
+
+    // Empty string clears, missing key leaves untouched (planner-config semantics).
+    res = await r.request('/email-config', {
+      method: 'PUT',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ fromName: '' }),
+    });
+    const after = (await res.json()) as { mailtrapToken: string; fromName: string };
+    expect(after.mailtrapToken).toBe('tok');
+    expect(after.fromName).toBe('');
+  });
+
+  test('templates: 2 ids x 3 locales, defaults not overridden', async () => {
+    const { r } = emailRouter(freshDb());
+    const res = await r.request('/email-templates', { headers: AUTH });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      templates: Array<{ id: string; locale: string; subject: string; html: string; overridden: boolean }>;
+    };
+    const keys = body.templates.map((t) => `${t.id}.${t.locale}`).sort();
+    expect(keys).toEqual([
+      'invitation-vdi.de', 'invitation-vdi.en', 'invitation-vdi.fr',
+      'summary.de', 'summary.en', 'summary.fr',
+    ]);
+    for (const t of body.templates) {
+      expect(t.subject.length).toBeGreaterThan(0);
+      expect(t.html).toContain('<!doctype html>');
+      expect(t.overridden).toBe(false);
+    }
+  });
+
+  test('roster: seats assigned lowest-free-first, duplicates skipped, delete frees the seat', async () => {
+    const { r } = emailRouter(freshDb());
+    let res = await addRoster(r, ['a@x.co', 'b@x.co', 'c@x.co', 'a@x.co']);
+    expect(res.status).toBe(200);
+    let body = (await res.json()) as {
+      added: number; skipped: number;
+      entries: Array<{ id: number; seat: number; email: string }>;
+    };
+    expect(body.added).toBe(3);
+    expect(body.skipped).toBe(1);
+    expect(body.entries.map((e) => e.seat)).toEqual([1, 2, 3]);
+
+    const bId = body.entries.find((e) => e.email === 'b@x.co')!.id;
+    res = await r.request(`/email-roster/${bId}`, { method: 'DELETE', headers: AUTH });
+    expect(res.status).toBe(200);
+
+    res = await addRoster(r, ['d@x.co']);
+    body = (await res.json()) as typeof body;
+    // d takes the freed seat 2, not seat 4.
+    expect(body.entries.find((e) => e.email === 'd@x.co')!.seat).toBe(2);
+  });
+
+  test('send pending-only: late addition only emails the newcomer; rows = explicit resend; test marks nobody', async () => {
+    const db = freshDb();
+    const { r, calls } = emailRouter(db);
+    await wireSender(r);
+    await addRoster(r, ['a@x.co', 'b@x.co']);
+
+    // First batch reaches both, with per-seat {ID} + {CLUSTER} substituted.
+    let res = await r.request('/email-send', { method: 'POST', headers: JSON_AUTH, body: sendBody() });
+    expect(res.status).toBe(200);
+    let report = (await res.json()) as { sent: number; failed: number; results: Array<{ seat: number }> };
+    expect(report.sent).toBe(2);
+    expect(calls.map((c) => c.html)).toEqual([
+      '<b>agent 01 on DM3-POC004</b>',
+      '<b>agent 02 on DM3-POC004</b>',
+    ]);
+    // {ID} + {VARS} are substituted in the subject too.
+    expect(calls.map((c) => c.subject)).toEqual([
+      'briefing 01 on DM3-POC004',
+      'briefing 02 on DM3-POC004',
+    ]);
+
+    // Late addition: a second pending send only reaches the newcomer.
+    await addRoster(r, ['c@x.co']);
+    calls.length = 0;
+    res = await r.request('/email-send', { method: 'POST', headers: JSON_AUTH, body: sendBody() });
+    report = (await res.json()) as typeof report;
+    expect(report.sent).toBe(1);
+    expect(calls.map((c) => c.to)).toEqual(['c@x.co']);
+
+    // Everyone served → pending send has nothing to do.
+    calls.length = 0;
+    res = await r.request('/email-send', { method: 'POST', headers: JSON_AUTH, body: sendBody() });
+    report = (await res.json()) as typeof report;
+    expect(report.sent).toBe(0);
+    expect(calls.length).toBe(0);
+
+    // Explicit per-row resend still works.
+    const roster = (await (await r.request('/email-roster', { headers: AUTH })).json()) as {
+      entries: Array<{ id: number; email: string; sent: Record<string, number> }>;
+    };
+    const a = roster.entries.find((e) => e.email === 'a@x.co')!;
+    expect(a.sent['invitation-vdi']).toBeGreaterThan(0);
+    res = await r.request('/email-send', {
+      method: 'POST', headers: JSON_AUTH, body: sendBody({ mode: 'rows', rosterIds: [a.id] }),
+    });
+    report = (await res.json()) as typeof report;
+    expect(report.sent).toBe(1);
+    expect(calls.map((c) => c.to)).toEqual(['a@x.co']);
+
+    // Test mode targets the given address and marks nobody.
+    calls.length = 0;
+    res = await r.request('/email-send', {
+      method: 'POST', headers: JSON_AUTH, body: sendBody({ mode: 'test', testAddress: 'op@x.co' }),
+    });
+    expect(((await res.json()) as { sent: number }).sent).toBe(1);
+    expect(calls.map((c) => c.to)).toEqual(['op@x.co']);
+    const after = (await (await r.request('/email-roster', { headers: AUTH })).json()) as {
+      entries: Array<{ sent: Record<string, number> }>;
+    };
+    // summary family untouched everywhere; op@x.co not added to the roster.
+    expect(after.entries).toHaveLength(3);
+    expect(after.entries.every((e) => e.sent['summary'] === undefined)).toBe(true);
+  });
+
+  test('email_vars merge across template types (summary send keeps invitation vars)', async () => {
+    const db = freshDb();
+    const { r } = emailRouter(db);
+    await wireSender(r);
+    await addRoster(r, ['a@x.co']);
+    await r.request('/email-send', { method: 'POST', headers: JSON_AUTH, body: sendBody() });
+    await r.request('/email-send', {
+      method: 'POST',
+      headers: JSON_AUTH,
+      body: sendBody({
+        templateId: 'summary',
+        subject: 'debrief',
+        html: '<b>bye</b>',
+        vars: { SURVEY_URL: 'https://survey.example' },
+      }),
+    });
+    const cfg = (await (await r.request('/email-config', { headers: AUTH })).json()) as {
+      vars: Record<string, string>;
+    };
+    expect(cfg.vars).toEqual({ CLUSTER: 'DM3-POC004', SURVEY_URL: 'https://survey.example' });
+  });
+
+  test('failed sends stay pending (no markSent)', async () => {
+    const db = freshDb();
+    const { r, calls } = emailRouter(db, { ok: false, error: 'HTTP 401' });
+    await wireSender(r);
+    await addRoster(r, ['a@x.co']);
+    let res = await r.request('/email-send', { method: 'POST', headers: JSON_AUTH, body: sendBody() });
+    const report = (await res.json()) as { ok: boolean; sent: number; failed: number };
+    expect(report.ok).toBe(false);
+    expect(report.failed).toBe(1);
+    expect(calls.length).toBe(1);
+    // Still pending: a retry targets them again.
+    res = await r.request('/email-send', { method: 'POST', headers: JSON_AUTH, body: sendBody() });
+    expect(((await res.json()) as { failed: number }).failed).toBe(1);
+  });
+
+  test('sending an edited draft persists it as the deployment template; matching default clears it', async () => {
+    const db = freshDb();
+    const { r } = emailRouter(db);
+    await wireSender(r);
+    await addRoster(r, ['a@x.co']);
+    await r.request('/email-send', { method: 'POST', headers: JSON_AUTH, body: sendBody() });
+
+    let tpl = (await (await r.request('/email-templates', { headers: AUTH })).json()) as {
+      templates: Array<{ id: string; locale: string; html: string; overridden: boolean }>;
+    };
+    const edited = tpl.templates.find((t) => t.id === 'invitation-vdi' && t.locale === 'en')!;
+    expect(edited.overridden).toBe(true);
+    expect(edited.html).toBe('<b>agent {ID} on {CLUSTER}</b>');
+
+    // Reset restores the bundled default.
+    const res = await r.request('/email-templates/invitation-vdi/en', {
+      method: 'DELETE', headers: AUTH,
+    });
+    expect(res.status).toBe(200);
+    tpl = (await (await r.request('/email-templates', { headers: AUTH })).json()) as typeof tpl;
+    const restored = tpl.templates.find((t) => t.id === 'invitation-vdi' && t.locale === 'en')!;
+    expect(restored.overridden).toBe(false);
+    expect(restored.html).toContain('<!doctype html>');
+  });
+
+  test('send validation: bad template, empty subject/html, unconfigured sender', async () => {
+    const { r } = emailRouter(freshDb());
+    const post = (body: string) =>
+      r.request('/email-send', { method: 'POST', headers: JSON_AUTH, body });
+    expect((await post(sendBody({ templateId: 'nope' }))).status).toBe(400);
+    expect((await post(sendBody({ subject: '' }))).status).toBe(400);
+    expect((await post(sendBody({ html: '' }))).status).toBe(400);
+    expect((await post(sendBody({ mode: 'weird' }))).status).toBe(400);
+    // Valid payload but no token/from configured → 400 before any send.
+    const res = await post(sendBody());
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain('not configured');
+  });
+
+  test('without admin header → 401 on every email endpoint', async () => {
+    const { r } = emailRouter(freshDb());
+    expect((await r.request('/email-config')).status).toBe(401);
+    expect((await r.request('/email-config', { method: 'PUT' })).status).toBe(401);
+    expect((await r.request('/email-templates')).status).toBe(401);
+    expect((await r.request('/email-roster')).status).toBe(401);
+    expect((await r.request('/email-roster', { method: 'POST' })).status).toBe(401);
+    expect((await r.request('/email-send', { method: 'POST' })).status).toBe(401);
+    expect((await r.request('/email-domains')).status).toBe(401);
+  });
+});
+
+describe('PUT /api/admin/email-templates/:id/:locale (explicit save)', () => {
+  const AUTH = { 'X-Admin-Password': ADMIN_PW };
+  const JSON_AUTH = { ...AUTH, 'Content-Type': 'application/json' };
+
+  test('stores an override, returns overridden flag, default draft clears it', async () => {
+    const db = freshDb();
+    const pack = fakePack();
+    const service = makeService(db, pack);
+    const r = buildAdminRoutes({
+      db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix,
+      clusterProfile: 'hpoc', pcEndpoint: '',
+    });
+    let res = await r.request('/email-templates/invitation-vdi/en', {
+      method: 'PUT',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ subject: 'custom', html: '<b>custom</b>' }),
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { overridden: boolean }).overridden).toBe(true);
+
+    let tpl = (await (await r.request('/email-templates', { headers: AUTH })).json()) as {
+      templates: Array<{ id: string; locale: string; subject: string; overridden: boolean }>;
+    };
+    const saved = tpl.templates.find((t) => t.id === 'invitation-vdi' && t.locale === 'en')!;
+    expect(saved.overridden).toBe(true);
+    expect(saved.subject).toBe('custom');
+
+    // Saving the bundled default back clears the override.
+    const def = EMAIL_TEMPLATES.find((t) => t.id === 'invitation-vdi' && t.locale === 'en')!;
+    res = await r.request('/email-templates/invitation-vdi/en', {
+      method: 'PUT',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ subject: def.subject, html: def.html }),
+    });
+    expect(((await res.json()) as { overridden: boolean }).overridden).toBe(false);
+
+    // Validation + unknown template.
+    expect((await r.request('/email-templates/nope/en', {
+      method: 'PUT', headers: JSON_AUTH, body: JSON.stringify({ subject: 's', html: 'h' }),
+    })).status).toBe(404);
+    expect((await r.request('/email-templates/invitation-vdi/en', {
+      method: 'PUT', headers: JSON_AUTH, body: JSON.stringify({ subject: '', html: 'h' }),
+    })).status).toBe(400);
   });
 });

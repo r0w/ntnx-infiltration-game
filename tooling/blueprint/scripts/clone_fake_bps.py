@@ -27,6 +27,7 @@ import sys
 import urllib3
 
 import requests
+from requests.adapters import HTTPAdapter, Retry
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -54,8 +55,25 @@ AUTH = (PC_USERNAME, PC_PASSWORD)
 HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
 
+def _make_session():
+    """Retrying session for idempotent reads; mutations use plain
+    `requests`. POST is allowed because our v3 `/list` reads are POSTs."""
+    retry = Retry(total=4, connect=4, read=4, backoff_factor=0.5,
+                  status_forcelist=(500, 502, 503, 504),
+                  allowed_methods=frozenset(("GET", "POST", "PUT", "DELETE")),
+                  raise_on_status=False)
+    s = requests.Session()
+    adapter = HTTPAdapter(max_retries=retry)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+    return s
+
+
+_SESS = _make_session()
+
+
 def list_bps():
-    r = requests.post(
+    r = _SESS.post(
         "%s/api/nutanix/v3/blueprints/list" % BASE,
         auth=AUTH, headers=HEADERS, verify=False, timeout=20,
         data=json.dumps({"kind": "blueprint", "length": 250}),

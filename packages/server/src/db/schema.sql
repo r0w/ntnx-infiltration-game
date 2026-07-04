@@ -58,6 +58,26 @@ CREATE TABLE IF NOT EXISTS stage_history (
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
+-- Append-only log of every check attempt (stage_history above keeps only the
+-- LATEST state per stage — this keeps the trail). Backs the /admin Logs tab:
+-- who attempted what, when, and what the check said. Grows with play; an
+-- event's worth is a few hundred rows, no pruning needed.
+CREATE TABLE IF NOT EXISTS check_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  stage_name TEXT NOT NULL,
+  status TEXT NOT NULL,           -- 'passed' | 'failed'
+  checked_at INTEGER NOT NULL,
+  duration_ms INTEGER,
+  detail TEXT,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_check_attempts_at ON check_attempts(checked_at DESC);
+-- session_id index keeps ON DELETE CASCADE from scanning the whole log on
+-- every session delete.
+CREATE INDEX IF NOT EXISTS idx_check_attempts_session ON check_attempts(session_id);
+
 CREATE TABLE IF NOT EXISTS cluster_cache (
   session_id TEXT NOT NULL,
   entity_kind TEXT NOT NULL,
@@ -140,4 +160,27 @@ CREATE TABLE IF NOT EXISTS scoreboard_peers (
   base_url TEXT NOT NULL UNIQUE,
   enabled INTEGER NOT NULL DEFAULT 1,
   added_at INTEGER NOT NULL
+);
+
+-- Participant email roster (/admin Emails tab). Each entry binds an email
+-- address to a per-event seat number — the {ID} in the invitation, i.e.
+-- the "<CLUSTER>-User<ID>" VDI account handed to that participant. Seats
+-- are assigned lowest-free-first so deleting someone frees their VDI
+-- account for the next addition.
+CREATE TABLE IF NOT EXISTS email_roster (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  seat INTEGER NOT NULL UNIQUE,
+  email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  added_at INTEGER NOT NULL
+);
+
+-- One row per (participant, template type) successful delivery. Sending
+-- a template targets roster entries with no row here ("pending"), so
+-- adding a late participant never re-emails the rest of the room. Resend
+-- just refreshes sent_at.
+CREATE TABLE IF NOT EXISTS email_sends (
+  roster_id INTEGER NOT NULL,
+  template_id TEXT NOT NULL,
+  sent_at INTEGER NOT NULL,
+  PRIMARY KEY (roster_id, template_id)
 );
