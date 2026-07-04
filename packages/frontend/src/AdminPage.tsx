@@ -1495,13 +1495,10 @@ function ClusterConfigEditor({ password }: { password: string }) {
 }
 
 /**
- * Read-only display of Prism Central product enablement, currently scoped
- * to Intelligent Operations. Live-fetched on every Cluster tab open — no
- * caching because the operator clicks Enable in Prism UI and wants to see
- * the flip without restarting the backend. There is no public API to
- * activate IOps from the game side; we surface the state and a deep-link
- * to the Prism activation screen so the operator's "click here" path is
- * one hop instead of three.
+ * Read-only live cluster status: IOps enablement + software versions.
+ * Fetched on every Cluster tab open, no caching. Versions matter because
+ * the "AOS + PC Demo - Latest" RX workload is managed elsewhere and can
+ * drift from what OPERATOR.md expects.
  */
 function IntelligentOpsStatus({ password }: { password: string }) {
   const [data, setData] = useState<AdminClusterStatusPayload | null>(null);
@@ -1569,6 +1566,25 @@ function IntelligentOpsStatus({ password }: { password: string }) {
         )}
         {error && <div className="c-dim admin-cluster-iops-err">{error}</div>}
       </div>
+      <div className="admin-cluster-label admin-cluster-versions-title">
+        Software versions
+        <span className="c-dim"> · live</span>
+      </div>
+      {data.versions.rows.length === 0 ? (
+        <div className="c-dim admin-cluster-iops-err">
+          {data.versions.error ?? 'unavailable (mock mode)'}
+        </div>
+      ) : (
+        <div className="admin-cluster-versions">
+          {data.versions.rows.map((r) => (
+            <div key={`${r.component}|${r.version}|${r.location ?? ''}`} className="admin-cluster-version-row">
+              <span>{r.component}</span>
+              <span className="c-green">{r.version}</span>
+              <span className="c-dim">{r.location ?? ''}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

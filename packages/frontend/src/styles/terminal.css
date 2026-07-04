@@ -1765,6 +1765,15 @@ a.terminal-link:visited {
   cursor: pointer;
 }
 .admin-cluster-iops-err { font-size: 12px; margin-top: 2px; }
+.admin-cluster-versions-title { margin-top: 10px; }
+.admin-cluster-versions {
+  display: grid;
+  grid-template-columns: max-content max-content 1fr;
+  column-gap: 14px;
+  row-gap: 3px;
+  font-size: 13px;
+}
+.admin-cluster-version-row { display: contents; }
 .admin-table {
   width: 100%;
   border-collapse: collapse;
