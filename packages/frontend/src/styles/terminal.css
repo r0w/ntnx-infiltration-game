@@ -1710,10 +1710,44 @@ a.terminal-link:visited {
 }
 .admin-cluster-input { max-width: 240px; }
 .admin-planner-input { max-width: 380px; }
+/* Generic admin panel card — the Emails tab's console material promoted
+   to every tab. Eyebrow = RP codename, title = what the operator controls. */
+.admin-panel {
+  background: #0d1420;
+  border: 1px solid #1f2937;
+  border-radius: 6px;
+  padding: 16px 18px 18px;
+  min-width: 0;
+}
+.admin-panel-head { margin: 0 0 12px; }
+.admin-eyebrow {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--blue);
+  opacity: 0.8;
+}
+.admin-panel-title {
+  margin: 3px 0 4px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--fg);
+}
+.admin-panel-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--dim);
+  max-width: 72ch;
+}
 .admin-cluster-block {
-  margin-top: 6px;
-  padding-top: 12px;
-  border-top: 1px solid #1b232b;
+  background: #0d1420;
+  border: 1px solid #1f2937;
+  border-radius: 6px;
+  padding: 16px 18px 18px;
 }
 .admin-planner-reveal {
   background: transparent;

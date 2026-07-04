@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   api,
@@ -111,6 +111,26 @@ function AdminLogin({ onLoggedIn }: { onLoggedIn: (pw: string) => void }) {
           <Link to="/">← back to game</Link>
         </p>
       </div>
+    </div>
+  );
+}
+
+
+/** Card header used across the admin tabs: RP eyebrow + plain title (+ short desc). */
+function PanelHead({
+  eyebrow,
+  title,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="admin-panel-head">
+      <span className="admin-eyebrow">{eyebrow}</span>
+      <h3 className="admin-panel-title">{title}</h3>
+      {children && <p className="admin-panel-desc">{children}</p>}
     </div>
   );
 }
@@ -561,8 +581,8 @@ function AdminDashboard({
       )}
       {error && <div className="app-error">{error}</div>}
       {tab === 'users' && gates && gates.length > 0 && (
-        <section className="admin-gates">
-          <h2 className="admin-section-title">gates</h2>
+        <section className="admin-gates admin-panel">
+          <PanelHead eyebrow="checkpoints" title="Gates" />
           <div className="admin-gates-grid">
             {gates.map((g) => {
               const pct = g.totalActive > 0
@@ -657,7 +677,8 @@ function AdminDashboard({
             return 0;
           });
           return (
-            <>
+            <section className="admin-panel">
+              <PanelHead eyebrow="field ops" title="Agents" />
               <div className="admin-users-toolbar">
                 <label className="admin-users-toggle">
                   <input
@@ -808,21 +829,27 @@ function AdminDashboard({
           </table>
         </div>
               )}
-            </>
+            </section>
           );
         })()
       ) : null}
       {tab === 'logs' && (
-        <LogsTab password={password} query={logsQuery} onQueryChange={setLogsQuery} />
+        <section className="admin-panel">
+          <PanelHead eyebrow="comms log" title="Check attempts" />
+          <LogsTab password={password} query={logsQuery} onQueryChange={setLogsQuery} />
+        </section>
       )}
       {tab === 'pack' && (
-        <PackEditor
-          stages={packStages}
-          meta={packMeta}
-          busyId={packBusyId}
-          onTogglePackField={togglePackField}
-          onRequestDisable={requestDisable}
-        />
+        <section className="admin-panel">
+          <PanelHead eyebrow="mission plan" title="Stages" />
+          <PackEditor
+            stages={packStages}
+            meta={packMeta}
+            busyId={packBusyId}
+            onTogglePackField={togglePackField}
+            onRequestDisable={requestDisable}
+          />
+        </section>
       )}
       {tab === 'cluster' && <ClusterConfigEditor password={password} />}
       {tab === 'emails' && <EmailsTab password={password} />}
@@ -1433,12 +1460,11 @@ function ClusterConfigEditor({ password }: { password: string }) {
       <div className="admin-cluster-col">
         <ClusterVersions password={password} />
       </div>
-      <div className="admin-cluster-col">
-        <p className="admin-cluster-intro">
-          <strong>Cached cluster snapshot</strong> · pre-loaded at boot to skip
-          the slow discover-unconfigured-nodes / LCM-inventory queries inside
-          checks. Operator edits are sticky (the boot probe never overwrites them).
-        </p>
+      <div className="admin-cluster-col admin-panel">
+        <PanelHead eyebrow="target cluster" title="Cached snapshot">
+          Pre-loaded at boot so checks skip the slow live queries. Operator
+          edits are sticky; the boot probe never overwrites them.
+        </PanelHead>
         {error && <div className="app-error">{error}</div>}
         <div className="admin-cluster-section">
           <label className="admin-cluster-label">
@@ -1555,7 +1581,7 @@ function IntelligentOpsStatus({ password }: { password: string }) {
   const stateLabel = state ?? 'unknown';
 
   return (
-    <div className="admin-cluster-section">
+    <div className="admin-cluster-section admin-cluster-block">
       <div className="admin-cluster-label">
         Intelligent Operations
         <span className="c-dim"> · live</span>
@@ -1629,7 +1655,7 @@ function ClusterVersions({ password }: { password: string }) {
   }, [load]);
 
   return (
-    <div className="admin-cluster-section">
+    <div className="admin-cluster-section admin-cluster-block">
       <div className="admin-cluster-label">
         Software versions
         <span className="c-dim"> · live</span>
@@ -1748,19 +1774,16 @@ function PlannerConfigEditor({ password }: { password: string }) {
 
   return (
     <div className="admin-cluster admin-cluster-block">
-      <p className="admin-cluster-intro">
-        <strong>Planner (secondary PC)</strong> · powers stages 31
-        <span className="c-dim"> (capacity-runway)</span> + 32
-        <span className="c-dim"> (resource-optimization)</span>. When all 3
-        fields are saved, the <code>PlannerCluster</code> capability flips
-        on for <em>new</em> sessions and the stages become playable. Leave
-        empty (or clear) to auto-skip them.{' '}
+      <PanelHead eyebrow="target cluster" title="Planner (secondary PC)">
+        Powers stages 31 <span className="c-dim">(capacity-runway)</span> + 32{' '}
+        <span className="c-dim">(resource-optimization)</span> on new sessions
+        once all 3 fields are saved; empty = auto-skip.{' '}
         {allSaved ? (
           <span className="c-green">● wired</span>
         ) : (
-          <span className="c-yellow">● not wired — stages 31/32 auto-skip</span>
+          <span className="c-yellow">● not wired · stages 31/32 auto-skip</span>
         )}
-      </p>
+      </PanelHead>
       {error && <div className="app-error">{error}</div>}
       <div className="admin-cluster-section">
         <label className="admin-cluster-label">Planner PC endpoint</label>
@@ -2132,12 +2155,10 @@ function EmailsTab({ password }: { password: string }) {
           <span className="admin-emails-eyebrow">Uplink</span>
           <h3 className="admin-emails-title">Sender identity</h3>
           <p className="admin-emails-desc">
-            Briefings go out through the{' '}
             <a href="https://mailtrap.io" target="_blank" rel="noreferrer">
               Mailtrap
             </a>{' '}
-            Send API; the from address must sit on a domain verified in the
-            account owning the token.
+            Send API token + a from address on a verified domain.
           </p>
           <p className="admin-emails-channel">
             {!wired ? (
@@ -2247,9 +2268,8 @@ function EmailsTab({ password }: { password: string }) {
           <span className="admin-emails-eyebrow">Manifest</span>
           <h3 className="admin-emails-title">Agent roster</h3>
           <p className="admin-emails-desc">
-            One seat per participant = their VDI account. Each briefing goes
-            out <em>once</em>: adding someone later only emails them. Deleting
-            frees the seat.
+            One seat = one VDI account; each briefing goes out <em>once</em>{' '}
+            per agent. Deleting frees the seat.
           </p>
         </div>
         <div className="admin-emails-test-row admin-emails-add-row">
@@ -2437,9 +2457,8 @@ function EmailsTab({ password }: { password: string }) {
           <span className="admin-emails-eyebrow">Briefing room</span>
           <h3 className="admin-emails-title">Edit templates</h3>
           <p className="admin-emails-desc">
-            Pick a template, fill the variables, edit it visually or in the
-            HTML source. Sending happens from the manifest above and saves the
-            draft as this deployment&apos;s template.
+            Sending happens from the manifest; the sent draft becomes this
+            deployment&apos;s template.
           </p>
         </div>
         <div className="admin-emails-compose-row">
@@ -2628,11 +2647,10 @@ function PolicyEngineStatus({ password }: { password: string }) {
 
   return (
     <div className="admin-cluster admin-cluster-block">
-      <p className="admin-cluster-intro">
-        <strong>Policy Engine</strong> · powers stage 21
-        <span className="c-dim"> (create-approval-policy)</span> on shared
-        clusters. Activate in Prism if needed, then re-check here.
-      </p>
+      <PanelHead eyebrow="target cluster" title="Policy Engine">
+        Powers stage 21 <span className="c-dim">(create-approval-policy)</span>{' '}
+        on shared clusters. Activate in Prism if needed, then re-check here.
+      </PanelHead>
       <div className="admin-cluster-iops">
         state:{' '}
         {enabled === null ? (
@@ -2759,14 +2777,14 @@ function PeersEditor({ password }: { password: string }) {
   const selfLabelDirty = (selfLabel.trim() || null) !== selfLabelSaved;
 
   return (
-    <div className="admin-cluster">
-      <p className="admin-cluster-intro">
+    <div className="admin-cluster admin-panel">
+      <PanelHead eyebrow="network" title="Combined scoreboards">
         Clusters merged into the{' '}
         <Link to="/scoreboard?combined=1" target="_blank" rel="noreferrer">
           combined scoreboard
         </Link>
         . baseUrl example: <code>http://10.55.89.44:3000</code>.
-      </p>
+      </PanelHead>
       {error && <div className="app-error">{error}</div>}
 
       <div className="admin-cluster-section">
