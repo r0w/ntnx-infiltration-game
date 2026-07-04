@@ -228,8 +228,8 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
                 time.sleep(3)
                 continue
             raise Exception("create project failed: %s" % last)
-        # POST accepted — wait for the intentful task, which can still FAIL
-        # on its own (aplos settling right after the node removal, issue #41).
+        # POST accepted — the intentful task can still FAIL on its own
+        # (issue #41: likely the v3 subnet-lag surfacing at task level).
         task = _wait_create_task(r.json()["status"]["execution_context"]["task_uuid"])
         if task.get("status") == "SUCCEEDED":
             return task["entity_reference_list"][0]["uuid"]

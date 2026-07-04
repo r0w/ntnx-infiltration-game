@@ -178,12 +178,8 @@ def test_create_project_survives_blip_during_recovery_lookup():
 
 
 def test_create_project_retries_when_create_task_fails():
-    # Issue #41 (live on DM3-POC004, right after the 4→3 node removal): the
-    # POST is accepted but the intentful create task ends FAILED and leaves
-    # the project in state ERROR. The loop must purge the ERROR project (via
-    # the existing lookup) and re-create instead of raising.
-    # create#1 202 -> task FAILED -> lookup finds ERROR dupe, deletes it,
-    # settle poll sees it gone -> create#2 202 -> task SUCCEEDED.
+    # Issue #41: POST accepted but the intentful task ends FAILED, leaving an
+    # ERROR-state project. Must purge it and re-create instead of raising.
     fake_req = FakeReq(post=[
         FakeResp(202, {"status": {"execution_context": {"task_uuid": "t-fail"}}}),
         FakeResp(202, {"status": {"execution_context": {"task_uuid": "t-ok"}}}),
