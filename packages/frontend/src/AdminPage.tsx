@@ -1913,7 +1913,9 @@ function EmailsTab({ password }: { password: string }) {
       ]);
       setToken(cfg.mailtrapToken);
       setFromEmail(cfg.fromEmail);
-      setFromName(cfg.fromName);
+      // RP default: prefill the display name until the operator stores
+      // their own (shows as unsaved, one `save` click away).
+      setFromName(cfg.fromName || 'Tank The Operator');
       setSavedCfg({ token: cfg.mailtrapToken, fromEmail: cfg.fromEmail, fromName: cfg.fromName });
       setSavedVars(cfg.vars);
       setClusterName(cfg.clusterName);
@@ -2212,7 +2214,7 @@ function EmailsTab({ password }: { password: string }) {
           <input
             type="text"
             className="admin-cluster-input admin-planner-input"
-            placeholder="Nutanix Cloud Operations Command Center"
+            placeholder="Tank The Operator"
             value={fromName}
             onChange={(e) => setFromName(e.target.value)}
             disabled={busy !== null}
