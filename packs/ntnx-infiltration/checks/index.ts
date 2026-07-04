@@ -160,7 +160,12 @@ async function CheckAuthPolicy(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const expected = `${trigram}-auth`;
   const expectedLc = expected.toLowerCase();
+  // The user binding is the point of this stage — refuse to pass when the
+  // user itself can't be resolved (deleted mid-session, IAM unreachable).
   const userUuid = await lookupUserUuid(ctx, `${trigram}-adm`);
+  if (!userUuid) {
+    return { pass: false, detail: `User '${trigram}-adm' not found on the cluster.` };
+  }
   try {
     // v4 authz policies carry the identifier on `displayName`. Top-level
     // `name` is null in list responses — the cached `cacheEntity` helper
@@ -197,18 +202,16 @@ async function CheckAuthPolicy(ctx: CheckContext): Promise<CheckResult> {
         detail: `Authorization policy '${expected}' is not bound to the Super Admin role.`,
       };
     }
-    if (userUuid) {
-      const userBound = (found.identities ?? []).some((id) => {
-        const anyof =
-          id.identityFilter?.user?.uuid?.anyof ?? id.$reserved?.user?.uuid?.anyof ?? [];
-        return anyof.includes(userUuid);
-      });
-      if (!userBound) {
-        return {
-          pass: false,
-          detail: `Authorization policy '${expected}' does not target '${trigram}-adm'.`,
-        };
-      }
+    const userBound = (found.identities ?? []).some((id) => {
+      const anyof =
+        id.identityFilter?.user?.uuid?.anyof ?? id.$reserved?.user?.uuid?.anyof ?? [];
+      return anyof.includes(userUuid);
+    });
+    if (!userBound) {
+      return {
+        pass: false,
+        detail: `Authorization policy '${expected}' does not target '${trigram}-adm'.`,
+      };
     }
     if (found.extId) {
       ctx.cache.set({ kind: 'authPolicy', logicalName: expected, uuid: found.extId });
@@ -864,7 +867,14 @@ interface MsegRule {
 async function CheckSecurityPolicy(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const expected = `${trigram}-mseg-policy`;
+  // Scoping to the category is the point — fail when it can't be resolved.
   const catUuid = await lookupCategoryUuid(ctx, `${trigram}-cat`, 'Critical');
+  if (!catUuid) {
+    return {
+      pass: false,
+      detail: `Category '${trigram}-cat:Critical' not found on the cluster — re-create it.`,
+    };
+  }
   try {
     const policies = await listAll<{ extId?: string; name?: string; state?: string }>(
       ctx,
@@ -885,16 +895,14 @@ async function CheckSecurityPolicy(ctx: CheckContext): Promise<CheckResult> {
       `/api/microseg/v4.0/config/policies/${found.extId}`,
     );
     const rules = detail?.data?.rules ?? [];
-    if (catUuid) {
-      const scoped = rules.some((r) =>
-        (r.spec?.securedGroupCategoryReferences ?? []).includes(catUuid),
-      );
-      if (!scoped) {
-        return {
-          pass: false,
-          detail: `Security policy '${expected}' is not scoped to '${trigram}-cat:Critical'.`,
-        };
-      }
+    const scoped = rules.some((r) =>
+      (r.spec?.securedGroupCategoryReferences ?? []).includes(catUuid),
+    );
+    if (!scoped) {
+      return {
+        pass: false,
+        detail: `Security policy '${expected}' is not scoped to '${trigram}-cat:Critical'.`,
+      };
     }
     // Python `CheckSecurityPolicy` only asserts "≥1 rule has
     // is_all_protocol_allowed" (no destAllowSpec clause). Match the
@@ -1101,7 +1109,14 @@ async function CheckProtectionPolicy(ctx: CheckContext): Promise<CheckResult> {
 async function CheckApprovalPolicy(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const expectedName = 'master-appr-policy';
+  // The protection-policy link is the point — fail when it can't be resolved.
   const protectionUuid = await lookupProtectionPolicyUuid(ctx, `${trigram}-prot-policy`);
+  if (!protectionUuid) {
+    return {
+      pass: false,
+      detail: `Protection policy '${trigram}-prot-policy' not found on the cluster.`,
+    };
+  }
   try {
     // Linked protection policies live on `securedPolicies[]` (not
     // `targetPolicyExtIds` — that's the create-time DTO only). Each entry
@@ -1122,16 +1137,14 @@ async function CheckApprovalPolicy(ctx: CheckContext): Promise<CheckResult> {
         detail: `Approval policy '${expectedName}' not found.`,
       };
     }
-    if (protectionUuid) {
-      const linked = (found.securedPolicies ?? []).some(
-        (sp) => sp.policyExtId === protectionUuid,
-      );
-      if (!linked) {
-        return {
-          pass: false,
-          detail: `Approval policy not linked to your protection policy — associate them.`,
-        };
-      }
+    const linked = (found.securedPolicies ?? []).some(
+      (sp) => sp.policyExtId === protectionUuid,
+    );
+    if (!linked) {
+      return {
+        pass: false,
+        detail: `Approval policy not linked to your protection policy — associate them.`,
+      };
     }
     if (found.extId) {
       ctx.cache.set({ kind: 'approvalPolicy', logicalName: expectedName, uuid: found.extId });
@@ -1624,7 +1637,11 @@ async function CheckCloneApp(ctx: CheckContext): Promise<CheckResult> {
 async function CheckSchedDay2(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const expected = `${trigram}-sched`;
+  // The schedule must target the player's app — fail when it can't resolve.
   const appUuid = await lookupAppUuid(ctx, `${trigram}-app`);
+  if (!appUuid) {
+    return { pass: false, detail: `Application '${trigram}-app' not found.` };
+  }
   try {
     // Calm app-scheduler entities live on `/api/nutanix/v3/jobs/list` —
     // the GUI calls them "Self-Service > Policies" but they're modeled as
@@ -1648,14 +1665,12 @@ async function CheckSchedDay2(ctx: CheckContext): Promise<CheckResult> {
       (j) => j.metadata?.name === expected || j.resources?.name === expected,
     );
     if (!found) return { pass: false, detail: `Scheduled policy '${expected}' not found.` };
-    if (appUuid) {
-      const target = found.resources?.executable?.entity?.uuid;
-      if (target !== appUuid) {
-        return {
-          pass: false,
-          detail: `Schedule '${expected}' targets '${target ?? '?'}' (expected app UUID '${appUuid}').`,
-        };
-      }
+    const target = found.resources?.executable?.entity?.uuid;
+    if (target !== appUuid) {
+      return {
+        pass: false,
+        detail: `Schedule '${expected}' targets '${target ?? '?'}' (expected app UUID '${appUuid}').`,
+      };
     }
     return { pass: true, detail: `Schedule '${expected}' targets the player's app.` };
   } catch (err) {

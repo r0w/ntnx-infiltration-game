@@ -182,7 +182,7 @@ export async function lookupProjectUuid(
       metadata?: { name?: string; uuid?: string };
     }>(ctx, '/api/nutanix/v3/projects/list');
     return projects.find(
-      (p) => p.spec?.name === name || p.status?.name === name || p.metadata?.name === name,
+      (p) => p?.spec?.name === name || p?.status?.name === name || p?.metadata?.name === name,
     )?.metadata?.uuid;
   } catch {
     return undefined;
@@ -200,7 +200,7 @@ export async function lookupCategoryUuid(
       ctx,
       '/api/prism/v4.2/config/categories',
     );
-    return categories.find((c) => c.key === key && c.value === value)?.extId;
+    return categories.find((c) => c?.key === key && c?.value === value)?.extId;
   } catch {
     return undefined;
   }
@@ -231,7 +231,7 @@ export async function lookupAppUuid(
       metadata?: { uuid?: string; name?: string };
       status?: { name?: string };
     }>(ctx, '/api/nutanix/v3/apps/list');
-    return apps.find((a) => a.status?.name === name || a.metadata?.name === name)?.metadata
+    return apps.find((a) => a?.status?.name === name || a?.metadata?.name === name)?.metadata
       ?.uuid;
   } catch {
     return undefined;
