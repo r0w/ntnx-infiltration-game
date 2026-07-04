@@ -512,7 +512,7 @@ export const api = {
       mailtrapToken?: string | null;
       fromEmail?: string | null;
       fromName?: string | null;
-      recipients?: string[] | null;
+      vars?: Record<string, string>;
     },
   ) =>
     fetch('/api/admin/email-config', {
@@ -520,11 +520,37 @@ export const api = {
       headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }).then((res) => handle<AdminEmailConfigPayload>(res)),
+  adminEmailDomains: (password: string) =>
+    adminGet<{ domains: Array<{ domain: string; verified: boolean }>; error?: string }>(
+      '/admin/email-domains',
+      password,
+    ),
   adminEmailTemplates: (password: string) =>
     adminGet<{ templates: AdminEmailTemplate[] }>('/admin/email-templates', password),
+  adminEmailTemplateReset: (password: string, id: string, locale: string) =>
+    adminDel<{ ok: true }>(`/admin/email-templates/${id}/${locale}`, password),
+  adminEmailRoster: (password: string) =>
+    adminGet<{ entries: AdminEmailRosterEntry[] }>('/admin/email-roster', password),
+  adminEmailRosterAdd: (password: string, emails: string[]) =>
+    adminPost<{ added: number; skipped: number; entries: AdminEmailRosterEntry[] }>(
+      '/admin/email-roster',
+      password,
+      { emails },
+    ),
+  adminEmailRosterDelete: (password: string, id: number) =>
+    adminDel<{ ok: true; entries: AdminEmailRosterEntry[] }>(`/admin/email-roster/${id}`, password),
   adminEmailSend: (
     password: string,
-    body: { recipients: string[]; subject: string; html: string; test?: boolean },
+    body: {
+      templateId: string;
+      locale: string;
+      subject: string;
+      html: string;
+      vars: Record<string, string>;
+      mode: 'pending' | 'rows' | 'test';
+      rosterIds?: number[];
+      testAddress?: string;
+    },
   ) => adminPost<AdminEmailSendPayload>('/admin/email-send', password, body),
 };
 
@@ -545,22 +571,32 @@ export interface AdminEmailConfigPayload {
   mailtrapToken: string;
   fromEmail: string;
   fromName: string;
-  recipients: string[];
+  vars: Record<string, string>;
 }
 
 export interface AdminEmailTemplate {
-  id: 'invitation' | 'invitation-vdi' | 'invitation-vpn' | 'summary';
+  id: 'invitation-vdi' | 'summary';
   locale: 'en' | 'fr';
   subject: string;
   html: string;
   variables: Record<string, string>;
+  overridden: boolean;
+}
+
+export interface AdminEmailRosterEntry {
+  id: number;
+  seat: number;
+  email: string;
+  addedAt: number;
+  /** templateId → sentAt of the last successful delivery. */
+  sent: Record<string, number>;
 }
 
 export interface AdminEmailSendPayload {
   ok: boolean;
   sent: number;
   failed: number;
-  results: Array<{ to: string; ok: boolean; error?: string }>;
+  results: Array<{ to: string; seat: number; ok: boolean; error?: string }>;
 }
 
 export interface AdminPlannerConfigPayload {

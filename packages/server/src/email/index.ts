@@ -3,26 +3,18 @@
 // reads, so the minified Docker build needs no extra COPY. bun-types
 // declares *.html as HTMLBundle, but `with { type: "text" }` makes the
 // runtime (and bundler) hand us the raw string — hence the casts.
-import invitationEnRaw from './templates/invitation.en.html' with { type: 'text' };
-import invitationFrRaw from './templates/invitation.fr.html' with { type: 'text' };
 import invitationVdiEnRaw from './templates/invitation-vdi.en.html' with { type: 'text' };
 import invitationVdiFrRaw from './templates/invitation-vdi.fr.html' with { type: 'text' };
-import invitationVpnEnRaw from './templates/invitation-vpn.en.html' with { type: 'text' };
-import invitationVpnFrRaw from './templates/invitation-vpn.fr.html' with { type: 'text' };
 import summaryEnRaw from './templates/summary.en.html' with { type: 'text' };
 import summaryFrRaw from './templates/summary.fr.html' with { type: 'text' };
 
-const invitationEn = invitationEnRaw as unknown as string;
-const invitationFr = invitationFrRaw as unknown as string;
 const invitationVdiEn = invitationVdiEnRaw as unknown as string;
 const invitationVdiFr = invitationVdiFrRaw as unknown as string;
-const invitationVpnEn = invitationVpnEnRaw as unknown as string;
-const invitationVpnFr = invitationVpnFrRaw as unknown as string;
 const summaryEn = summaryEnRaw as unknown as string;
 const summaryFr = summaryFrRaw as unknown as string;
 
 export interface EmailTemplate {
-  id: 'invitation' | 'invitation-vdi' | 'invitation-vpn' | 'summary';
+  id: 'invitation-vdi' | 'summary';
   locale: 'en' | 'fr';
   /** Default subject line — editable in the composer before sending. */
   subject: string;
@@ -30,59 +22,36 @@ export interface EmailTemplate {
   /**
    * `{VAR}` placeholders the operator fills in from the composer, with
    * their default values ('' = must be provided). `{ID}` is not listed:
-   * the server substitutes it per recipient (1-based position in the
-   * recipient list, zero-padded) at send time.
+   * the server substitutes it per recipient (the roster seat number,
+   * zero-padded) at send time.
    */
   variables: Record<string, string>;
 }
 
 const LEGACY_SURVEY_URL = 'https://forms.cloud.microsoft/r/UFWgLW352a?origin=lprLink';
 
+// Default Parallels RAS jump host for HPoC events. Base64ed only to keep
+// the internal URL out of plain-text search on this public repo — the
+// operator sees (and can replace) the decoded value in the composer.
+const DEFAULT_PARALLEL_URL = Buffer.from(
+  'aHR0cHM6Ly9kbTMtcmFzLmhwb2MubnV0YW5peC5jb20v',
+  'base64',
+).toString();
+
 export const EMAIL_TEMPLATES: EmailTemplate[] = [
-  {
-    id: 'invitation',
-    locale: 'en',
-    subject: 'Nutanix Cloud Operations Command Center - Mission Briefing',
-    html: invitationEn,
-    variables: { GAME_URL: '' },
-  },
-  {
-    id: 'invitation',
-    locale: 'fr',
-    subject: 'Nutanix Cloud Operations Command Center - Briefing de Mission',
-    html: invitationFr,
-    variables: { GAME_URL: '' },
-  },
-  // Legacy access variants, ported from the escape game: the event hands
-  // out per-seat VDI accounts ({CLUSTER}-User{ID} on a Parallels jump
-  // host) or a VPN profile, and the game URL is reached from inside.
   {
     id: 'invitation-vdi',
     locale: 'en',
     subject: 'Nutanix Cloud Operations Command Center - Mission Briefing',
     html: invitationVdiEn,
-    variables: { GAME_URL: '', PARALLEL_URL: '', CLUSTER: '', PASSWORD: '' },
+    variables: { GAME_URL: '', PARALLEL_URL: DEFAULT_PARALLEL_URL, CLUSTER: '', PASSWORD: '' },
   },
   {
     id: 'invitation-vdi',
     locale: 'fr',
     subject: 'Nutanix Cloud Operations Command Center - Briefing de Mission',
     html: invitationVdiFr,
-    variables: { GAME_URL: '', PARALLEL_URL: '', CLUSTER: '', PASSWORD: '' },
-  },
-  {
-    id: 'invitation-vpn',
-    locale: 'en',
-    subject: 'Nutanix Cloud Operations Command Center - Mission Briefing',
-    html: invitationVpnEn,
-    variables: { GAME_URL: '' },
-  },
-  {
-    id: 'invitation-vpn',
-    locale: 'fr',
-    subject: 'Nutanix Cloud Operations Command Center - Briefing de Mission',
-    html: invitationVpnFr,
-    variables: { GAME_URL: '' },
+    variables: { GAME_URL: '', PARALLEL_URL: DEFAULT_PARALLEL_URL, CLUSTER: '', PASSWORD: '' },
   },
   {
     id: 'summary',
@@ -99,6 +68,8 @@ export const EMAIL_TEMPLATES: EmailTemplate[] = [
     variables: { SURVEY_URL: LEGACY_SURVEY_URL },
   },
 ];
+
+export const EMAIL_TEMPLATE_IDS = ['invitation-vdi', 'summary'] as const;
 
 export interface MailtrapSendArgs {
   token: string;
@@ -152,6 +123,51 @@ export async function sendMailtrapEmail(args: MailtrapSendArgs): Promise<Mailtra
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: controller.signal.aborted ? 'timeout' : msg };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Verified sending domains of the Mailtrap account owning the token —
+ * lets /admin suggest a from address instead of the operator guessing
+ * which domain their account can send from.
+ */
+export async function listMailtrapDomains(
+  token: string,
+  timeoutMs = 10000,
+): Promise<{ domains: Array<{ domain: string; verified: boolean }>; error?: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const headers = { Accept: 'application/json', 'Api-Token': token };
+  try {
+    const accRes = await fetch('https://mailtrap.io/api/accounts', {
+      headers,
+      signal: controller.signal,
+    });
+    if (!accRes.ok) return { domains: [], error: `accounts: HTTP ${accRes.status}` };
+    const accounts = (await accRes.json()) as Array<{ id: number }>;
+    const domains: Array<{ domain: string; verified: boolean }> = [];
+    for (const acc of accounts) {
+      const dRes = await fetch(`https://mailtrap.io/api/accounts/${acc.id}/sending_domains`, {
+        headers,
+        signal: controller.signal,
+      });
+      if (!dRes.ok) continue;
+      const body = (await dRes.json()) as {
+        data?: Array<{ domain_name: string; dns_records?: Array<{ status: string }> }>;
+      };
+      for (const d of body.data ?? []) {
+        domains.push({
+          domain: d.domain_name,
+          verified: (d.dns_records ?? []).every((r) => r.status === 'pass'),
+        });
+      }
+    }
+    return { domains };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { domains: [], error: controller.signal.aborted ? 'timeout' : msg };
   } finally {
     clearTimeout(timer);
   }

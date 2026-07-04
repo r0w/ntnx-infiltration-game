@@ -1759,6 +1759,17 @@ a.terminal-link:visited {
   gap: 16px;
 }
 .admin-emails-config { max-width: 720px; }
+/* Top row: sender identity left, roster right — uses the page width. */
+.admin-emails-toprow {
+  display: grid;
+  grid-template-columns: minmax(320px, 460px) 1fr;
+  gap: 28px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .admin-emails-toprow { grid-template-columns: 1fr; }
+}
+.admin-emails-rosterblock { min-width: 0; }
 .admin-emails-compose-row {
   display: flex;
   flex-wrap: wrap;
@@ -1791,13 +1802,50 @@ a.terminal-link:visited {
   border-radius: 4px;
   background: #0b0f1a; /* matches the templates' own background */
 }
-.admin-emails-recipients { min-height: 140px; }
 .admin-emails-test-row {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 .admin-emails-test-row .admin-cluster-input { max-width: none; flex: 1 1 auto; }
+.admin-emails-add-row { margin-top: 10px; max-width: 720px; }
+.admin-emails-domains {
+  font-size: 12px;
+  color: var(--dim);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.admin-emails-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.admin-emails-viewmodes { display: flex; gap: 4px; }
+.admin-emails-format { display: flex; align-items: center; gap: 4px; }
+.admin-emails-format-btn {
+  background: rgba(124, 220, 254, 0.03);
+  border: 1px solid #1b232b;
+  border-radius: 3px;
+  color: #e6edf3;
+  font: inherit;
+  font-size: 13px;
+  width: 28px;
+  height: 26px;
+  cursor: pointer;
+}
+.admin-emails-format-btn:hover { border-color: var(--accent); }
+.admin-emails-format-hint { font-size: 11px; margin-left: 8px; }
+.admin-emails-editframe { background: #0b0f1a; margin-top: 10px; }
+.admin-emails-editor { margin-top: 10px; width: 100%; }
+.admin-emails-preview { margin-top: 10px; }
+.admin-emails-roster-table { margin-top: 12px; }
+.admin-emails-roster-table .admin-planner-reveal { margin-left: 10px; }
+.admin-emails-seat { color: var(--accent); font-weight: 600; }
+.admin-emails-sendrow { margin-top: 14px; align-items: end; }
 .admin-emails-warn { font-size: 12px; margin: 8px 0 0; }
 .admin-emails-report { margin-top: 10px; font-size: 13px; }
 .admin-emails-report-list {

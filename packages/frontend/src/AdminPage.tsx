@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   api,
@@ -6,6 +6,7 @@ import {
   type AdminClusterConfigPayload,
   type AdminClusterStatusPayload,
   type AdminClusterVersionsPayload,
+  type AdminEmailRosterEntry,
   type AdminEmailSendPayload,
   type AdminEmailTemplate,
   type AdminGateEntry,
@@ -1826,12 +1827,17 @@ function PlannerConfigEditor({ password }: { password: string }) {
 /**
  * Emails tab — send participant emails (mission invitation / lab summary)
  * from /admin, replacing the old escape-game blueprint day-2 actions.
- * Sender identity = a Mailtrap Send API token + a from address on a domain
- * verified in that Mailtrap account, persisted server-side so each
- * operator wires their own once per deployment. The composer loads a
- * bundled template (en/fr), the operator fills the {VARS}, edits the raw
- * HTML with a live preview, and the server fires one Mailtrap call per
- * recipient ({ID} = 1-based position in the list, zero-padded).
+ *
+ * - Sender identity = a Mailtrap Send API token + a from address on a
+ *   domain verified in that account; the server lists the account's
+ *   verified domains to suggest one. Persisted server-side.
+ * - Recipients live on a seat-numbered roster (email ↔ VDI account
+ *   <CLUSTER>-User<seat>); each template family is one-shot per
+ *   participant, so adding someone late only emails them. Per-row
+ *   resend + delete.
+ * - The body is edited in place in the rendered email (iframe in
+ *   designMode) with a small formatting toolbar; raw-HTML source view
+ *   as fallback. Edits + variables persist per deployment on send.
  */
 function EmailsTab({ password }: { password: string }) {
   // Sender config (mirrors PlannerConfigEditor).
@@ -1845,41 +1851,66 @@ function EmailsTab({ password }: { password: string }) {
   } | null>(null);
   const [showToken, setShowToken] = useState(false);
   const [cfgSavedAt, setCfgSavedAt] = useState<number | null>(null);
+  const [domains, setDomains] = useState<Array<{ domain: string; verified: boolean }> | null>(
+    null,
+  );
+  const [domainsError, setDomainsError] = useState<string | null>(null);
 
   // Composer.
   const [templates, setTemplates] = useState<AdminEmailTemplate[] | null>(null);
+  const [savedVars, setSavedVars] = useState<Record<string, string>>({});
   const [selKey, setSelKey] = useState('');
   const [subject, setSubject] = useState('');
   const [html, setHtml] = useState('');
   const [vars, setVars] = useState<Record<string, string>>({});
-  const [recipientsText, setRecipientsText] = useState('');
+  const [viewMode, setViewMode] = useState<'edit' | 'source' | 'preview'>('edit');
+  const editFrameRef = useRef<HTMLIFrameElement | null>(null);
+
+  // Roster.
+  const [roster, setRoster] = useState<AdminEmailRosterEntry[] | null>(null);
+  const [addText, setAddText] = useState('');
   const [testAddr, setTestAddr] = useState('');
   const [sendReport, setSendReport] = useState<AdminEmailSendPayload | null>(null);
   const [confirmSend, setConfirmSend] = useState(false);
 
-  const [busy, setBusy] = useState<'load' | 'save' | 'send' | 'test' | null>('load');
+  const [busy, setBusy] = useState<'load' | 'save' | 'send' | 'test' | 'roster' | null>('load');
   const [error, setError] = useState<string | null>(null);
+
+  const selTemplate = templates?.find((t) => `${t.id}.${t.locale}` === selKey) ?? null;
+
+  const loadDomains = useCallback(async () => {
+    try {
+      const d = await api.adminEmailDomains(password);
+      setDomains(d.domains);
+      setDomainsError(d.error ?? null);
+    } catch (err) {
+      setDomainsError(err instanceof Error ? err.message : String(err));
+    }
+  }, [password]);
 
   const load = useCallback(async () => {
     setBusy('load');
     setError(null);
     try {
-      const [cfg, tpl] = await Promise.all([
+      const [cfg, tpl, ros] = await Promise.all([
         api.adminEmailConfig(password),
         api.adminEmailTemplates(password),
+        api.adminEmailRoster(password),
       ]);
       setToken(cfg.mailtrapToken);
       setFromEmail(cfg.fromEmail);
       setFromName(cfg.fromName);
       setSavedCfg({ token: cfg.mailtrapToken, fromEmail: cfg.fromEmail, fromName: cfg.fromName });
-      setRecipientsText(cfg.recipients.join('\n'));
+      setSavedVars(cfg.vars);
       setTemplates(tpl.templates);
+      setRoster(ros.entries);
+      if (cfg.mailtrapToken) void loadDomains();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(null);
     }
-  }, [password]);
+  }, [password, loadDomains]);
 
   useEffect(() => {
     void load();
@@ -1899,6 +1930,7 @@ function EmailsTab({ password }: { password: string }) {
       setFromName(p.fromName);
       setSavedCfg({ token: p.mailtrapToken, fromEmail: p.fromEmail, fromName: p.fromName });
       setCfgSavedAt(Date.now());
+      if (p.mailtrapToken) void loadDomains();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1906,49 +1938,77 @@ function EmailsTab({ password }: { password: string }) {
     }
   };
 
-  const applyTemplate = (key: string) => {
-    setSelKey(key);
-    const t = templates?.find((t) => `${t.id}.${t.locale}` === key);
-    if (!t) return;
-    setSubject(t.subject);
-    setHtml(t.html);
-    // GAME_URL defaults to this deployment's own origin — the invitation
-    // points at the game the operator is composing from.
-    setVars(
-      Object.fromEntries(
-        Object.entries(t.variables).map(([k, v]) => [
-          k,
-          k === 'GAME_URL' && !v ? window.location.origin : v,
-        ]),
-      ),
-    );
-    setSendReport(null);
+  const applyTemplate = useCallback(
+    (key: string, tplList: AdminEmailTemplate[], saved: Record<string, string>) => {
+      setSelKey(key);
+      const t = tplList.find((t) => `${t.id}.${t.locale}` === key);
+      if (!t) return;
+      setSubject(t.subject);
+      setHtml(t.html);
+      // Priority: last-used value for this deployment, then the template
+      // default; GAME_URL falls back to this deployment's own origin.
+      setVars(
+        Object.fromEntries(
+          Object.keys(t.variables).map((k) => [
+            k,
+            saved[k]?.trim()
+              ? saved[k]
+              : t.variables[k] || (k === 'GAME_URL' ? window.location.origin : ''),
+          ]),
+        ),
+      );
+      setSendReport(null);
+    },
+    [],
+  );
+
+  // ── WYSIWYG surface ──────────────────────────────────────────────────
+  // The edit iframe shows the RAW template ({VARS} visible) in designMode
+  // so serializing it back never bakes substituted values into the draft.
+  // It is (re)written only when the template or view changes — not on
+  // every keystroke, which would destroy the cursor.
+  const syncFromFrame = useCallback(() => {
+    const doc = editFrameRef.current?.contentDocument;
+    if (!doc) return;
+    setHtml('<!doctype html>\n' + doc.documentElement.outerHTML);
+  }, []);
+
+  useEffect(() => {
+    if (viewMode !== 'edit') return;
+    const doc = editFrameRef.current?.contentDocument;
+    if (!doc) return;
+    doc.open();
+    doc.write(html);
+    doc.close();
+    doc.designMode = 'on';
+    const onInput = () => syncFromFrame();
+    doc.addEventListener('input', onInput);
+    return () => doc.removeEventListener('input', onInput);
+    // `html` intentionally absent: the frame is the source of truth while
+    // editing; re-writing it on each sync would reset the caret.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, selKey]);
+
+  const execFormat = (cmd: string) => {
+    const doc = editFrameRef.current?.contentDocument;
+    if (!doc) return;
+    doc.execCommand(cmd);
+    syncFromFrame();
   };
 
-  // Operator-filled {VARS} substituted live; {ID} stays for the server
-  // (per-recipient). Empty values leave the token visible so the preview
-  // shows what would really go out.
-  const substituted = useMemo(() => {
+  // Operator-filled {VARS} substituted for the preview; {ID} shows the
+  // first seat. Empty values leave the token visible on purpose.
+  const previewHtml = useMemo(() => {
     let out = html;
     for (const [k, v] of Object.entries(vars)) {
       if (v.trim()) out = out.split(`{${k}}`).join(v.trim());
     }
-    return out;
+    return out.split('{ID}').join('01');
   }, [html, vars]);
 
   const missingVars = Object.keys(vars).filter(
     (k) => !vars[k].trim() && html.includes(`{${k}}`),
   );
-
-  const recipients = useMemo(
-    () =>
-      recipientsText
-        .split(/[\n,;]+/)
-        .map((r) => r.trim())
-        .filter(Boolean),
-    [recipientsText],
-  );
-  const badRecipients = recipients.filter((r) => !/^\S+@\S+\.\S+$/.test(r));
 
   const wired = savedCfg !== null && savedCfg.token !== '' && savedCfg.fromEmail !== '';
   const cfgDirty =
@@ -1956,20 +2016,24 @@ function EmailsTab({ password }: { password: string }) {
     (token.trim() !== savedCfg.token ||
       fromEmail.trim() !== savedCfg.fromEmail ||
       fromName.trim() !== savedCfg.fromName);
-  const draftReady = subject.trim() !== '' && html.trim() !== '';
+  const draftReady = selTemplate !== null && subject.trim() !== '' && html.trim() !== '';
+  const pending = selTemplate
+    ? (roster ?? []).filter((r) => r.sent[selTemplate.id] === undefined)
+    : [];
+  const verifiedDomains = (domains ?? []).filter((d) => d.verified);
 
-  const send = async (to: string[], test: boolean) => {
-    setBusy(test ? 'test' : 'send');
+  const addToRoster = async () => {
+    const emails = addText
+      .split(/[\n,;\s]+/)
+      .map((e) => e.trim())
+      .filter(Boolean);
+    if (emails.length === 0) return;
+    setBusy('roster');
     setError(null);
-    setSendReport(null);
     try {
-      const r = await api.adminEmailSend(password, {
-        recipients: to,
-        subject: subject.trim(),
-        html: substituted,
-        test,
-      });
-      setSendReport(r);
+      const r = await api.adminEmailRosterAdd(password, emails);
+      setRoster(r.entries);
+      setAddText('');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1977,11 +2041,81 @@ function EmailsTab({ password }: { password: string }) {
     }
   };
 
+  const deleteFromRoster = async (id: number) => {
+    setBusy('roster');
+    setError(null);
+    try {
+      const r = await api.adminEmailRosterDelete(password, id);
+      setRoster(r.entries);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const send = async (mode: 'pending' | 'rows' | 'test', rosterIds?: number[]) => {
+    if (!selTemplate) return;
+    setBusy(mode === 'test' ? 'test' : 'send');
+    setError(null);
+    setSendReport(null);
+    try {
+      const r = await api.adminEmailSend(password, {
+        templateId: selTemplate.id,
+        locale: selTemplate.locale,
+        subject: subject.trim(),
+        html,
+        vars,
+        mode,
+        ...(rosterIds ? { rosterIds } : {}),
+        ...(mode === 'test' ? { testAddress: testAddr.trim() } : {}),
+      });
+      setSendReport(r);
+      if (mode !== 'test') {
+        // Sends persist the draft + refresh the sent badges.
+        const [ros, tpl, cfg] = await Promise.all([
+          api.adminEmailRoster(password),
+          api.adminEmailTemplates(password),
+          api.adminEmailConfig(password),
+        ]);
+        setRoster(ros.entries);
+        setTemplates(tpl.templates);
+        setSavedVars(cfg.vars);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const resetTemplate = async () => {
+    if (!selTemplate) return;
+    setBusy('save');
+    setError(null);
+    try {
+      await api.adminEmailTemplateReset(password, selTemplate.id, selTemplate.locale);
+      const tpl = await api.adminEmailTemplates(password);
+      setTemplates(tpl.templates);
+      applyTemplate(selKey, tpl.templates, savedVars);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const TEMPLATE_LABELS: Record<string, string> = {
+    'invitation-vdi': 'invitation',
+    summary: 'summary',
+  };
+
   return (
     <div className="admin-emails">
       {error && <div className="app-error">{error}</div>}
 
-      <div className="admin-cluster admin-cluster-block admin-emails-config">
+      <div className="admin-emails-toprow">
+            <div className="admin-cluster admin-cluster-block admin-emails-config">
         <p className="admin-cluster-intro">
           <strong>Sender identity</strong> · emails go out through the{' '}
           <a href="https://mailtrap.io" target="_blank" rel="noreferrer">
@@ -2022,13 +2156,36 @@ function EmailsTab({ password }: { password: string }) {
           <input
             type="text"
             className="admin-cluster-input admin-planner-input"
-            placeholder="game@your-verified-domain.com"
+            placeholder="tank@your-verified-domain.com"
             value={fromEmail}
             onChange={(e) => setFromEmail(e.target.value)}
             disabled={busy !== null}
             spellCheck={false}
             autoComplete="off"
           />
+          {verifiedDomains.length > 0 && (
+            <span className="admin-emails-domains">
+              verified: {verifiedDomains.map((d) => d.domain).join(', ')}
+              {verifiedDomains.map((d) => {
+                const suggestion = `tank@${d.domain}`;
+                return suggestion !== fromEmail.trim() ? (
+                  <button
+                    key={d.domain}
+                    type="button"
+                    className="admin-planner-reveal"
+                    onClick={() => setFromEmail(suggestion)}
+                  >
+                    use {suggestion}
+                  </button>
+                ) : null;
+              })}
+            </span>
+          )}
+          {domainsError && (
+            <span className="c-yellow admin-emails-domains">
+              domain lookup failed: {domainsError}
+            </span>
+          )}
         </div>
         <div className="admin-cluster-section">
           <label className="admin-cluster-label">From name (optional)</label>
@@ -2057,110 +2214,125 @@ function EmailsTab({ password }: { password: string }) {
           )}
         </div>
       </div>
-
-      <div className="admin-cluster-block">
+        <div className="admin-cluster-block admin-emails-rosterblock">
         <p className="admin-cluster-intro">
-          <strong>Compose</strong> · pick a template, fill the variables, tweak
-          the HTML if needed — the preview shows what recipients get. Loading a
-          template overwrites the subject + body draft.
+          <strong>Roster</strong> · each participant gets a seat = their VDI
+          account number (<code>{'{CLUSTER}'}-User{'{ID}'}</code>). A template
+          is sent <em>once</em> per participant: adding someone later only
+          emails them. Deleting frees the seat.
         </p>
-        <div className="admin-emails-compose-row">
-          <div className="admin-cluster-section">
-            <label className="admin-cluster-label">Template</label>
-            <select
-              className="admin-cluster-input"
-              value={selKey}
-              onChange={(e) => applyTemplate(e.target.value)}
-              disabled={busy !== null || templates === null}
-            >
-              <option value="">choose…</option>
-              {(templates ?? []).map((t) => (
-                <option key={`${t.id}.${t.locale}`} value={`${t.id}.${t.locale}`}>
-                  {t.id} · {t.locale}
-                </option>
-              ))}
-            </select>
-          </div>
-          {Object.keys(vars).map((k) => (
-            <div className="admin-cluster-section" key={k}>
-              <label className="admin-cluster-label">{`{${k}}`}</label>
-              <input
-                type="text"
-                className="admin-cluster-input admin-emails-var-input"
-                value={vars[k]}
-                onChange={(e) => setVars((prev) => ({ ...prev, [k]: e.target.value }))}
-                disabled={busy !== null}
-                spellCheck={false}
-              />
-            </div>
-          ))}
-        </div>
-        <div className="admin-cluster-section admin-emails-subject">
-          <label className="admin-cluster-label">Subject</label>
+        <div className="admin-emails-test-row admin-emails-add-row">
           <input
             type="text"
-            className="admin-cluster-input admin-emails-subject-input"
-            value={subject}
-            onChange={(e) => setSubject(e.target.value)}
+            className="admin-cluster-input"
+            placeholder="add addresses (space / comma / newline separated)"
+            value={addText}
+            onChange={(e) => setAddText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void addToRoster();
+            }}
             disabled={busy !== null}
             spellCheck={false}
           />
+          <button
+            type="button"
+            className="modal-btn"
+            disabled={busy !== null || addText.trim() === ''}
+            onClick={() => void addToRoster()}
+          >
+            {busy === 'roster' ? '…' : 'add'}
+          </button>
         </div>
-        <div className="admin-emails-grid">
-          <div className="admin-cluster-section">
-            <label className="admin-cluster-label">HTML body</label>
-            <textarea
-              className="admin-cluster-textarea admin-emails-editor"
-              value={html}
-              onChange={(e) => setHtml(e.target.value)}
-              disabled={busy !== null}
-              spellCheck={false}
-            />
-          </div>
-          <div className="admin-cluster-section">
-            <label className="admin-cluster-label">Preview</label>
-            <iframe
-              className="admin-emails-preview"
-              title="email preview"
-              sandbox=""
-              srcDoc={substituted.split('{ID}').join('01')}
-            />
-          </div>
-        </div>
-        {missingVars.length > 0 && (
+        {roster && roster.length > 20 && (
           <p className="admin-emails-warn c-yellow">
-            unfilled variable{missingVars.length === 1 ? '' : 's'}:{' '}
-            {missingVars.map((k) => `{${k}}`).join(', ')} — recipients would see
-            the raw token.
+            {roster.length} participants for 20 VDI accounts — seats above 20
+            have no matching account.
           </p>
         )}
-      </div>
-
-      <div className="admin-cluster-block">
-        <p className="admin-cluster-intro">
-          <strong>Recipients</strong> · one address per line (commas work too).
-          The list is saved on send, so it&apos;s prefilled for the next email
-          of the day. <code>{'{ID}'}</code> in the body becomes each
-          recipient&apos;s position (01, 02, …).
-        </p>
-        <div className="admin-emails-grid">
+        {roster && roster.length > 0 ? (
+          <div className="admin-table-wrap">
+            <table className="admin-table admin-emails-roster-table">
+              <thead>
+                <tr>
+                  <th>seat</th>
+                  <th>email</th>
+                  <th>invitation</th>
+                  <th>summary</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {roster.map((r) => (
+                  <tr key={r.id}>
+                    <td className="admin-emails-seat">{String(r.seat).padStart(2, '0')}</td>
+                    <td>{r.email}</td>
+                    {(['invitation-vdi', 'summary'] as const).map((fam) => (
+                      <td key={fam}>
+                        {r.sent[fam] ? (
+                          <span className="c-green" title={new Date(r.sent[fam]).toLocaleString()}>
+                            ✓ {fmtAge(r.sent[fam])}
+                          </span>
+                        ) : (
+                          <span className="c-dim">—</span>
+                        )}
+                        {selTemplate?.id === fam && r.sent[fam] !== undefined && (
+                          <button
+                            type="button"
+                            className="admin-planner-reveal"
+                            disabled={busy !== null || !wired || !draftReady}
+                            onClick={() => void send('rows', [r.id])}
+                            title="resend the current draft to this participant only"
+                          >
+                            resend
+                          </button>
+                        )}
+                      </td>
+                    ))}
+                    <td>
+                      <button
+                        type="button"
+                        className="admin-planner-reveal"
+                        disabled={busy !== null}
+                        onClick={() => void deleteFromRoster(r.id)}
+                        title="remove from roster (frees the seat; forgets sent state)"
+                      >
+                        delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="c-dim admin-emails-warn">roster is empty — add participants above.</p>
+        )}
+        <div className="admin-emails-grid admin-emails-sendrow">
           <div className="admin-cluster-section">
-            <label className="admin-cluster-label">
-              Recipients ({recipients.length})
-            </label>
-            <textarea
-              className="admin-cluster-textarea admin-emails-recipients"
-              placeholder={'agent.one@example.com\nagent.two@example.com'}
-              value={recipientsText}
-              onChange={(e) => setRecipientsText(e.target.value)}
-              disabled={busy !== null}
-              spellCheck={false}
-            />
-            {badRecipients.length > 0 && (
-              <span className="c-yellow admin-emails-warn">
-                not an email: {badRecipients.join(', ')}
-              </span>
-            )}
+            <label className="admin-cluster-label">Send</label>
+            <div className="admin-cluster-actions">
+              <button
+                type="button"
+                className="modal-btn modal-btn-danger"
+                disabled={busy !== null || !wired || !draftReady || pending.length === 0}
+                onClick={() => setConfirmSend(true)}
+                title={
+                  !wired
+                    ? 'configure the sender identity first'
+                    : !draftReady
+                      ? 'pick a template first'
+                      : pending.length === 0
+                        ? 'everyone already received this template'
+                        : undefined
+                }
+              >
+                {busy === 'send'
+                  ? 'sending…'
+                  : selTemplate
+                    ? `send ${TEMPLATE_LABELS[selTemplate.id] ?? selTemplate.id} to ${pending.length} pending`
+                    : 'send'}
+              </button>
+            </div>
           </div>
           <div className="admin-cluster-section">
             <label className="admin-cluster-label">Dry run</label>
@@ -2180,66 +2352,210 @@ function EmailsTab({ password }: { password: string }) {
                 disabled={
                   busy !== null || !wired || !draftReady || !/^\S+@\S+\.\S+$/.test(testAddr.trim())
                 }
-                onClick={() => void send([testAddr.trim()], true)}
-                title="send this draft to a single address without touching the saved recipient list"
+                onClick={() => void send('test')}
+                title="send this draft to a single address; does not mark anyone as sent"
               >
                 {busy === 'test' ? 'sending…' : 'send test'}
               </button>
             </div>
-            <div className="admin-cluster-actions">
-              <button
-                type="button"
-                className="modal-btn modal-btn-danger"
-                disabled={
-                  busy !== null ||
-                  !wired ||
-                  !draftReady ||
-                  recipients.length === 0 ||
-                  badRecipients.length > 0
-                }
-                onClick={() => setConfirmSend(true)}
-                title={!wired ? 'configure the sender identity first' : undefined}
-              >
-                {busy === 'send'
-                  ? 'sending…'
-                  : `send to ${recipients.length} recipient${recipients.length === 1 ? '' : 's'}`}
-              </button>
-            </div>
-            {sendReport && (
-              <div className="admin-emails-report">
-                <span className={sendReport.failed === 0 ? 'c-green' : 'c-yellow'}>
-                  sent {sendReport.sent}, failed {sendReport.failed}
-                </span>
-                <ul className="admin-emails-report-list">
-                  {sendReport.results.map((r) => (
-                    <li key={r.to} className={r.ok ? 'c-green' : 'c-red'}>
-                      {r.ok ? '✓' : '✗'} {r.to}
-                      {r.error ? ` — ${r.error}` : ''}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
           </div>
         </div>
+        {sendReport && (
+          <div className="admin-emails-report">
+            <span className={sendReport.failed === 0 ? 'c-green' : 'c-yellow'}>
+              sent {sendReport.sent}, failed {sendReport.failed}
+            </span>
+            <ul className="admin-emails-report-list">
+              {sendReport.results.map((r) => (
+                <li key={r.to} className={r.ok ? 'c-green' : 'c-red'}>
+                  {r.ok ? '✓' : '✗'} {String(r.seat).padStart(2, '0')} · {r.to}
+                  {r.error ? ` — ${r.error}` : ''}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
       </div>
 
-      {confirmSend && (
+      <div className="admin-cluster-block">
+        <p className="admin-cluster-intro">
+          <strong>Compose</strong> · pick a template, fill the variables, then
+          click into the email to edit it in place (or switch to the HTML
+          source). Sending saves your edits as this deployment&apos;s template
+          for the next batches.
+        </p>
+        <div className="admin-emails-compose-row">
+          <div className="admin-cluster-section">
+            <label className="admin-cluster-label">Template</label>
+            <select
+              className="admin-cluster-input"
+              value={selKey}
+              onChange={(e) => applyTemplate(e.target.value, templates ?? [], savedVars)}
+              disabled={busy !== null || templates === null}
+            >
+              <option value="">choose…</option>
+              {(templates ?? []).map((t) => (
+                <option key={`${t.id}.${t.locale}`} value={`${t.id}.${t.locale}`}>
+                  {TEMPLATE_LABELS[t.id] ?? t.id} · {t.locale}
+                  {t.overridden ? ' · edited' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          {Object.keys(vars).map((k) => (
+            <div className="admin-cluster-section" key={k}>
+              <label className="admin-cluster-label">{`{${k}}`}</label>
+              <input
+                type="text"
+                className="admin-cluster-input admin-emails-var-input"
+                value={vars[k]}
+                onChange={(e) => setVars((prev) => ({ ...prev, [k]: e.target.value }))}
+                disabled={busy !== null}
+                spellCheck={false}
+              />
+            </div>
+          ))}
+        </div>
+        {selTemplate && (
+          <>
+            <div className="admin-cluster-section admin-emails-subject">
+              <label className="admin-cluster-label">Subject</label>
+              <input
+                type="text"
+                className="admin-cluster-input admin-emails-subject-input"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                disabled={busy !== null}
+                spellCheck={false}
+              />
+            </div>
+            <div className="admin-emails-toolbar">
+              <div className="admin-emails-viewmodes" role="tablist">
+                {(['edit', 'source', 'preview'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    role="tab"
+                    aria-selected={viewMode === m}
+                    className={`admin-tab ${viewMode === m ? 'admin-tab-active' : ''}`}
+                    onClick={() => setViewMode(m)}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+              {viewMode === 'edit' && (
+                <div className="admin-emails-format">
+                  <button
+                    type="button"
+                    className="admin-emails-format-btn"
+                    title="bold"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => execFormat('bold')}
+                  >
+                    <strong>B</strong>
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-emails-format-btn"
+                    title="italic"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => execFormat('italic')}
+                  >
+                    <em>I</em>
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-emails-format-btn"
+                    title="underline"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => execFormat('underline')}
+                  >
+                    <u>U</u>
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-emails-format-btn"
+                    title="clear formatting"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => execFormat('removeFormat')}
+                  >
+                    ⌫
+                  </button>
+                  <span className="c-dim admin-emails-format-hint">
+                    click into the email to edit · {'{VARS}'} stay as tokens here
+                  </span>
+                </div>
+              )}
+              {selTemplate.overridden && (
+                <button
+                  type="button"
+                  className="admin-planner-reveal"
+                  disabled={busy !== null}
+                  onClick={() => void resetTemplate()}
+                  title="discard this deployment's edits and reload the bundled template"
+                >
+                  reset to default
+                </button>
+              )}
+            </div>
+            {viewMode === 'edit' && (
+              // Distinct `key`s: without them React reuses the same <iframe>
+              // node across modes and the srcdoc/doc.write contents clash.
+              <iframe
+                key="edit"
+                ref={editFrameRef}
+                className="admin-emails-preview admin-emails-editframe"
+                title="email editor"
+              />
+            )}
+            {viewMode === 'source' && (
+              <textarea
+                className="admin-cluster-textarea admin-emails-editor"
+                value={html}
+                onChange={(e) => setHtml(e.target.value)}
+                disabled={busy !== null}
+                spellCheck={false}
+              />
+            )}
+            {viewMode === 'preview' && (
+              <iframe
+                key="preview"
+                className="admin-emails-preview"
+                title="email preview"
+                sandbox=""
+                srcDoc={previewHtml}
+              />
+            )}
+            {missingVars.length > 0 && (
+              <p className="admin-emails-warn c-yellow">
+                unfilled variable{missingVars.length === 1 ? '' : 's'}:{' '}
+                {missingVars.map((k) => `{${k}}`).join(', ')} — recipients would
+                see the raw token.
+              </p>
+            )}
+          </>
+        )}
+      </div>
+
+      {confirmSend && selTemplate && (
         <ConfirmModal
           title="send emails"
-          confirmLabel={`send to ${recipients.length}`}
+          confirmLabel={`send to ${pending.length}`}
           danger
           busy={busy === 'send'}
           onConfirm={() => {
             setConfirmSend(false);
-            void send(recipients, false);
+            void send('pending');
           }}
           onCancel={() => setConfirmSend(false)}
         >
           <p>
-            Send <strong>{subject.trim() || '(no subject)'}</strong> to{' '}
-            <strong>{recipients.length}</strong> recipient
-            {recipients.length === 1 ? '' : 's'}?
+            Send <strong>{TEMPLATE_LABELS[selTemplate.id] ?? selTemplate.id}</strong> (
+            {selTemplate.locale}) to the <strong>{pending.length}</strong>{' '}
+            participant{pending.length === 1 ? '' : 's'} who did not receive it
+            yet?
           </p>
         </ConfirmModal>
       )}

@@ -998,32 +998,74 @@ describe('lunch lock (pack-wide pause)', () => {
 
 describe('email participant routes', () => {
   const AUTH = { 'X-Admin-Password': ADMIN_PW };
+  const JSON_AUTH = { ...AUTH, 'Content-Type': 'application/json' };
+
+  /** Router with a stubbed Mailtrap call recording every send. */
+  function emailRouter(db: Database, sendResult: { ok: boolean; error?: string } = { ok: true }) {
+    const calls: Array<{ to: string; subject: string; html: string }> = [];
+    const pack = fakePack();
+    const service = makeService(db, pack);
+    const r = buildAdminRoutes({
+      db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix,
+      clusterProfile: 'hpoc', pcEndpoint: '',
+      sendEmail: async (args) => {
+        calls.push({ to: args.to, subject: args.subject, html: args.html });
+        return sendResult;
+      },
+    });
+    return { r, calls, service };
+  }
+
+  const wireSender = async (r: ReturnType<typeof emailRouter>['r']) => {
+    await r.request('/email-config', {
+      method: 'PUT',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ mailtrapToken: 'tok', fromEmail: 'tank@ntnx.ch' }),
+    });
+  };
+
+  const addRoster = (r: ReturnType<typeof emailRouter>['r'], emails: string[]) =>
+    r.request('/email-roster', {
+      method: 'POST',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ emails }),
+    });
+
+  const sendBody = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      templateId: 'invitation-vdi',
+      locale: 'en',
+      subject: 's',
+      html: '<b>agent {ID} on {CLUSTER}</b>',
+      vars: { CLUSTER: 'DM3-POC004' },
+      mode: 'pending',
+      ...over,
+    });
 
   test('config: empty by default, PUT persists, empty string clears', async () => {
-    const db = freshDb();
-    const r = router(db);
+    const { r } = emailRouter(freshDb());
     let res = await r.request('/email-config', { headers: AUTH });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      mailtrapToken: '', fromEmail: '', fromName: '', recipients: [],
+      mailtrapToken: '', fromEmail: '', fromName: '', vars: {},
     });
 
     res = await r.request('/email-config', {
       method: 'PUT',
-      headers: { ...AUTH, 'Content-Type': 'application/json' },
+      headers: JSON_AUTH,
       body: JSON.stringify({
-        mailtrapToken: 'tok', fromEmail: 'a@b.co', fromName: 'N', recipients: ['x@y.co'],
+        mailtrapToken: 'tok', fromEmail: 'a@b.co', fromName: 'N', vars: { CLUSTER: 'X' },
       }),
     });
     expect(res.status).toBe(200);
-    const saved = (await res.json()) as { mailtrapToken: string; recipients: string[] };
+    const saved = (await res.json()) as { mailtrapToken: string; vars: Record<string, string> };
     expect(saved.mailtrapToken).toBe('tok');
-    expect(saved.recipients).toEqual(['x@y.co']);
+    expect(saved.vars).toEqual({ CLUSTER: 'X' });
 
     // Empty string clears, missing key leaves untouched (planner-config semantics).
     res = await r.request('/email-config', {
       method: 'PUT',
-      headers: { ...AUTH, 'Content-Type': 'application/json' },
+      headers: JSON_AUTH,
       body: JSON.stringify({ fromName: '' }),
     });
     const after = (await res.json()) as { mailtrapToken: string; fromName: string };
@@ -1031,50 +1073,165 @@ describe('email participant routes', () => {
     expect(after.fromName).toBe('');
   });
 
-  test('templates: 4 ids x 2 locales, html + subject non-empty', async () => {
-    const res = await router(freshDb()).request('/email-templates', { headers: AUTH });
+  test('templates: 2 ids x 2 locales, defaults not overridden', async () => {
+    const { r } = emailRouter(freshDb());
+    const res = await r.request('/email-templates', { headers: AUTH });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      templates: Array<{ id: string; locale: string; subject: string; html: string }>;
+      templates: Array<{ id: string; locale: string; subject: string; html: string; overridden: boolean }>;
     };
     const keys = body.templates.map((t) => `${t.id}.${t.locale}`).sort();
-    expect(keys).toEqual([
-      'invitation-vdi.en', 'invitation-vdi.fr',
-      'invitation-vpn.en', 'invitation-vpn.fr',
-      'invitation.en', 'invitation.fr',
-      'summary.en', 'summary.fr',
-    ]);
+    expect(keys).toEqual(['invitation-vdi.en', 'invitation-vdi.fr', 'summary.en', 'summary.fr']);
     for (const t of body.templates) {
       expect(t.subject.length).toBeGreaterThan(0);
       expect(t.html).toContain('<!doctype html>');
+      expect(t.overridden).toBe(false);
     }
   });
 
-  test('send: validation + unconfigured sender → 400, no network call', async () => {
-    const db = freshDb();
-    const r = router(db);
-    const post = (body: unknown) =>
-      r.request('/email-send', {
-        method: 'POST',
-        headers: { ...AUTH, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+  test('roster: seats assigned lowest-free-first, duplicates skipped, delete frees the seat', async () => {
+    const { r } = emailRouter(freshDb());
+    let res = await addRoster(r, ['a@x.co', 'b@x.co', 'c@x.co', 'a@x.co']);
+    expect(res.status).toBe(200);
+    let body = (await res.json()) as {
+      added: number; skipped: number;
+      entries: Array<{ id: number; seat: number; email: string }>;
+    };
+    expect(body.added).toBe(3);
+    expect(body.skipped).toBe(1);
+    expect(body.entries.map((e) => e.seat)).toEqual([1, 2, 3]);
 
-    expect((await post({ recipients: [], subject: 's', html: 'h' })).status).toBe(400);
-    expect((await post({ recipients: ['nope'], subject: 's', html: 'h' })).status).toBe(400);
-    expect((await post({ recipients: ['a@b.co'], subject: '', html: 'h' })).status).toBe(400);
-    expect((await post({ recipients: ['a@b.co'], subject: 's', html: '' })).status).toBe(400);
+    const bId = body.entries.find((e) => e.email === 'b@x.co')!.id;
+    res = await r.request(`/email-roster/${bId}`, { method: 'DELETE', headers: AUTH });
+    expect(res.status).toBe(200);
+
+    res = await addRoster(r, ['d@x.co']);
+    body = (await res.json()) as typeof body;
+    // d takes the freed seat 2, not seat 4.
+    expect(body.entries.find((e) => e.email === 'd@x.co')!.seat).toBe(2);
+  });
+
+  test('send pending-only: late addition only emails the newcomer; rows = explicit resend; test marks nobody', async () => {
+    const db = freshDb();
+    const { r, calls } = emailRouter(db);
+    await wireSender(r);
+    await addRoster(r, ['a@x.co', 'b@x.co']);
+
+    // First batch reaches both, with per-seat {ID} + {CLUSTER} substituted.
+    let res = await r.request('/email-send', { method: 'POST', headers: JSON_AUTH, body: sendBody() });
+    expect(res.status).toBe(200);
+    let report = (await res.json()) as { sent: number; failed: number; results: Array<{ seat: number }> };
+    expect(report.sent).toBe(2);
+    expect(calls.map((c) => c.html)).toEqual([
+      '<b>agent 01 on DM3-POC004</b>',
+      '<b>agent 02 on DM3-POC004</b>',
+    ]);
+
+    // Late addition: a second pending send only reaches the newcomer.
+    await addRoster(r, ['c@x.co']);
+    calls.length = 0;
+    res = await r.request('/email-send', { method: 'POST', headers: JSON_AUTH, body: sendBody() });
+    report = (await res.json()) as typeof report;
+    expect(report.sent).toBe(1);
+    expect(calls.map((c) => c.to)).toEqual(['c@x.co']);
+
+    // Everyone served → pending send has nothing to do.
+    calls.length = 0;
+    res = await r.request('/email-send', { method: 'POST', headers: JSON_AUTH, body: sendBody() });
+    report = (await res.json()) as typeof report;
+    expect(report.sent).toBe(0);
+    expect(calls.length).toBe(0);
+
+    // Explicit per-row resend still works.
+    const roster = (await (await r.request('/email-roster', { headers: AUTH })).json()) as {
+      entries: Array<{ id: number; email: string; sent: Record<string, number> }>;
+    };
+    const a = roster.entries.find((e) => e.email === 'a@x.co')!;
+    expect(a.sent['invitation-vdi']).toBeGreaterThan(0);
+    res = await r.request('/email-send', {
+      method: 'POST', headers: JSON_AUTH, body: sendBody({ mode: 'rows', rosterIds: [a.id] }),
+    });
+    report = (await res.json()) as typeof report;
+    expect(report.sent).toBe(1);
+    expect(calls.map((c) => c.to)).toEqual(['a@x.co']);
+
+    // Test mode targets the given address and marks nobody.
+    calls.length = 0;
+    res = await r.request('/email-send', {
+      method: 'POST', headers: JSON_AUTH, body: sendBody({ mode: 'test', testAddress: 'op@x.co' }),
+    });
+    expect(((await res.json()) as { sent: number }).sent).toBe(1);
+    expect(calls.map((c) => c.to)).toEqual(['op@x.co']);
+    const after = (await (await r.request('/email-roster', { headers: AUTH })).json()) as {
+      entries: Array<{ sent: Record<string, number> }>;
+    };
+    // summary family untouched everywhere; op@x.co not added to the roster.
+    expect(after.entries).toHaveLength(3);
+    expect(after.entries.every((e) => e.sent['summary'] === undefined)).toBe(true);
+  });
+
+  test('failed sends stay pending (no markSent)', async () => {
+    const db = freshDb();
+    const { r, calls } = emailRouter(db, { ok: false, error: 'HTTP 401' });
+    await wireSender(r);
+    await addRoster(r, ['a@x.co']);
+    let res = await r.request('/email-send', { method: 'POST', headers: JSON_AUTH, body: sendBody() });
+    const report = (await res.json()) as { ok: boolean; sent: number; failed: number };
+    expect(report.ok).toBe(false);
+    expect(report.failed).toBe(1);
+    expect(calls.length).toBe(1);
+    // Still pending: a retry targets them again.
+    res = await r.request('/email-send', { method: 'POST', headers: JSON_AUTH, body: sendBody() });
+    expect(((await res.json()) as { failed: number }).failed).toBe(1);
+  });
+
+  test('sending an edited draft persists it as the deployment template; matching default clears it', async () => {
+    const db = freshDb();
+    const { r } = emailRouter(db);
+    await wireSender(r);
+    await addRoster(r, ['a@x.co']);
+    await r.request('/email-send', { method: 'POST', headers: JSON_AUTH, body: sendBody() });
+
+    let tpl = (await (await r.request('/email-templates', { headers: AUTH })).json()) as {
+      templates: Array<{ id: string; locale: string; html: string; overridden: boolean }>;
+    };
+    const edited = tpl.templates.find((t) => t.id === 'invitation-vdi' && t.locale === 'en')!;
+    expect(edited.overridden).toBe(true);
+    expect(edited.html).toBe('<b>agent {ID} on {CLUSTER}</b>');
+
+    // Reset restores the bundled default.
+    const res = await r.request('/email-templates/invitation-vdi/en', {
+      method: 'DELETE', headers: AUTH,
+    });
+    expect(res.status).toBe(200);
+    tpl = (await (await r.request('/email-templates', { headers: AUTH })).json()) as typeof tpl;
+    const restored = tpl.templates.find((t) => t.id === 'invitation-vdi' && t.locale === 'en')!;
+    expect(restored.overridden).toBe(false);
+    expect(restored.html).toContain('<!doctype html>');
+  });
+
+  test('send validation: bad template, empty subject/html, unconfigured sender', async () => {
+    const { r } = emailRouter(freshDb());
+    const post = (body: string) =>
+      r.request('/email-send', { method: 'POST', headers: JSON_AUTH, body });
+    expect((await post(sendBody({ templateId: 'nope' }))).status).toBe(400);
+    expect((await post(sendBody({ subject: '' }))).status).toBe(400);
+    expect((await post(sendBody({ html: '' }))).status).toBe(400);
+    expect((await post(sendBody({ mode: 'weird' }))).status).toBe(400);
     // Valid payload but no token/from configured → 400 before any send.
-    const res = await post({ recipients: ['a@b.co'], subject: 's', html: 'h' });
+    const res = await post(sendBody());
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toContain('not configured');
   });
 
   test('without admin header → 401 on every email endpoint', async () => {
-    const r = router(freshDb());
+    const { r } = emailRouter(freshDb());
     expect((await r.request('/email-config')).status).toBe(401);
     expect((await r.request('/email-config', { method: 'PUT' })).status).toBe(401);
     expect((await r.request('/email-templates')).status).toBe(401);
+    expect((await r.request('/email-roster')).status).toBe(401);
+    expect((await r.request('/email-roster', { method: 'POST' })).status).toBe(401);
     expect((await r.request('/email-send', { method: 'POST' })).status).toBe(401);
+    expect((await r.request('/email-domains')).status).toBe(401);
   });
 });

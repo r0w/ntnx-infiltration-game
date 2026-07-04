@@ -14,7 +14,12 @@ import {
   type SoftwareVersionsProbeResult,
 } from '../cluster-status-probe';
 import { consoleLogger } from '../logger';
-import { EMAIL_TEMPLATES, sendMailtrapEmail } from '../email';
+import {
+  EMAIL_TEMPLATES,
+  listMailtrapDomains,
+  sendMailtrapEmail,
+} from '../email';
+import { EmailRosterQueries, type EmailRosterRow } from '../db/queries';
 
 export interface AdminRoutesDeps {
   db: Database;
@@ -44,6 +49,8 @@ export interface AdminRoutesDeps {
    *  `/cluster-status` to build the Prism UI deep-link to the IOps
    *  activation page. May be empty in mock mode. */
   pcEndpoint: string;
+  /** Test seam for /email-send — defaults to the real Mailtrap call. */
+  sendEmail?: typeof sendMailtrapEmail;
 }
 
 export interface AdminClusterStatusPayload {
@@ -56,15 +63,25 @@ export interface AdminEmailConfigPayload {
   mailtrapToken: string;
   fromEmail: string;
   fromName: string;
-  /** Last-sent recipient list, persisted so the operator can reuse it. */
-  recipients: string[];
+  /** Last-used template variable values ({CLUSTER}, {PASSWORD}, …), persisted per deployment. */
+  vars: Record<string, string>;
+}
+
+export interface AdminEmailTemplatePayload {
+  id: string;
+  locale: string;
+  subject: string;
+  html: string;
+  variables: Record<string, string>;
+  /** True when the operator saved a deployment-local edit of this template. */
+  overridden: boolean;
 }
 
 export interface AdminEmailSendPayload {
   ok: boolean;
   sent: number;
   failed: number;
-  results: Array<{ to: string; ok: boolean; error?: string }>;
+  results: Array<{ to: string; seat: number; ok: boolean; error?: string }>;
 }
 
 export interface AdminClusterConfigPayload {
@@ -760,25 +777,32 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   // the /admin Emails tab. Sender identity = a Mailtrap Send API token +
   // a from-address on a domain verified in that Mailtrap account; both
   // persisted in cluster_config so each operator wires their own after
-  // deploy. The recipient list is persisted too, so the morning
-  // invitation list is prefilled for the end-of-day summary.
-  router.get('/email-config', (c) => {
+  // deploy. Recipients live on a seat-numbered roster (email ↔ VDI
+  // account) and each template family is one-shot per participant.
+  const roster = new EmailRosterQueries(deps.db);
+  const sendEmail = deps.sendEmail ?? sendMailtrapEmail;
+  const emailTplKey = (id: string, locale: string) => `email_tpl:${id}.${locale}`;
+  const findTemplate = (id: unknown, locale: unknown) =>
+    EMAIL_TEMPLATES.find((t) => t.id === id && t.locale === locale);
+
+  const emailConfigPayload = (): AdminEmailConfigPayload => {
     const cfg = deps.service.clusterConfig;
-    const payload: AdminEmailConfigPayload = {
+    return {
       mailtrapToken: cfg.get<string>('mailtrap_token') ?? '',
       fromEmail: cfg.get<string>('email_from') ?? '',
       fromName: cfg.get<string>('email_from_name') ?? '',
-      recipients: cfg.get<string[]>('email_recipients') ?? [],
+      vars: cfg.get<Record<string, string>>('email_vars') ?? {},
     };
-    return c.json(payload);
-  });
+  };
+
+  router.get('/email-config', (c) => c.json(emailConfigPayload()));
 
   router.put('/email-config', async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as {
       mailtrapToken?: unknown;
       fromEmail?: unknown;
       fromName?: unknown;
-      recipients?: unknown;
+      vars?: unknown;
     };
     const cfg = deps.service.clusterConfig;
     // Same per-field semantics as /planner-config: string sets, null or
@@ -796,56 +820,121 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     apply(body.mailtrapToken, 'mailtrap_token');
     apply(body.fromEmail, 'email_from');
     apply(body.fromName, 'email_from_name');
-    if (body.recipients !== undefined) {
-      if (body.recipients === null) {
-        cfg.delete('email_recipients');
-      } else if (
-        Array.isArray(body.recipients) &&
-        body.recipients.every((r) => typeof r === 'string')
+    if (body.vars !== undefined) {
+      if (
+        body.vars === null ||
+        typeof body.vars !== 'object' ||
+        Array.isArray(body.vars) ||
+        !Object.values(body.vars).every((v) => typeof v === 'string')
       ) {
-        cfg.set('email_recipients', body.recipients, 'admin');
-      } else {
-        throw new HttpError(400, 'recipients must be an array of strings or null');
+        throw new HttpError(400, 'vars must be an object of strings');
       }
+      cfg.set('email_vars', body.vars, 'admin');
     }
-    const payload: AdminEmailConfigPayload = {
-      mailtrapToken: cfg.get<string>('mailtrap_token') ?? '',
-      fromEmail: cfg.get<string>('email_from') ?? '',
-      fromName: cfg.get<string>('email_from_name') ?? '',
-      recipients: cfg.get<string[]>('email_recipients') ?? [],
-    };
-    return c.json(payload);
+    return c.json(emailConfigPayload());
   });
 
+  // Verified sending domains of the configured token — powers the
+  // "tank@<domain>" from-address suggestion in the UI.
+  router.get('/email-domains', async (c) => {
+    const token = deps.service.clusterConfig.get<string>('mailtrap_token') ?? '';
+    if (!token) throw new HttpError(400, 'Mailtrap token not configured');
+    const r = await listMailtrapDomains(token);
+    return c.json(r);
+  });
+
+  // Effective templates: bundled defaults with the operator's
+  // deployment-local override applied when one was saved.
   router.get('/email-templates', (c) => {
-    return c.json({ templates: EMAIL_TEMPLATES });
+    const cfg = deps.service.clusterConfig;
+    const templates: AdminEmailTemplatePayload[] = EMAIL_TEMPLATES.map((t) => {
+      const ov = cfg.get<{ subject: string; html: string }>(emailTplKey(t.id, t.locale));
+      return {
+        id: t.id,
+        locale: t.locale,
+        subject: ov?.subject ?? t.subject,
+        html: ov?.html ?? t.html,
+        variables: t.variables,
+        overridden: ov !== undefined,
+      };
+    });
+    return c.json({ templates });
+  });
+
+  // Reset a template to its bundled default.
+  router.delete('/email-templates/:id/:locale', (c) => {
+    const { id, locale } = c.req.param();
+    if (!findTemplate(id, locale)) throw new HttpError(404, `unknown template ${id}.${locale}`);
+    deps.service.clusterConfig.delete(emailTplKey(id, locale));
+    return c.json({ ok: true });
+  });
+
+  router.get('/email-roster', (c) => {
+    return c.json({ entries: roster.list() });
+  });
+
+  router.post('/email-roster', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { emails?: unknown };
+    if (
+      !Array.isArray(body.emails) ||
+      body.emails.length === 0 ||
+      !body.emails.every((e) => typeof e === 'string')
+    ) {
+      throw new HttpError(400, 'emails must be a non-empty array of strings');
+    }
+    const cleaned = body.emails.map((e) => e.trim()).filter(Boolean);
+    const invalid = cleaned.filter((e) => !/^\S+@\S+\.\S+$/.test(e));
+    if (invalid.length > 0) {
+      throw new HttpError(400, `invalid email(s): ${invalid.join(', ')}`);
+    }
+    let added = 0;
+    let skipped = 0;
+    for (const e of cleaned) {
+      if (roster.add(e)) added++;
+      else skipped++; // already on the roster
+    }
+    return c.json({ added, skipped, entries: roster.list() });
+  });
+
+  router.delete('/email-roster/:id', (c) => {
+    const id = Number(c.req.param('id'));
+    if (!Number.isInteger(id)) throw new HttpError(400, 'bad roster id');
+    if (!roster.remove(id)) throw new HttpError(404, `roster entry ${id} not found`);
+    return c.json({ ok: true, entries: roster.list() });
   });
 
   router.post('/email-send', async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as {
-      recipients?: unknown;
+      templateId?: unknown;
+      locale?: unknown;
       subject?: unknown;
       html?: unknown;
-      test?: unknown;
+      vars?: unknown;
+      mode?: unknown;
+      rosterIds?: unknown;
+      testAddress?: unknown;
     };
-    if (
-      !Array.isArray(body.recipients) ||
-      body.recipients.length === 0 ||
-      !body.recipients.every((r) => typeof r === 'string')
-    ) {
-      throw new HttpError(400, 'recipients must be a non-empty array of strings');
-    }
-    const recipients = body.recipients.map((r) => r.trim()).filter(Boolean);
-    const invalid = recipients.filter((r) => !/^\S+@\S+\.\S+$/.test(r));
-    if (recipients.length === 0 || invalid.length > 0) {
-      throw new HttpError(400, `invalid recipient(s): ${invalid.join(', ') || '(empty list)'}`);
-    }
+    const template = findTemplate(body.templateId, body.locale);
+    if (!template) throw new HttpError(400, 'unknown templateId/locale');
     if (typeof body.subject !== 'string' || !body.subject.trim()) {
       throw new HttpError(400, 'subject is required');
     }
     if (typeof body.html !== 'string' || !body.html.trim()) {
       throw new HttpError(400, 'html body is required');
     }
+    const vars: Record<string, string> =
+      body.vars && typeof body.vars === 'object' && !Array.isArray(body.vars)
+        ? (Object.fromEntries(
+            Object.entries(body.vars as Record<string, unknown>).filter(
+              ([, v]) => typeof v === 'string',
+            ),
+          ) as Record<string, string>)
+        : {};
+    const mode = body.mode;
+    if (mode !== 'pending' && mode !== 'rows' && mode !== 'test') {
+      throw new HttpError(400, `mode must be pending | rows | test`);
+    }
+
     const cfg = deps.service.clusterConfig;
     const token = cfg.get<string>('mailtrap_token') ?? '';
     const fromEmail = cfg.get<string>('email_from') ?? '';
@@ -853,24 +942,65 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       throw new HttpError(400, 'email sender not configured (Mailtrap token + from address)');
     }
     const fromName = cfg.get<string>('email_from_name') ?? '';
-    const isTest = body.test === true;
-    // Sequential on purpose: a handful of recipients, and Mailtrap
-    // rate-limits burst sends on free plans.
-    const results: Array<{ to: string; ok: boolean; error?: string }> = [];
-    for (let i = 0; i < recipients.length; i++) {
-      const to = recipients[i];
-      // Legacy {ID} placeholder = 1-based position in the list, zero-padded
-      // (the old escape-game used it for per-participant VDI accounts).
-      const html = body.html.split('{ID}').join(String(i + 1).padStart(2, '0'));
-      const r = await sendMailtrapEmail({ token, fromEmail, fromName, to, subject: body.subject, html });
-      results.push({ to, ok: r.ok, ...(r.error ? { error: r.error } : {}) });
+
+    // Resolve targets. `pending` = roster entries this template family
+    // never reached (the one-shot guarantee); `rows` = explicit resend.
+    let targets: Array<Pick<EmailRosterRow, 'seat' | 'email'> & { id?: number }>;
+    if (mode === 'test') {
+      const addr = typeof body.testAddress === 'string' ? body.testAddress.trim() : '';
+      if (!/^\S+@\S+\.\S+$/.test(addr)) throw new HttpError(400, 'testAddress must be an email');
+      targets = [{ seat: 1, email: addr }];
+    } else if (mode === 'rows') {
+      const ids = Array.isArray(body.rosterIds)
+        ? body.rosterIds.filter((n): n is number => Number.isInteger(n))
+        : [];
+      if (ids.length === 0) throw new HttpError(400, 'rosterIds required for mode=rows');
+      targets = roster.byIds(ids);
+      if (targets.length === 0) throw new HttpError(404, 'no matching roster entries');
+    } else {
+      targets = roster.pendingFor(template.id);
     }
-    if (!isTest) cfg.set('email_recipients', recipients, 'admin');
+
+    // Operator {VARS} first, then the per-recipient {ID} (= VDI seat).
+    let base = body.html;
+    let subject = body.subject.trim();
+    for (const [k, v] of Object.entries(vars)) {
+      if (!v.trim()) continue;
+      base = base.split(`{${k}}`).join(v.trim());
+      subject = subject.split(`{${k}}`).join(v.trim());
+    }
+
+    // Sequential on purpose: a roomful of recipients at most, and
+    // Mailtrap rate-limits burst sends on free plans.
+    const results: AdminEmailSendPayload['results'] = [];
+    for (const t of targets) {
+      const html = base.split('{ID}').join(String(t.seat).padStart(2, '0'));
+      const r = await sendEmail({ token, fromEmail, fromName, to: t.email, subject, html });
+      results.push({ to: t.email, seat: t.seat, ok: r.ok, ...(r.error ? { error: r.error } : {}) });
+      if (r.ok && mode !== 'test' && t.id !== undefined) roster.markSent(t.id, template.id);
+    }
+
+    if (mode !== 'test') {
+      // The edited draft becomes this deployment's template for the next
+      // sends; a draft matching the bundled default clears any override.
+      if (body.html !== template.html || body.subject.trim() !== template.subject) {
+        cfg.set(
+          emailTplKey(template.id, template.locale),
+          { subject: body.subject.trim(), html: body.html },
+          'admin',
+        );
+      } else {
+        cfg.delete(emailTplKey(template.id, template.locale));
+      }
+      cfg.set('email_vars', vars, 'admin');
+    }
+
     const failed = results.filter((r) => !r.ok).length;
     consoleLogger.info('participant emails sent via admin', {
-      count: recipients.length,
+      template: `${template.id}.${template.locale}`,
+      mode,
+      count: results.length,
       failed,
-      test: isTest,
     });
     const payload: AdminEmailSendPayload = {
       ok: failed === 0,
