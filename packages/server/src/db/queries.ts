@@ -1001,7 +1001,7 @@ export interface EmailRosterRow {
  * Participant roster for the /admin Emails tab. Seat = the participant's
  * VDI account number ({ID} in templates), assigned lowest-free-first so a
  * deleted participant frees their account for the next addition. Sends
- * are one-shot per (participant, template family) — "pending" targeting
+ * are one-shot per (participant, template type) — "pending" targeting
  * means adding someone late never re-emails the room.
  */
 export class EmailRosterQueries {

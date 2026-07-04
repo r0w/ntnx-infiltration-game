@@ -1073,7 +1073,7 @@ describe('email participant routes', () => {
     expect(after.fromName).toBe('');
   });
 
-  test('templates: 2 ids x 2 locales, defaults not overridden', async () => {
+  test('templates: 2 ids x 3 locales, defaults not overridden', async () => {
     const { r } = emailRouter(freshDb());
     const res = await r.request('/email-templates', { headers: AUTH });
     expect(res.status).toBe(200);
@@ -1081,7 +1081,10 @@ describe('email participant routes', () => {
       templates: Array<{ id: string; locale: string; subject: string; html: string; overridden: boolean }>;
     };
     const keys = body.templates.map((t) => `${t.id}.${t.locale}`).sort();
-    expect(keys).toEqual(['invitation-vdi.en', 'invitation-vdi.fr', 'summary.en', 'summary.fr']);
+    expect(keys).toEqual([
+      'invitation-vdi.de', 'invitation-vdi.en', 'invitation-vdi.fr',
+      'summary.de', 'summary.en', 'summary.fr',
+    ]);
     for (const t of body.templates) {
       expect(t.subject.length).toBeGreaterThan(0);
       expect(t.html).toContain('<!doctype html>');

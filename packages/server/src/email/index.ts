@@ -5,17 +5,21 @@
 // runtime (and bundler) hand us the raw string — hence the casts.
 import invitationVdiEnRaw from './templates/invitation-vdi.en.html' with { type: 'text' };
 import invitationVdiFrRaw from './templates/invitation-vdi.fr.html' with { type: 'text' };
+import invitationVdiDeRaw from './templates/invitation-vdi.de.html' with { type: 'text' };
 import summaryEnRaw from './templates/summary.en.html' with { type: 'text' };
 import summaryFrRaw from './templates/summary.fr.html' with { type: 'text' };
+import summaryDeRaw from './templates/summary.de.html' with { type: 'text' };
 
 const invitationVdiEn = invitationVdiEnRaw as unknown as string;
 const invitationVdiFr = invitationVdiFrRaw as unknown as string;
+const invitationVdiDe = invitationVdiDeRaw as unknown as string;
 const summaryEn = summaryEnRaw as unknown as string;
 const summaryFr = summaryFrRaw as unknown as string;
+const summaryDe = summaryDeRaw as unknown as string;
 
 export interface EmailTemplate {
   id: 'invitation-vdi' | 'summary';
-  locale: 'en' | 'fr';
+  locale: 'en' | 'fr' | 'de';
   /** Default subject line — editable in the composer before sending. */
   subject: string;
   html: string;
@@ -38,38 +42,58 @@ const DEFAULT_PARALLEL_URL = Buffer.from(
   'base64',
 ).toString();
 
+const INVITATION_VARS = {
+  GAME_URL: '',
+  PARALLEL_URL: DEFAULT_PARALLEL_URL,
+  CLUSTER: '',
+  PASSWORD: '',
+};
+
 export const EMAIL_TEMPLATES: EmailTemplate[] = [
   {
     id: 'invitation-vdi',
     locale: 'en',
-    subject: 'Nutanix Cloud Operations Command Center - Mission Briefing',
+    subject: '[CLASSIFIED] Operation Infiltration: Mission Briefing',
     html: invitationVdiEn,
-    variables: { GAME_URL: '', PARALLEL_URL: DEFAULT_PARALLEL_URL, CLUSTER: '', PASSWORD: '' },
+    variables: { ...INVITATION_VARS },
   },
   {
     id: 'invitation-vdi',
     locale: 'fr',
-    subject: 'Nutanix Cloud Operations Command Center - Briefing de Mission',
+    subject: '[CONFIDENTIEL] Opération Infiltration : Briefing de Mission',
     html: invitationVdiFr,
-    variables: { GAME_URL: '', PARALLEL_URL: DEFAULT_PARALLEL_URL, CLUSTER: '', PASSWORD: '' },
+    variables: { ...INVITATION_VARS },
+  },
+  {
+    id: 'invitation-vdi',
+    locale: 'de',
+    subject: '[STRENG GEHEIM] Operation Infiltration: Missionsbriefing',
+    html: invitationVdiDe,
+    variables: { ...INVITATION_VARS },
   },
   {
     id: 'summary',
     locale: 'en',
-    subject: 'Nutanix Cloud Operations Command Center - Lab Summary',
+    subject: '[DEBRIEF] Operation Infiltration: Mission Accomplished',
     html: summaryEn,
     variables: { SURVEY_URL: LEGACY_SURVEY_URL },
   },
   {
     id: 'summary',
     locale: 'fr',
-    subject: 'Nutanix Cloud Operations Command Center - Résumé du Lab',
+    subject: '[DEBRIEF] Opération Infiltration : Mission Accomplie',
     html: summaryFr,
+    variables: { SURVEY_URL: LEGACY_SURVEY_URL },
+  },
+  {
+    id: 'summary',
+    locale: 'de',
+    subject: '[DEBRIEF] Operation Infiltration: Mission erfüllt',
+    html: summaryDe,
     variables: { SURVEY_URL: LEGACY_SURVEY_URL },
   },
 ];
 
-export const EMAIL_TEMPLATE_IDS = ['invitation-vdi', 'summary'] as const;
 
 export interface MailtrapSendArgs {
   token: string;
@@ -164,9 +188,16 @@ export async function listMailtrapDomains(
       });
       if (!dRes.ok) continue;
       const body = (await dRes.json()) as {
-        data?: Array<{ domain_name: string; dns_records?: Array<{ status: string }> }>;
+        data?: Array<{
+          domain_name: string;
+          demo?: boolean;
+          dns_records?: Array<{ status: string }>;
+        }>;
       };
       for (const d of body.data ?? []) {
+        // demomailtrap.co & co: Mailtrap's sandbox domains only deliver to
+        // the account owner — useless for real participant sends.
+        if (d.demo) continue;
         domains.push({
           domain: d.domain_name,
           verified: (d.dns_records ?? []).every((r) => r.status === 'pass'),

@@ -579,7 +579,7 @@ export interface AdminEmailConfigPayload {
 
 export interface AdminEmailTemplate {
   id: 'invitation-vdi' | 'summary';
-  locale: 'en' | 'fr';
+  locale: 'en' | 'fr' | 'de';
   subject: string;
   html: string;
   variables: Record<string, string>;

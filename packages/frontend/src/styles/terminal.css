@@ -1839,7 +1839,12 @@ a.terminal-link:visited {
 }
 .admin-emails-format-btn:hover { border-color: var(--accent); }
 .admin-emails-format-hint { font-size: 11px; margin-left: 8px; }
-.admin-emails-editframe { background: #0b0f1a; margin-top: 10px; }
+.admin-emails-studio {
+  margin-top: 10px;
+  border: 1px solid #1b232b;
+  border-radius: 4px;
+  overflow: hidden;
+}
 .admin-emails-editor { margin-top: 10px; width: 100%; }
 .admin-emails-preview { margin-top: 10px; }
 .admin-emails-roster-table { margin-top: 12px; }

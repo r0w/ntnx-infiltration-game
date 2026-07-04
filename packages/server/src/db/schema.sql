@@ -174,7 +174,7 @@ CREATE TABLE IF NOT EXISTS email_roster (
   added_at INTEGER NOT NULL
 );
 
--- One row per (participant, template family) successful delivery. Sending
+-- One row per (participant, template type) successful delivery. Sending
 -- a template targets roster entries with no row here ("pending"), so
 -- adding a late participant never re-emails the rest of the room. Resend
 -- just refreshes sent_at.

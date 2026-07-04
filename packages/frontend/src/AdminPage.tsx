@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   api,
@@ -17,6 +17,9 @@ import {
   type AdminUserEntry,
 } from './api';
 import { ConfirmModal, Modal } from './Modal';
+
+// GrapesJS studio — lazy so the ~1MB editor only loads when the Emails tab shows it.
+const EmailStudio = lazy(() => import('./EmailStudio'));
 import { VersionFooter } from './VersionFooter';
 
 type AdminTab = 'users' | 'logs' | 'pack' | 'cluster' | 'emails' | 'scoreboard';
@@ -1832,7 +1835,7 @@ function PlannerConfigEditor({ password }: { password: string }) {
  *   domain verified in that account; the server lists the account's
  *   verified domains to suggest one. Persisted server-side.
  * - Recipients live on a seat-numbered roster (email ↔ VDI account
- *   <CLUSTER>-User<seat>); each template family is one-shot per
+ *   <CLUSTER>-User<seat>); each template type is one-shot per
  *   participant, so adding someone late only emails them. Per-row
  *   resend + delete.
  * - The body is edited in place in the rendered email (iframe in
@@ -1871,7 +1874,8 @@ function EmailsTab({ password }: { password: string }) {
   const [html, setHtml] = useState('');
   const [vars, setVars] = useState<Record<string, string>>({});
   const [viewMode, setViewMode] = useState<'edit' | 'source' | 'preview'>('edit');
-  const editFrameRef = useRef<HTMLIFrameElement | null>(null);
+  // Bumped on every template (re)load so the studio remounts with the fresh draft.
+  const [studioNonce, setStudioNonce] = useState(0);
 
   // Roster.
   const [roster, setRoster] = useState<AdminEmailRosterEntry[] | null>(null);
@@ -1973,44 +1977,11 @@ function EmailsTab({ password }: { password: string }) {
         resolved.PASSWORD = resolved.CLUSTER ?? '';
       }
       setVars(resolved);
+      setStudioNonce((n) => n + 1);
       setSendReport(null);
     },
     [],
   );
-
-  // ── WYSIWYG surface ──────────────────────────────────────────────────
-  // The edit iframe shows the RAW template ({VARS} visible) in designMode
-  // so serializing it back never bakes substituted values into the draft.
-  // It is (re)written only when the template or view changes — not on
-  // every keystroke, which would destroy the cursor.
-  const syncFromFrame = useCallback(() => {
-    const doc = editFrameRef.current?.contentDocument;
-    if (!doc) return;
-    setHtml('<!doctype html>\n' + doc.documentElement.outerHTML);
-  }, []);
-
-  useEffect(() => {
-    if (viewMode !== 'edit') return;
-    const doc = editFrameRef.current?.contentDocument;
-    if (!doc) return;
-    doc.open();
-    doc.write(html);
-    doc.close();
-    doc.designMode = 'on';
-    const onInput = () => syncFromFrame();
-    doc.addEventListener('input', onInput);
-    return () => doc.removeEventListener('input', onInput);
-    // `html` intentionally absent: the frame is the source of truth while
-    // editing; re-writing it on each sync would reset the caret.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, selKey]);
-
-  const execFormat = (cmd: string) => {
-    const doc = editFrameRef.current?.contentDocument;
-    if (!doc) return;
-    doc.execCommand(cmd);
-    syncFromFrame();
-  };
 
   // Operator-filled {VARS} substituted for the preview; {ID} shows the
   // first seat. Empty values leave the token visible on purpose.
@@ -2041,9 +2012,24 @@ function EmailsTab({ password }: { password: string }) {
       fromEmail.trim() !== savedCfg.fromEmail ||
       fromName.trim() !== savedCfg.fromName);
   const draftReady = selTemplate !== null && subject.trim() !== '' && html.trim() !== '';
-  const pending = selTemplate
-    ? (roster ?? []).filter((r) => r.sent[selTemplate.id] === undefined)
-    : [];
+  const pendingFor = (tplType: string) =>
+    (roster ?? []).filter((r) => r.sent[tplType] === undefined);
+  const pending = selTemplate ? pendingFor(selTemplate.id) : [];
+
+  // Per-type send button in the roster header. If the composer holds a
+  // different type, load that type's template first (keeping the
+  // current locale) so the confirm modal always shows what goes out.
+  const requestSend = (tplType: 'invitation-vdi' | 'summary') => {
+    if (selTemplate?.id !== tplType) {
+      const locale = selTemplate?.locale ?? 'en';
+      const t =
+        templates?.find((t) => t.id === tplType && t.locale === locale) ??
+        templates?.find((t) => t.id === tplType);
+      if (!t) return;
+      applyTemplate(`${t.id}.${t.locale}`, templates ?? [], savedVars, clusterName);
+    }
+    setConfirmSend(true);
+  };
   const verifiedDomains = (domains ?? []).filter((d) => d.verified);
 
   const addToRoster = async () => {
@@ -2290,8 +2276,31 @@ function EmailsTab({ password }: { password: string }) {
                 <tr>
                   <th>seat</th>
                   <th>email</th>
-                  <th>invitation</th>
-                  <th>summary</th>
+                  {(['invitation-vdi', 'summary'] as const).map((tplType) => {
+                    const count = pendingFor(tplType).length;
+                    return (
+                      <th key={tplType}>
+                        {TEMPLATE_LABELS[tplType]}
+                        <button
+                          type="button"
+                          className="admin-planner-reveal"
+                          disabled={busy !== null || !canSend || count === 0}
+                          onClick={() => requestSend(tplType)}
+                          title={
+                            !canSend
+                              ? wired
+                                ? 'Mailtrap rejected the token'
+                                : 'configure the sender identity first'
+                              : count === 0
+                                ? `everyone already received the ${TEMPLATE_LABELS[tplType]}`
+                                : `send the ${TEMPLATE_LABELS[tplType]} to the ${count} participant(s) who did not get it yet`
+                          }
+                        >
+                          send to {count}
+                        </button>
+                      </th>
+                    );
+                  })}
                   <th></th>
                 </tr>
               </thead>
@@ -2300,16 +2309,16 @@ function EmailsTab({ password }: { password: string }) {
                   <tr key={r.id}>
                     <td className="admin-emails-seat">{String(r.seat).padStart(2, '0')}</td>
                     <td>{r.email}</td>
-                    {(['invitation-vdi', 'summary'] as const).map((fam) => (
-                      <td key={fam}>
-                        {r.sent[fam] ? (
-                          <span className="c-green" title={new Date(r.sent[fam]).toLocaleString()}>
-                            ✓ {fmtAge(r.sent[fam])}
+                    {(['invitation-vdi', 'summary'] as const).map((tplType) => (
+                      <td key={tplType}>
+                        {r.sent[tplType] ? (
+                          <span className="c-green" title={new Date(r.sent[tplType]).toLocaleString()}>
+                            ✓ {fmtAge(r.sent[tplType])}
                           </span>
                         ) : (
                           <span className="c-dim">—</span>
                         )}
-                        {selTemplate?.id === fam && r.sent[fam] !== undefined && (
+                        {selTemplate?.id === tplType && r.sent[tplType] !== undefined && (
                           <button
                             type="button"
                             className="admin-planner-reveal"
@@ -2342,34 +2351,6 @@ function EmailsTab({ password }: { password: string }) {
           <p className="c-dim admin-emails-warn">roster is empty — add participants above.</p>
         )}
         <div className="admin-emails-grid admin-emails-sendrow">
-          <div className="admin-cluster-section">
-            <label className="admin-cluster-label">Send</label>
-            <div className="admin-cluster-actions">
-              <button
-                type="button"
-                className="modal-btn modal-btn-danger"
-                disabled={busy !== null || !canSend || !draftReady || pending.length === 0}
-                onClick={() => setConfirmSend(true)}
-                title={
-                  !canSend
-                    ? wired
-                      ? 'Mailtrap rejected the token'
-                      : 'configure the sender identity first'
-                    : !draftReady
-                      ? 'pick a template first'
-                      : pending.length === 0
-                        ? 'everyone already received this template'
-                        : undefined
-                }
-              >
-                {busy === 'send'
-                  ? 'sending…'
-                  : selTemplate
-                    ? `send ${TEMPLATE_LABELS[selTemplate.id] ?? selTemplate.id} to ${pending.length} pending`
-                    : 'send'}
-              </button>
-            </div>
-          </div>
           <div className="admin-cluster-section">
             <label className="admin-cluster-label">Dry run</label>
             <div className="admin-emails-test-row">
@@ -2481,49 +2462,6 @@ function EmailsTab({ password }: { password: string }) {
                   </button>
                 ))}
               </div>
-              {viewMode === 'edit' && (
-                <div className="admin-emails-format">
-                  <button
-                    type="button"
-                    className="admin-emails-format-btn"
-                    title="bold"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => execFormat('bold')}
-                  >
-                    <strong>B</strong>
-                  </button>
-                  <button
-                    type="button"
-                    className="admin-emails-format-btn"
-                    title="italic"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => execFormat('italic')}
-                  >
-                    <em>I</em>
-                  </button>
-                  <button
-                    type="button"
-                    className="admin-emails-format-btn"
-                    title="underline"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => execFormat('underline')}
-                  >
-                    <u>U</u>
-                  </button>
-                  <button
-                    type="button"
-                    className="admin-emails-format-btn"
-                    title="clear formatting"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => execFormat('removeFormat')}
-                  >
-                    ⌫
-                  </button>
-                  <span className="c-dim admin-emails-format-hint">
-                    click into the email to edit · {'{VARS}'} stay as tokens here
-                  </span>
-                </div>
-              )}
               {selTemplate.overridden && (
                 <button
                   type="button"
@@ -2537,14 +2475,11 @@ function EmailsTab({ password }: { password: string }) {
               )}
             </div>
             {viewMode === 'edit' && (
-              // Distinct `key`s: without them React reuses the same <iframe>
-              // node across modes and the srcdoc/doc.write contents clash.
-              <iframe
-                key="edit"
-                ref={editFrameRef}
-                className="admin-emails-preview admin-emails-editframe"
-                title="email editor"
-              />
+              <Suspense
+                fallback={<p className="c-dim admin-emails-warn">loading editor…</p>}
+              >
+                <EmailStudio key={`${selKey}:${studioNonce}`} html={html} onChange={setHtml} />
+              </Suspense>
             )}
             {viewMode === 'source' && (
               <textarea

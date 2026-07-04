@@ -783,7 +783,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   // a from-address on a domain verified in that Mailtrap account; both
   // persisted in cluster_config so each operator wires their own after
   // deploy. Recipients live on a seat-numbered roster (email ↔ VDI
-  // account) and each template family is one-shot per participant.
+  // account) and each template type is one-shot per participant.
   const roster = new EmailRosterQueries(deps.db);
   const sendEmail = deps.sendEmail ?? sendMailtrapEmail;
   const emailTplKey = (id: string, locale: string) => `email_tpl:${id}.${locale}`;
@@ -958,7 +958,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     }
     const fromName = cfg.get<string>('email_from_name') ?? '';
 
-    // Resolve targets. `pending` = roster entries this template family
+    // Resolve targets. `pending` = roster entries this template type
     // never reached (the one-shot guarantee); `rows` = explicit resend.
     let targets: Array<Pick<EmailRosterRow, 'seat' | 'email'> & { id?: number }>;
     if (mode === 'test') {
