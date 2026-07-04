@@ -15,6 +15,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- New `/admin` Emails tab: send the mission invitation or lab-summary email to participants (en/fr templates, editable HTML with live preview, per-recipient results, Mailtrap sender config).
 - The `/admin` Cluster tab shows the software versions the cluster actually runs (PC, AOS, Files, …).
 - Operator QoL: `/admin` shows each player's last failed check, plus a Logs tab of all attempts.
 - Admin footer showing the running version, branch, and commit, with a changelog

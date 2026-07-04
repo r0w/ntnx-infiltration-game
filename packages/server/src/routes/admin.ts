@@ -14,6 +14,7 @@ import {
   type SoftwareVersionsProbeResult,
 } from '../cluster-status-probe';
 import { consoleLogger } from '../logger';
+import { EMAIL_TEMPLATES, sendMailtrapEmail } from '../email';
 
 export interface AdminRoutesDeps {
   db: Database;
@@ -50,6 +51,21 @@ export interface AdminClusterStatusPayload {
 }
 
 export type AdminClusterVersionsPayload = SoftwareVersionsProbeResult;
+
+export interface AdminEmailConfigPayload {
+  mailtrapToken: string;
+  fromEmail: string;
+  fromName: string;
+  /** Last-sent recipient list, persisted so the operator can reuse it. */
+  recipients: string[];
+}
+
+export interface AdminEmailSendPayload {
+  ok: boolean;
+  sent: number;
+  failed: number;
+  results: Array<{ to: string; ok: boolean; error?: string }>;
+}
 
 export interface AdminClusterConfigPayload {
   discoverableNodeSerials: string[];
@@ -737,6 +753,132 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       oldPcUsername: cfg.get<string>('old_pc_username') ?? '',
       oldPcPassword: cfg.get<string>('old_pc_password') ?? '',
     });
+  });
+
+  // ─── Participant emails (issue #30) ──────────────────────────────────
+  // Operator-sent invitations / lab summaries, composed and fired from
+  // the /admin Emails tab. Sender identity = a Mailtrap Send API token +
+  // a from-address on a domain verified in that Mailtrap account; both
+  // persisted in cluster_config so each operator wires their own after
+  // deploy. The recipient list is persisted too, so the morning
+  // invitation list is prefilled for the end-of-day summary.
+  router.get('/email-config', (c) => {
+    const cfg = deps.service.clusterConfig;
+    const payload: AdminEmailConfigPayload = {
+      mailtrapToken: cfg.get<string>('mailtrap_token') ?? '',
+      fromEmail: cfg.get<string>('email_from') ?? '',
+      fromName: cfg.get<string>('email_from_name') ?? '',
+      recipients: cfg.get<string[]>('email_recipients') ?? [],
+    };
+    return c.json(payload);
+  });
+
+  router.put('/email-config', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      mailtrapToken?: unknown;
+      fromEmail?: unknown;
+      fromName?: unknown;
+      recipients?: unknown;
+    };
+    const cfg = deps.service.clusterConfig;
+    // Same per-field semantics as /planner-config: string sets, null or
+    // empty string clears, missing key leaves the stored value untouched.
+    const apply = (incoming: unknown, key: string) => {
+      if (incoming === undefined) return;
+      if (incoming === null || (typeof incoming === 'string' && incoming.trim() === '')) {
+        cfg.delete(key);
+      } else if (typeof incoming === 'string') {
+        cfg.set(key, incoming.trim(), 'admin');
+      } else {
+        throw new HttpError(400, `${key} must be a string or null`);
+      }
+    };
+    apply(body.mailtrapToken, 'mailtrap_token');
+    apply(body.fromEmail, 'email_from');
+    apply(body.fromName, 'email_from_name');
+    if (body.recipients !== undefined) {
+      if (body.recipients === null) {
+        cfg.delete('email_recipients');
+      } else if (
+        Array.isArray(body.recipients) &&
+        body.recipients.every((r) => typeof r === 'string')
+      ) {
+        cfg.set('email_recipients', body.recipients, 'admin');
+      } else {
+        throw new HttpError(400, 'recipients must be an array of strings or null');
+      }
+    }
+    const payload: AdminEmailConfigPayload = {
+      mailtrapToken: cfg.get<string>('mailtrap_token') ?? '',
+      fromEmail: cfg.get<string>('email_from') ?? '',
+      fromName: cfg.get<string>('email_from_name') ?? '',
+      recipients: cfg.get<string[]>('email_recipients') ?? [],
+    };
+    return c.json(payload);
+  });
+
+  router.get('/email-templates', (c) => {
+    return c.json({ templates: EMAIL_TEMPLATES });
+  });
+
+  router.post('/email-send', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      recipients?: unknown;
+      subject?: unknown;
+      html?: unknown;
+      test?: unknown;
+    };
+    if (
+      !Array.isArray(body.recipients) ||
+      body.recipients.length === 0 ||
+      !body.recipients.every((r) => typeof r === 'string')
+    ) {
+      throw new HttpError(400, 'recipients must be a non-empty array of strings');
+    }
+    const recipients = body.recipients.map((r) => r.trim()).filter(Boolean);
+    const invalid = recipients.filter((r) => !/^\S+@\S+\.\S+$/.test(r));
+    if (recipients.length === 0 || invalid.length > 0) {
+      throw new HttpError(400, `invalid recipient(s): ${invalid.join(', ') || '(empty list)'}`);
+    }
+    if (typeof body.subject !== 'string' || !body.subject.trim()) {
+      throw new HttpError(400, 'subject is required');
+    }
+    if (typeof body.html !== 'string' || !body.html.trim()) {
+      throw new HttpError(400, 'html body is required');
+    }
+    const cfg = deps.service.clusterConfig;
+    const token = cfg.get<string>('mailtrap_token') ?? '';
+    const fromEmail = cfg.get<string>('email_from') ?? '';
+    if (!token || !fromEmail) {
+      throw new HttpError(400, 'email sender not configured (Mailtrap token + from address)');
+    }
+    const fromName = cfg.get<string>('email_from_name') ?? '';
+    const isTest = body.test === true;
+    // Sequential on purpose: a handful of recipients, and Mailtrap
+    // rate-limits burst sends on free plans.
+    const results: Array<{ to: string; ok: boolean; error?: string }> = [];
+    for (let i = 0; i < recipients.length; i++) {
+      const to = recipients[i];
+      // Legacy {ID} placeholder = 1-based position in the list, zero-padded
+      // (the old escape-game used it for per-participant VDI accounts).
+      const html = body.html.split('{ID}').join(String(i + 1).padStart(2, '0'));
+      const r = await sendMailtrapEmail({ token, fromEmail, fromName, to, subject: body.subject, html });
+      results.push({ to, ok: r.ok, ...(r.error ? { error: r.error } : {}) });
+    }
+    if (!isTest) cfg.set('email_recipients', recipients, 'admin');
+    const failed = results.filter((r) => !r.ok).length;
+    consoleLogger.info('participant emails sent via admin', {
+      count: recipients.length,
+      failed,
+      test: isTest,
+    });
+    const payload: AdminEmailSendPayload = {
+      ok: failed === 0,
+      sent: results.length - failed,
+      failed,
+      results,
+    };
+    return c.json(payload);
   });
 
   // ─── capabilities ───────────────────────────────────────────────────

@@ -1752,6 +1752,60 @@ a.terminal-link:visited {
   margin-top: 6px;
 }
 .admin-peers-add-row .admin-cluster-input { max-width: none; flex: 1 1 auto; }
+/* Emails tab — full-width (HTML editor + rendered preview side by side). */
+.admin-emails {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.admin-emails-config { max-width: 720px; }
+.admin-emails-compose-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
+}
+.admin-emails-compose-row .admin-cluster-input { min-width: 220px; }
+.admin-emails-var-input { max-width: 380px; }
+.admin-emails-subject { margin-top: 12px; }
+.admin-emails-subject-input { max-width: 560px; }
+.admin-emails-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 12px;
+}
+@media (max-width: 980px) {
+  .admin-emails-grid { grid-template-columns: 1fr; }
+}
+.admin-emails-editor {
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  min-height: 480px;
+  white-space: pre;
+}
+.admin-emails-preview {
+  width: 100%;
+  min-height: 480px;
+  border: 1px solid #1b232b;
+  border-radius: 4px;
+  background: #0b0f1a; /* matches the templates' own background */
+}
+.admin-emails-recipients { min-height: 140px; }
+.admin-emails-test-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.admin-emails-test-row .admin-cluster-input { max-width: none; flex: 1 1 auto; }
+.admin-emails-warn { font-size: 12px; margin: 8px 0 0; }
+.admin-emails-report { margin-top: 10px; font-size: 13px; }
+.admin-emails-report-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  max-height: 180px;
+  overflow-y: auto;
+}
 .admin-cluster-iops {
   font-size: 13px;
   display: flex;

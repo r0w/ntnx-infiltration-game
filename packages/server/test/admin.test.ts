@@ -995,3 +995,81 @@ describe('lunch lock (pack-wide pause)', () => {
     expect((await r.request('/lunch/unlock', { method: 'POST' })).status).toBe(401);
   });
 });
+
+describe('email participant routes', () => {
+  const AUTH = { 'X-Admin-Password': ADMIN_PW };
+
+  test('config: empty by default, PUT persists, empty string clears', async () => {
+    const db = freshDb();
+    const r = router(db);
+    let res = await r.request('/email-config', { headers: AUTH });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      mailtrapToken: '', fromEmail: '', fromName: '', recipients: [],
+    });
+
+    res = await r.request('/email-config', {
+      method: 'PUT',
+      headers: { ...AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mailtrapToken: 'tok', fromEmail: 'a@b.co', fromName: 'N', recipients: ['x@y.co'],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const saved = (await res.json()) as { mailtrapToken: string; recipients: string[] };
+    expect(saved.mailtrapToken).toBe('tok');
+    expect(saved.recipients).toEqual(['x@y.co']);
+
+    // Empty string clears, missing key leaves untouched (planner-config semantics).
+    res = await r.request('/email-config', {
+      method: 'PUT',
+      headers: { ...AUTH, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fromName: '' }),
+    });
+    const after = (await res.json()) as { mailtrapToken: string; fromName: string };
+    expect(after.mailtrapToken).toBe('tok');
+    expect(after.fromName).toBe('');
+  });
+
+  test('templates: 2 ids x 2 locales, html + subject non-empty', async () => {
+    const res = await router(freshDb()).request('/email-templates', { headers: AUTH });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      templates: Array<{ id: string; locale: string; subject: string; html: string }>;
+    };
+    const keys = body.templates.map((t) => `${t.id}.${t.locale}`).sort();
+    expect(keys).toEqual(['invitation.en', 'invitation.fr', 'summary.en', 'summary.fr']);
+    for (const t of body.templates) {
+      expect(t.subject.length).toBeGreaterThan(0);
+      expect(t.html).toContain('<!doctype html>');
+    }
+  });
+
+  test('send: validation + unconfigured sender → 400, no network call', async () => {
+    const db = freshDb();
+    const r = router(db);
+    const post = (body: unknown) =>
+      r.request('/email-send', {
+        method: 'POST',
+        headers: { ...AUTH, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+    expect((await post({ recipients: [], subject: 's', html: 'h' })).status).toBe(400);
+    expect((await post({ recipients: ['nope'], subject: 's', html: 'h' })).status).toBe(400);
+    expect((await post({ recipients: ['a@b.co'], subject: '', html: 'h' })).status).toBe(400);
+    expect((await post({ recipients: ['a@b.co'], subject: 's', html: '' })).status).toBe(400);
+    // Valid payload but no token/from configured → 400 before any send.
+    const res = await post({ recipients: ['a@b.co'], subject: 's', html: 'h' });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain('not configured');
+  });
+
+  test('without admin header → 401 on every email endpoint', async () => {
+    const r = router(freshDb());
+    expect((await r.request('/email-config')).status).toBe(401);
+    expect((await r.request('/email-config', { method: 'PUT' })).status).toBe(401);
+    expect((await r.request('/email-templates')).status).toBe(401);
+    expect((await r.request('/email-send', { method: 'POST' })).status).toBe(401);
+  });
+});

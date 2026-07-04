@@ -504,6 +504,28 @@ export const api = {
     adminGet<{ flags: string[] }>('/admin/capabilities', password),
   adminCapabilitiesRefresh: (password: string) =>
     adminPost<AdminCapabilitiesRefreshPayload>('/admin/capabilities/refresh', password),
+  adminEmailConfig: (password: string) =>
+    adminGet<AdminEmailConfigPayload>('/admin/email-config', password),
+  adminEmailConfigSave: (
+    password: string,
+    body: {
+      mailtrapToken?: string | null;
+      fromEmail?: string | null;
+      fromName?: string | null;
+      recipients?: string[] | null;
+    },
+  ) =>
+    fetch('/api/admin/email-config', {
+      method: 'PUT',
+      headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((res) => handle<AdminEmailConfigPayload>(res)),
+  adminEmailTemplates: (password: string) =>
+    adminGet<{ templates: AdminEmailTemplate[] }>('/admin/email-templates', password),
+  adminEmailSend: (
+    password: string,
+    body: { recipients: string[]; subject: string; html: string; test?: boolean },
+  ) => adminPost<AdminEmailSendPayload>('/admin/email-send', password, body),
 };
 
 export interface AdminCapabilitiesRefreshPayload {
@@ -517,6 +539,28 @@ export interface AdminCapabilitiesRefreshPayload {
     transportError?: boolean;
     transportCode?: string;
   }>;
+}
+
+export interface AdminEmailConfigPayload {
+  mailtrapToken: string;
+  fromEmail: string;
+  fromName: string;
+  recipients: string[];
+}
+
+export interface AdminEmailTemplate {
+  id: 'invitation' | 'summary';
+  locale: 'en' | 'fr';
+  subject: string;
+  html: string;
+  variables: Record<string, string>;
+}
+
+export interface AdminEmailSendPayload {
+  ok: boolean;
+  sent: number;
+  failed: number;
+  results: Array<{ to: string; ok: boolean; error?: string }>;
 }
 
 export interface AdminPlannerConfigPayload {

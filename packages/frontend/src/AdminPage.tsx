@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   api,
@@ -6,6 +6,8 @@ import {
   type AdminClusterConfigPayload,
   type AdminClusterStatusPayload,
   type AdminClusterVersionsPayload,
+  type AdminEmailSendPayload,
+  type AdminEmailTemplate,
   type AdminGateEntry,
   type AdminLunchStatus,
   type AdminPackStageEntry,
@@ -16,7 +18,7 @@ import {
 import { ConfirmModal, Modal } from './Modal';
 import { VersionFooter } from './VersionFooter';
 
-type AdminTab = 'users' | 'logs' | 'pack' | 'cluster' | 'scoreboard';
+type AdminTab = 'users' | 'logs' | 'pack' | 'cluster' | 'emails' | 'scoreboard';
 
 const STORAGE_KEY = 'ntnx-infiltration-admin-pw';
 
@@ -120,7 +122,7 @@ function AdminDashboard({
   // the right section. Unknown / missing → users (safe default).
   const navigate = useNavigate();
   const { tab: tabParam } = useParams<{ tab?: string }>();
-  const VALID_TABS = ['users', 'logs', 'pack', 'cluster', 'scoreboard'] as const;
+  const VALID_TABS = ['users', 'logs', 'pack', 'cluster', 'emails', 'scoreboard'] as const;
   const tab: AdminTab = (VALID_TABS as readonly string[]).includes(tabParam ?? '')
     ? (tabParam as AdminTab)
     : 'users';
@@ -453,6 +455,15 @@ function AdminDashboard({
             onClick={() => setTab('cluster')}
           >
             cluster
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'emails'}
+            className={`admin-tab ${tab === 'emails' ? 'admin-tab-active' : ''}`}
+            onClick={() => setTab('emails')}
+          >
+            emails
           </button>
           <button
             type="button"
@@ -810,6 +821,7 @@ function AdminDashboard({
         />
       )}
       {tab === 'cluster' && <ClusterConfigEditor password={password} />}
+      {tab === 'emails' && <EmailsTab password={password} />}
       {tab === 'scoreboard' && <PeersEditor password={password} />}
       {packDisableTarget && (
         <ConfirmModal
@@ -1807,6 +1819,430 @@ function PlannerConfigEditor({ password }: { password: string }) {
           <span className="c-green admin-cluster-saved">saved {fmtAge(savedAt)}</span>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Emails tab — send participant emails (mission invitation / lab summary)
+ * from /admin, replacing the old escape-game blueprint day-2 actions.
+ * Sender identity = a Mailtrap Send API token + a from address on a domain
+ * verified in that Mailtrap account, persisted server-side so each
+ * operator wires their own once per deployment. The composer loads a
+ * bundled template (en/fr), the operator fills the {VARS}, edits the raw
+ * HTML with a live preview, and the server fires one Mailtrap call per
+ * recipient ({ID} = 1-based position in the list, zero-padded).
+ */
+function EmailsTab({ password }: { password: string }) {
+  // Sender config (mirrors PlannerConfigEditor).
+  const [token, setToken] = useState('');
+  const [fromEmail, setFromEmail] = useState('');
+  const [fromName, setFromName] = useState('');
+  const [savedCfg, setSavedCfg] = useState<{
+    token: string;
+    fromEmail: string;
+    fromName: string;
+  } | null>(null);
+  const [showToken, setShowToken] = useState(false);
+  const [cfgSavedAt, setCfgSavedAt] = useState<number | null>(null);
+
+  // Composer.
+  const [templates, setTemplates] = useState<AdminEmailTemplate[] | null>(null);
+  const [selKey, setSelKey] = useState('');
+  const [subject, setSubject] = useState('');
+  const [html, setHtml] = useState('');
+  const [vars, setVars] = useState<Record<string, string>>({});
+  const [recipientsText, setRecipientsText] = useState('');
+  const [testAddr, setTestAddr] = useState('');
+  const [sendReport, setSendReport] = useState<AdminEmailSendPayload | null>(null);
+  const [confirmSend, setConfirmSend] = useState(false);
+
+  const [busy, setBusy] = useState<'load' | 'save' | 'send' | 'test' | null>('load');
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setBusy('load');
+    setError(null);
+    try {
+      const [cfg, tpl] = await Promise.all([
+        api.adminEmailConfig(password),
+        api.adminEmailTemplates(password),
+      ]);
+      setToken(cfg.mailtrapToken);
+      setFromEmail(cfg.fromEmail);
+      setFromName(cfg.fromName);
+      setSavedCfg({ token: cfg.mailtrapToken, fromEmail: cfg.fromEmail, fromName: cfg.fromName });
+      setRecipientsText(cfg.recipients.join('\n'));
+      setTemplates(tpl.templates);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }, [password]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const saveCfg = async () => {
+    setBusy('save');
+    setError(null);
+    try {
+      const p = await api.adminEmailConfigSave(password, {
+        mailtrapToken: token.trim() || null,
+        fromEmail: fromEmail.trim() || null,
+        fromName: fromName.trim() || null,
+      });
+      setToken(p.mailtrapToken);
+      setFromEmail(p.fromEmail);
+      setFromName(p.fromName);
+      setSavedCfg({ token: p.mailtrapToken, fromEmail: p.fromEmail, fromName: p.fromName });
+      setCfgSavedAt(Date.now());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const applyTemplate = (key: string) => {
+    setSelKey(key);
+    const t = templates?.find((t) => `${t.id}.${t.locale}` === key);
+    if (!t) return;
+    setSubject(t.subject);
+    setHtml(t.html);
+    // GAME_URL defaults to this deployment's own origin — the invitation
+    // points at the game the operator is composing from.
+    setVars(
+      Object.fromEntries(
+        Object.entries(t.variables).map(([k, v]) => [
+          k,
+          k === 'GAME_URL' && !v ? window.location.origin : v,
+        ]),
+      ),
+    );
+    setSendReport(null);
+  };
+
+  // Operator-filled {VARS} substituted live; {ID} stays for the server
+  // (per-recipient). Empty values leave the token visible so the preview
+  // shows what would really go out.
+  const substituted = useMemo(() => {
+    let out = html;
+    for (const [k, v] of Object.entries(vars)) {
+      if (v.trim()) out = out.split(`{${k}}`).join(v.trim());
+    }
+    return out;
+  }, [html, vars]);
+
+  const missingVars = Object.keys(vars).filter(
+    (k) => !vars[k].trim() && html.includes(`{${k}}`),
+  );
+
+  const recipients = useMemo(
+    () =>
+      recipientsText
+        .split(/[\n,;]+/)
+        .map((r) => r.trim())
+        .filter(Boolean),
+    [recipientsText],
+  );
+  const badRecipients = recipients.filter((r) => !/^\S+@\S+\.\S+$/.test(r));
+
+  const wired = savedCfg !== null && savedCfg.token !== '' && savedCfg.fromEmail !== '';
+  const cfgDirty =
+    savedCfg !== null &&
+    (token.trim() !== savedCfg.token ||
+      fromEmail.trim() !== savedCfg.fromEmail ||
+      fromName.trim() !== savedCfg.fromName);
+  const draftReady = subject.trim() !== '' && html.trim() !== '';
+
+  const send = async (to: string[], test: boolean) => {
+    setBusy(test ? 'test' : 'send');
+    setError(null);
+    setSendReport(null);
+    try {
+      const r = await api.adminEmailSend(password, {
+        recipients: to,
+        subject: subject.trim(),
+        html: substituted,
+        test,
+      });
+      setSendReport(r);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="admin-emails">
+      {error && <div className="app-error">{error}</div>}
+
+      <div className="admin-cluster admin-cluster-block admin-emails-config">
+        <p className="admin-cluster-intro">
+          <strong>Sender identity</strong> · emails go out through the{' '}
+          <a href="https://mailtrap.io" target="_blank" rel="noreferrer">
+            Mailtrap
+          </a>{' '}
+          Send API. The from address must belong to a domain verified in the
+          Mailtrap account owning the token.{' '}
+          {wired ? (
+            <span className="c-green">● wired</span>
+          ) : (
+            <span className="c-yellow">● not wired — sending disabled</span>
+          )}
+        </p>
+        <div className="admin-cluster-section">
+          <label className="admin-cluster-label">
+            Mailtrap API token
+            <button
+              type="button"
+              className="admin-planner-reveal"
+              onClick={() => setShowToken((s) => !s)}
+              title={showToken ? 'hide' : 'show'}
+            >
+              {showToken ? 'hide' : 'show'}
+            </button>
+          </label>
+          <input
+            type={showToken ? 'text' : 'password'}
+            className="admin-cluster-input admin-planner-input"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            disabled={busy !== null}
+            spellCheck={false}
+            autoComplete="new-password"
+          />
+        </div>
+        <div className="admin-cluster-section">
+          <label className="admin-cluster-label">From address</label>
+          <input
+            type="text"
+            className="admin-cluster-input admin-planner-input"
+            placeholder="game@your-verified-domain.com"
+            value={fromEmail}
+            onChange={(e) => setFromEmail(e.target.value)}
+            disabled={busy !== null}
+            spellCheck={false}
+            autoComplete="off"
+          />
+        </div>
+        <div className="admin-cluster-section">
+          <label className="admin-cluster-label">From name (optional)</label>
+          <input
+            type="text"
+            className="admin-cluster-input admin-planner-input"
+            placeholder="Nutanix Cloud Operations Command Center"
+            value={fromName}
+            onChange={(e) => setFromName(e.target.value)}
+            disabled={busy !== null}
+            spellCheck={false}
+            autoComplete="off"
+          />
+        </div>
+        <div className="admin-cluster-actions">
+          <button
+            type="button"
+            className="modal-btn modal-btn-danger"
+            disabled={busy !== null || !cfgDirty}
+            onClick={() => void saveCfg()}
+          >
+            {busy === 'save' ? 'saving…' : 'save'}
+          </button>
+          {cfgSavedAt && busy === null && (
+            <span className="c-green admin-cluster-saved">saved {fmtAge(cfgSavedAt)}</span>
+          )}
+        </div>
+      </div>
+
+      <div className="admin-cluster-block">
+        <p className="admin-cluster-intro">
+          <strong>Compose</strong> · pick a template, fill the variables, tweak
+          the HTML if needed — the preview shows what recipients get. Loading a
+          template overwrites the subject + body draft.
+        </p>
+        <div className="admin-emails-compose-row">
+          <div className="admin-cluster-section">
+            <label className="admin-cluster-label">Template</label>
+            <select
+              className="admin-cluster-input"
+              value={selKey}
+              onChange={(e) => applyTemplate(e.target.value)}
+              disabled={busy !== null || templates === null}
+            >
+              <option value="">choose…</option>
+              {(templates ?? []).map((t) => (
+                <option key={`${t.id}.${t.locale}`} value={`${t.id}.${t.locale}`}>
+                  {t.id} · {t.locale}
+                </option>
+              ))}
+            </select>
+          </div>
+          {Object.keys(vars).map((k) => (
+            <div className="admin-cluster-section" key={k}>
+              <label className="admin-cluster-label">{`{${k}}`}</label>
+              <input
+                type="text"
+                className="admin-cluster-input admin-emails-var-input"
+                value={vars[k]}
+                onChange={(e) => setVars((prev) => ({ ...prev, [k]: e.target.value }))}
+                disabled={busy !== null}
+                spellCheck={false}
+              />
+            </div>
+          ))}
+        </div>
+        <div className="admin-cluster-section admin-emails-subject">
+          <label className="admin-cluster-label">Subject</label>
+          <input
+            type="text"
+            className="admin-cluster-input admin-emails-subject-input"
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            disabled={busy !== null}
+            spellCheck={false}
+          />
+        </div>
+        <div className="admin-emails-grid">
+          <div className="admin-cluster-section">
+            <label className="admin-cluster-label">HTML body</label>
+            <textarea
+              className="admin-cluster-textarea admin-emails-editor"
+              value={html}
+              onChange={(e) => setHtml(e.target.value)}
+              disabled={busy !== null}
+              spellCheck={false}
+            />
+          </div>
+          <div className="admin-cluster-section">
+            <label className="admin-cluster-label">Preview</label>
+            <iframe
+              className="admin-emails-preview"
+              title="email preview"
+              sandbox=""
+              srcDoc={substituted.split('{ID}').join('01')}
+            />
+          </div>
+        </div>
+        {missingVars.length > 0 && (
+          <p className="admin-emails-warn c-yellow">
+            unfilled variable{missingVars.length === 1 ? '' : 's'}:{' '}
+            {missingVars.map((k) => `{${k}}`).join(', ')} — recipients would see
+            the raw token.
+          </p>
+        )}
+      </div>
+
+      <div className="admin-cluster-block">
+        <p className="admin-cluster-intro">
+          <strong>Recipients</strong> · one address per line (commas work too).
+          The list is saved on send, so it&apos;s prefilled for the next email
+          of the day. <code>{'{ID}'}</code> in the body becomes each
+          recipient&apos;s position (01, 02, …).
+        </p>
+        <div className="admin-emails-grid">
+          <div className="admin-cluster-section">
+            <label className="admin-cluster-label">
+              Recipients ({recipients.length})
+            </label>
+            <textarea
+              className="admin-cluster-textarea admin-emails-recipients"
+              placeholder={'agent.one@example.com\nagent.two@example.com'}
+              value={recipientsText}
+              onChange={(e) => setRecipientsText(e.target.value)}
+              disabled={busy !== null}
+              spellCheck={false}
+            />
+            {badRecipients.length > 0 && (
+              <span className="c-yellow admin-emails-warn">
+                not an email: {badRecipients.join(', ')}
+              </span>
+            )}
+          </div>
+          <div className="admin-cluster-section">
+            <label className="admin-cluster-label">Dry run</label>
+            <div className="admin-emails-test-row">
+              <input
+                type="text"
+                className="admin-cluster-input"
+                placeholder="you@example.com"
+                value={testAddr}
+                onChange={(e) => setTestAddr(e.target.value)}
+                disabled={busy !== null}
+                spellCheck={false}
+              />
+              <button
+                type="button"
+                className="modal-btn"
+                disabled={
+                  busy !== null || !wired || !draftReady || !/^\S+@\S+\.\S+$/.test(testAddr.trim())
+                }
+                onClick={() => void send([testAddr.trim()], true)}
+                title="send this draft to a single address without touching the saved recipient list"
+              >
+                {busy === 'test' ? 'sending…' : 'send test'}
+              </button>
+            </div>
+            <div className="admin-cluster-actions">
+              <button
+                type="button"
+                className="modal-btn modal-btn-danger"
+                disabled={
+                  busy !== null ||
+                  !wired ||
+                  !draftReady ||
+                  recipients.length === 0 ||
+                  badRecipients.length > 0
+                }
+                onClick={() => setConfirmSend(true)}
+                title={!wired ? 'configure the sender identity first' : undefined}
+              >
+                {busy === 'send'
+                  ? 'sending…'
+                  : `send to ${recipients.length} recipient${recipients.length === 1 ? '' : 's'}`}
+              </button>
+            </div>
+            {sendReport && (
+              <div className="admin-emails-report">
+                <span className={sendReport.failed === 0 ? 'c-green' : 'c-yellow'}>
+                  sent {sendReport.sent}, failed {sendReport.failed}
+                </span>
+                <ul className="admin-emails-report-list">
+                  {sendReport.results.map((r) => (
+                    <li key={r.to} className={r.ok ? 'c-green' : 'c-red'}>
+                      {r.ok ? '✓' : '✗'} {r.to}
+                      {r.error ? ` — ${r.error}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {confirmSend && (
+        <ConfirmModal
+          title="send emails"
+          confirmLabel={`send to ${recipients.length}`}
+          danger
+          busy={busy === 'send'}
+          onConfirm={() => {
+            setConfirmSend(false);
+            void send(recipients, false);
+          }}
+          onCancel={() => setConfirmSend(false)}
+        >
+          <p>
+            Send <strong>{subject.trim() || '(no subject)'}</strong> to{' '}
+            <strong>{recipients.length}</strong> recipient
+            {recipients.length === 1 ? '' : 's'}?
+          </p>
+        </ConfirmModal>
+      )}
     </div>
   );
 }
