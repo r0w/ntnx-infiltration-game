@@ -719,14 +719,9 @@ describe('GET /api/admin/cluster-status', () => {
       headers: { 'X-Admin-Password': ADMIN_PW },
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      intelligentOps: { state: unknown; enableUrl: unknown };
-      versions: { rows: unknown[]; error?: string };
-    };
+    const body = (await res.json()) as { intelligentOps: { state: unknown; enableUrl: unknown } };
     expect(body.intelligentOps.state).toBeNull();
     expect(body.intelligentOps.enableUrl).toBeNull();
-    expect(body.versions.rows).toEqual([]);
-    expect(body.versions.error).toBeUndefined();
   });
 
   test('live mode → reflects PC enablementState + builds Prism deep-link', async () => {
@@ -799,9 +794,6 @@ describe('GET /api/admin/cluster-status', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       intelligentOps: { state: string; enableUrl: string };
-      versions: {
-        rows: Array<{ component: string; version: string; location?: string; source: string }>;
-      };
     };
     expect(body.intelligentOps.state).toBe('DISABLED');
     expect(body.intelligentOps.enableUrl).toBe(
@@ -810,7 +802,67 @@ describe('GET /api/admin/cluster-status', () => {
     const paths = calls.map((x) => x.path);
     expect(paths).toContain('/api/prism/v4.2/config/domain-managers');
     expect(paths.some((p) => p.includes('/domain-managers/pc-uuid-1/products'))).toBe(true);
-    expect(body.versions.rows).toEqual([
+  });
+
+  test('GET /cluster-versions (live) → PC/AOS from v3 clusters + LCM inventory, deduped + sorted', async () => {
+    const liveNutanix: NutanixClient = {
+      mode: 'live',
+      async request<T>(_method: string, path: string): Promise<T> {
+        if (path === '/api/nutanix/v3/clusters/list') {
+          return {
+            entities: [
+              {
+                status: {
+                  name: 'PC',
+                  resources: {
+                    config: { build: { version: '7.5.1' }, service_list: ['PRISM_CENTRAL'] },
+                  },
+                },
+              },
+              {
+                status: {
+                  name: 'DM3-POC004',
+                  resources: { config: { build: { version: '7.5.1' }, service_list: ['AOS'] } },
+                },
+              },
+            ],
+          } as unknown as T;
+        }
+        if (path.startsWith('/api/lifecycle/v4.2/resources/entities')) {
+          return {
+            data: [
+              // Duplicate PC row must be skipped (clusters list already covers it).
+              { entityType: 'SOFTWARE', entityModel: 'PC', entityVersion: '7.5.1' },
+              {
+                entityType: 'SOFTWARE',
+                entityModel: 'Files',
+                entityVersion: '5.2.0',
+                locationInfo: { locationName: 'DM3-POC004' },
+              },
+              // Firmware and version-less rows are ignored.
+              { entityType: 'FIRMWARE', entityModel: 'NIC X550T', entityVersion: '0x18a5' },
+              { entityType: 'SOFTWARE', entityModel: 'Foundation' },
+            ],
+          } as unknown as T;
+        }
+        throw new Error(`unexpected path: ${path}`);
+      },
+    };
+    const db = freshDb();
+    const pack = fakePack();
+    const service = makeService(db, pack);
+    const r = buildAdminRoutes({
+      db, pack, adminPassword: ADMIN_PW, service, nutanix: liveNutanix,
+      clusterProfile: 'hpoc', pcEndpoint: 'https://10.8.16.7:9440',
+    });
+    const res = await r.request('/cluster-versions', {
+      headers: { 'X-Admin-Password': ADMIN_PW },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      rows: Array<{ component: string; version: string; location?: string; source: string }>;
+    };
+    expect(body.rows).toEqual([
       { component: 'Prism Central', version: '7.5.1', location: 'PC', source: 'pc' },
       { component: 'AOS', version: '7.5.1', location: 'DM3-POC004', source: 'pc' },
       { component: 'Files', version: '5.2.0', location: 'DM3-POC004', source: 'lcm' },

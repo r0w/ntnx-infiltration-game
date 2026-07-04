@@ -47,8 +47,9 @@ export interface AdminRoutesDeps {
 
 export interface AdminClusterStatusPayload {
   intelligentOps: IntelligentOpsProbeResult;
-  versions: SoftwareVersionsProbeResult;
 }
+
+export type AdminClusterVersionsPayload = SoftwareVersionsProbeResult;
 
 export interface AdminClusterConfigPayload {
   discoverableNodeSerials: string[];
@@ -799,18 +800,24 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   });
 
   // ─── live cluster status (no DB) ────────────────────────────────────
-  // Read-only probes: IOps enablement + software versions. Hits the live
-  // PC on every call; frequency is "operator opens the Cluster tab".
+  // Read-only probes, hit the live PC on every call; frequency is
+  // "operator opens the Cluster tab". Split endpoints so each panel
+  // refreshes without re-running the other probe.
   router.get('/cluster-status', async (c) => {
-    const [intelligentOps, versions] = await Promise.all([
-      probeIntelligentOps({
-        nutanix: deps.nutanix,
-        pcEndpoint: deps.pcEndpoint,
-        logger: consoleLogger,
-      }),
-      probeSoftwareVersions({ nutanix: deps.nutanix, logger: consoleLogger }),
-    ]);
-    const payload: AdminClusterStatusPayload = { intelligentOps, versions };
+    const intelligentOps = await probeIntelligentOps({
+      nutanix: deps.nutanix,
+      pcEndpoint: deps.pcEndpoint,
+      logger: consoleLogger,
+    });
+    const payload: AdminClusterStatusPayload = { intelligentOps };
+    return c.json(payload);
+  });
+
+  router.get('/cluster-versions', async (c) => {
+    const payload: AdminClusterVersionsPayload = await probeSoftwareVersions({
+      nutanix: deps.nutanix,
+      logger: consoleLogger,
+    });
     return c.json(payload);
   });
 
