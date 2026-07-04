@@ -253,8 +253,9 @@ function printReport(r: Report): void {
  * itself, aren't seeded from env, and aren't in the ignore list. `captures`
  * = vars the stage produces (from `<input/>` + check captures). Empty
  * arrays are omitted to keep the JSON terse.
+ * `write=false` = dry-run (--check): report drift without touching files.
  */
-function applyMode(stages: Stage[]): void {
+function applyMode(stages: Stage[], write: boolean): number {
   const allProducers = new Set<string>();
   const firstProducer = new Map<string, number>();
   for (const s of stages) {
@@ -303,14 +304,15 @@ function applyMode(stages: Stage[]): void {
       changed = true;
     }
     if (changed) {
-      writeFileSync(file, JSON.stringify(reorderStage(json), null, 2) + '\n', 'utf8');
+      if (write) writeFileSync(file, JSON.stringify(reorderStage(json), null, 2) + '\n', 'utf8');
       updated++;
       console.log(
         `${s.file}: needs=[${needs.join(',')}] captures=[${captures.join(',')}]`,
       );
     }
   }
-  console.log(`\nupdated ${updated} stage file(s).`);
+  console.log(`\n${write ? 'updated' : 'would update'} ${updated} stage file(s).`);
+  return updated;
 }
 
 /**
@@ -347,7 +349,15 @@ function main(): void {
   const stages = loadStages();
   const report = analyze(stages);
   if (args.has('--apply')) {
-    applyMode(stages);
+    applyMode(stages, true);
+    return;
+  }
+  if (args.has('--check')) {
+    const drift = applyMode(stages, false);
+    if (drift > 0) {
+      console.error(`${drift} stage file(s) out of date — run --apply`);
+      process.exit(1);
+    }
     return;
   }
   if (args.has('--json')) {
