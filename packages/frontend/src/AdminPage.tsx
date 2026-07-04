@@ -2285,7 +2285,7 @@ function EmailsTab({ password }: { password: string }) {
                         {TEMPLATE_LABELS[tplType]}
                         <button
                           type="button"
-                          className="admin-planner-reveal"
+                          className="admin-emails-send-btn"
                           disabled={busy !== null || !canSend || count === 0}
                           onClick={() => requestSend(tplType)}
                           title={
@@ -2352,31 +2352,45 @@ function EmailsTab({ password }: { password: string }) {
         ) : (
           <p className="c-dim admin-emails-warn">roster is empty — add participants above.</p>
         )}
-        <div className="admin-emails-grid admin-emails-sendrow">
-          <div className="admin-cluster-section">
-            <label className="admin-cluster-label">Dry run</label>
-            <div className="admin-emails-test-row">
-              <input
-                type="text"
-                className="admin-cluster-input"
-                placeholder="you@example.com"
-                value={testAddr}
-                onChange={(e) => setTestAddr(e.target.value)}
-                disabled={busy !== null}
-                spellCheck={false}
-              />
-              <button
-                type="button"
-                className="modal-btn"
-                disabled={
-                  busy !== null || !canSend || !draftReady || !/^\S+@\S+\.\S+$/.test(testAddr.trim())
-                }
-                onClick={() => void send('test')}
-                title="send this draft to a single address; does not mark anyone as sent"
-              >
-                {busy === 'test' ? 'sending…' : 'send test'}
-              </button>
-            </div>
+        <div className="admin-emails-dryrun">
+          <label className="admin-cluster-label">
+            Dry run · pick a template, send it to one address (marks nobody as sent)
+          </label>
+          <div className="admin-emails-test-row">
+            <select
+              className="admin-cluster-input admin-emails-dryrun-select"
+              value={selKey}
+              onChange={(e) => applyTemplate(e.target.value, templates ?? [], savedVars, clusterName)}
+              disabled={busy !== null || templates === null}
+            >
+              <option value="">choose…</option>
+              {(templates ?? []).map((t) => (
+                <option key={`${t.id}.${t.locale}`} value={`${t.id}.${t.locale}`}>
+                  {TEMPLATE_LABELS[t.id] ?? t.id} · {t.locale}
+                  {t.overridden ? ' · edited' : ''}
+                </option>
+              ))}
+            </select>
+            <input
+              type="text"
+              className="admin-cluster-input"
+              placeholder="you@example.com"
+              value={testAddr}
+              onChange={(e) => setTestAddr(e.target.value)}
+              disabled={busy !== null}
+              spellCheck={false}
+            />
+            <button
+              type="button"
+              className="modal-btn"
+              disabled={
+                busy !== null || !canSend || !draftReady || !/^\S+@\S+\.\S+$/.test(testAddr.trim())
+              }
+              onClick={() => void send('test')}
+              title="send the selected template's current draft to this address only"
+            >
+              {busy === 'test' ? 'sending…' : 'send test'}
+            </button>
           </div>
         </div>
         {sendReport && (
@@ -2399,9 +2413,10 @@ function EmailsTab({ password }: { password: string }) {
 
       <div className="admin-cluster-block">
         <p className="admin-cluster-intro">
-          <strong>Compose</strong> · pick a template, fill the variables, then
-          click into the email to edit it in place (or switch to the HTML
-          source). Sending saves your edits as this deployment&apos;s template
+          <strong>Edit templates</strong> · this section is for tweaking the
+          content: pick a template, fill the variables, edit it visually (or
+          in the HTML source). Sending happens from the roster above and uses
+          the current draft, which then becomes this deployment&apos;s template
           for the next batches.
         </p>
         <div className="admin-emails-compose-row">
