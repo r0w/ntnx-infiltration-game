@@ -1865,17 +1865,11 @@ a.terminal-link:visited {
   font-family: var(--mono, monospace);
   font-size: 12px;
   min-height: 480px;
-  white-space: pre;
+  /* The studio export is one long line — wrap it instead of h-scrolling. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   width: 100%;
   margin-top: 10px;
-}
-.admin-emails-preview {
-  width: 100%;
-  min-height: 480px;
-  margin-top: 10px;
-  border: 1px solid #1b232b;
-  border-radius: 4px;
-  background: #0b0f1a; /* matches the templates' own background */
 }
 .admin-emails-test-row {
   display: flex;

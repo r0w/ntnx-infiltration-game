@@ -528,6 +528,17 @@ export const api = {
     }>('/admin/email-domains', password),
   adminEmailTemplates: (password: string) =>
     adminGet<{ templates: AdminEmailTemplate[] }>('/admin/email-templates', password),
+  adminEmailTemplateSave: (
+    password: string,
+    id: string,
+    locale: string,
+    body: { subject: string; html: string },
+  ) =>
+    fetch(`/api/admin/email-templates/${id}/${locale}`, {
+      method: 'PUT',
+      headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((res) => handle<{ ok: true; overridden: boolean }>(res)),
   adminEmailTemplateReset: (password: string, id: string, locale: string) =>
     adminDel<{ ok: true }>(`/admin/email-templates/${id}/${locale}`, password),
   adminEmailRoster: (password: string) =>

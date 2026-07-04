@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   api,
@@ -1889,7 +1889,7 @@ function EmailsTab({ password }: { password: string }) {
   const [subject, setSubject] = useState('');
   const [html, setHtml] = useState('');
   const [vars, setVars] = useState<Record<string, string>>({});
-  const [viewMode, setViewMode] = useState<'edit' | 'source' | 'preview'>('edit');
+  const [viewMode, setViewMode] = useState<'edit' | 'source'>('edit');
   // Bumped on every template (re)load so the studio remounts with the fresh draft.
   const [studioNonce, setStudioNonce] = useState(0);
   // Synchronous mirror of `html` so handlers (send, dirty check) can read
@@ -1908,9 +1908,12 @@ function EmailsTab({ password }: { password: string }) {
   const [addText, setAddText] = useState('');
   const [testAddr, setTestAddr] = useState('');
   const [sendReport, setSendReport] = useState<AdminEmailSendPayload | null>(null);
+  const [tplSavedAt, setTplSavedAt] = useState<number | null>(null);
   const [confirmSend, setConfirmSend] = useState(false);
 
-  const [busy, setBusy] = useState<'load' | 'save' | 'send' | 'test' | 'roster' | null>('load');
+  const [busy, setBusy] = useState<'load' | 'save' | 'savetpl' | 'send' | 'test' | 'roster' | null>(
+    'load',
+  );
   const [error, setError] = useState<string | null>(null);
 
   const selTemplate = templates?.find((t) => `${t.id}.${t.locale}` === selKey) ?? null;
@@ -2017,16 +2020,6 @@ function EmailsTab({ password }: { password: string }) {
     [updateHtml],
   );
 
-  // Operator-filled {VARS} substituted for the preview; {ID} shows the
-  // first seat. Empty values leave the token visible on purpose.
-  const previewHtml = useMemo(() => {
-    let out = html;
-    for (const [k, v] of Object.entries(vars)) {
-      if (v.trim()) out = out.split(`{${k}}`).join(v.trim());
-    }
-    return out.split('{ID}').join('01');
-  }, [html, vars]);
-
   const missingVars = Object.keys(vars).filter(
     (k) => !vars[k].trim() && html.includes(`{${k}}`),
   );
@@ -2047,6 +2040,13 @@ function EmailsTab({ password }: { password: string }) {
       fromEmail.trim() !== savedCfg.fromEmail ||
       fromName.trim() !== savedCfg.fromName);
   const draftReady = selTemplate !== null && subject.trim() !== '' && html.trim() !== '';
+  // Note: html state can lag the studio by its 400ms debounce; the save /
+  // switch handlers flush before reading, this flag only gates buttons.
+  const draftDirty =
+    selTemplate !== null &&
+    loadedDraftRef.current !== null &&
+    (subject.trim() !== loadedDraftRef.current.subject ||
+      html !== loadedDraftRef.current.html);
   const pendingFor = (tplType: string) =>
     (roster ?? []).filter((r) => r.sent[tplType] === undefined);
   const pending = selTemplate ? pendingFor(selTemplate.id) : [];
@@ -2152,6 +2152,36 @@ function EmailsTab({ password }: { password: string }) {
         setTemplates(tpl.templates);
         setSavedVars(cfg.vars);
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const saveTemplate = async () => {
+    if (!selTemplate) return;
+    studioFlushRef.current?.();
+    setBusy('savetpl');
+    setError(null);
+    try {
+      const draft = { subject: subject.trim(), html: htmlRef.current };
+      const r = await api.adminEmailTemplateSave(
+        password,
+        selTemplate.id,
+        selTemplate.locale,
+        draft,
+      );
+      loadedDraftRef.current = draft;
+      setTemplates(
+        (prev) =>
+          prev?.map((t) =>
+            t.id === selTemplate.id && t.locale === selTemplate.locale
+              ? { ...t, ...draft, overridden: r.overridden }
+              : t,
+          ) ?? null,
+      );
+      setTplSavedAt(Date.now());
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -2497,8 +2527,8 @@ function EmailsTab({ password }: { password: string }) {
           <span className="admin-emails-eyebrow">Briefing room</span>
           <h3 className="admin-emails-title">Edit templates</h3>
           <p className="admin-emails-desc">
-            Sending happens from the manifest; the sent draft becomes this
-            deployment&apos;s template.
+            Sending happens from the manifest; save template (or sending)
+            keeps your edits as this deployment&apos;s version.
           </p>
         </div>
         <div className="admin-emails-compose-row">
@@ -2543,7 +2573,7 @@ function EmailsTab({ password }: { password: string }) {
             </div>
             <div className="admin-emails-toolbar">
               <div className="admin-emails-viewmodes" role="tablist">
-                {(['edit', 'source', 'preview'] as const).map((m) => (
+                {(['edit', 'source'] as const).map((m) => (
                   <button
                     key={m}
                     type="button"
@@ -2559,6 +2589,18 @@ function EmailsTab({ password }: { password: string }) {
                   </button>
                 ))}
               </div>
+              <button
+                type="button"
+                className="modal-btn"
+                disabled={busy !== null || !draftReady || !draftDirty}
+                onClick={() => void saveTemplate()}
+                title="store this draft as the deployment's template (sending does it too)"
+              >
+                {busy === 'savetpl' ? 'saving…' : 'save template'}
+              </button>
+              {tplSavedAt && busy === null && !draftDirty && (
+                <span className="c-green admin-cluster-saved">saved {fmtAge(tplSavedAt)}</span>
+              )}
               {selTemplate.overridden && (
                 <button
                   type="button"
@@ -2590,15 +2632,6 @@ function EmailsTab({ password }: { password: string }) {
                 onChange={(e) => updateHtml(e.target.value)}
                 disabled={busy !== null}
                 spellCheck={false}
-              />
-            )}
-            {viewMode === 'preview' && (
-              <iframe
-                key="preview"
-                className="admin-emails-preview"
-                title="email preview"
-                sandbox=""
-                srcDoc={previewHtml}
               />
             )}
             {missingVars.length > 0 && (

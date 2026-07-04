@@ -881,6 +881,30 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     return c.json({ templates });
   });
 
+  // Save the operator's draft as this deployment's template (a draft
+  // matching the bundled default clears the override instead). Sending
+  // does the same implicitly; this is the explicit "save" button.
+  router.put('/email-templates/:id/:locale', async (c) => {
+    const { id, locale } = c.req.param();
+    const template = findTemplate(id, locale);
+    if (!template) throw new HttpError(404, `unknown template ${id}.${locale}`);
+    const body = (await c.req.json().catch(() => ({}))) as { subject?: unknown; html?: unknown };
+    if (typeof body.subject !== 'string' || !body.subject.trim()) {
+      throw new HttpError(400, 'subject is required');
+    }
+    if (typeof body.html !== 'string' || !body.html.trim()) {
+      throw new HttpError(400, 'html body is required');
+    }
+    const cfg = deps.service.clusterConfig;
+    const overridden = body.html !== template.html || body.subject.trim() !== template.subject;
+    if (overridden) {
+      cfg.set(emailTplKey(id, locale), { subject: body.subject.trim(), html: body.html }, 'admin');
+    } else {
+      cfg.delete(emailTplKey(id, locale));
+    }
+    return c.json({ ok: true, overridden });
+  });
+
   // Reset a template to its bundled default.
   router.delete('/email-templates/:id/:locale', (c) => {
     const { id, locale } = c.req.param();

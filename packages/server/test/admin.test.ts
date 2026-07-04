@@ -28,6 +28,7 @@ import {
   type AdminUserEntry,
 } from '../src/routes/admin';
 import { SessionService } from '../src/session-service';
+import { EMAIL_TEMPLATES } from '../src/email';
 import type { LoadedPack } from '../src/pack-loader';
 
 const SCHEMA = readFileSync(
@@ -1263,5 +1264,51 @@ describe('email participant routes', () => {
     expect((await r.request('/email-roster', { method: 'POST' })).status).toBe(401);
     expect((await r.request('/email-send', { method: 'POST' })).status).toBe(401);
     expect((await r.request('/email-domains')).status).toBe(401);
+  });
+});
+
+describe('PUT /api/admin/email-templates/:id/:locale (explicit save)', () => {
+  const AUTH = { 'X-Admin-Password': ADMIN_PW };
+  const JSON_AUTH = { ...AUTH, 'Content-Type': 'application/json' };
+
+  test('stores an override, returns overridden flag, default draft clears it', async () => {
+    const db = freshDb();
+    const pack = fakePack();
+    const service = makeService(db, pack);
+    const r = buildAdminRoutes({
+      db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix,
+      clusterProfile: 'hpoc', pcEndpoint: '',
+    });
+    let res = await r.request('/email-templates/invitation-vdi/en', {
+      method: 'PUT',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ subject: 'custom', html: '<b>custom</b>' }),
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { overridden: boolean }).overridden).toBe(true);
+
+    let tpl = (await (await r.request('/email-templates', { headers: AUTH })).json()) as {
+      templates: Array<{ id: string; locale: string; subject: string; overridden: boolean }>;
+    };
+    const saved = tpl.templates.find((t) => t.id === 'invitation-vdi' && t.locale === 'en')!;
+    expect(saved.overridden).toBe(true);
+    expect(saved.subject).toBe('custom');
+
+    // Saving the bundled default back clears the override.
+    const def = EMAIL_TEMPLATES.find((t) => t.id === 'invitation-vdi' && t.locale === 'en')!;
+    res = await r.request('/email-templates/invitation-vdi/en', {
+      method: 'PUT',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ subject: def.subject, html: def.html }),
+    });
+    expect(((await res.json()) as { overridden: boolean }).overridden).toBe(false);
+
+    // Validation + unknown template.
+    expect((await r.request('/email-templates/nope/en', {
+      method: 'PUT', headers: JSON_AUTH, body: JSON.stringify({ subject: 's', html: 'h' }),
+    })).status).toBe(404);
+    expect((await r.request('/email-templates/invitation-vdi/en', {
+      method: 'PUT', headers: JSON_AUTH, body: JSON.stringify({ subject: '', html: 'h' }),
+    })).status).toBe(400);
   });
 });
