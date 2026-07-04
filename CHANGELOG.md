@@ -27,6 +27,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- Every `/admin` tab now uses the same card layout with clearer section headers.
 - Install runbook sets the `CloneProd` `pcUser` credential at deploy time, so
   stage 35 no longer asks the player to enter it (and can't lock the admin
   account on a typo).

@@ -1051,8 +1051,14 @@ export class EmailRosterQueries {
           id: number; seat: number; email: string; added_at: number;
         };
       return { id: r.id, seat: r.seat, email: r.email, addedAt: r.added_at, sent: {} };
-    } catch {
-      return null; // UNIQUE(email) violation — already on the roster
+    } catch (err) {
+      // Only the email-uniqueness violation means "already on the roster";
+      // anything else (SQLITE_BUSY, disk errors) must surface, not be
+      // reported to the operator as a benign skip.
+      if (err instanceof Error && err.message.includes('UNIQUE') && err.message.includes('email')) {
+        return null;
+      }
+      throw err;
     }
   }
 

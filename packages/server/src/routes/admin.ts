@@ -20,7 +20,8 @@ import {
   listMailtrapDomains,
   sendMailtrapEmail,
 } from '../email';
-import { EmailRosterQueries, type EmailRosterRow } from '../db/queries';
+import { EmailRosterQueries, type ClusterConfigQueries, type EmailRosterRow } from '../db/queries';
+import { EMAIL_RE, substituteSeat, substituteVars } from '@ntnx-game/shared';
 
 export interface AdminRoutesDeps {
   db: Database;
@@ -56,6 +57,25 @@ export interface AdminRoutesDeps {
 
 export interface AdminClusterStatusPayload {
   intelligentOps: IntelligentOpsProbeResult;
+}
+
+// Per-field cluster_config semantics shared by /planner-config and
+// /email-config: string sets (trimmed), null or empty string clears,
+// missing key leaves the stored value untouched. Callers must run
+// assertStringField on EVERY field before applying any, so a 400 never
+// leaves a partial write.
+function assertStringField(incoming: unknown, key: string): void {
+  if (incoming !== undefined && incoming !== null && typeof incoming !== 'string') {
+    throw new HttpError(400, `${key} must be a string or null`);
+  }
+}
+function applyStringField(cfg: ClusterConfigQueries, incoming: unknown, key: string): void {
+  if (incoming === undefined) return;
+  if (incoming === null || (typeof incoming === 'string' && incoming.trim() === '')) {
+    cfg.delete(key);
+  } else if (typeof incoming === 'string') {
+    cfg.set(key, incoming.trim(), 'admin');
+  }
 }
 
 export type AdminClusterVersionsPayload = SoftwareVersionsProbeResult;
@@ -754,22 +774,12 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       oldPcPassword?: unknown;
     };
     const cfg = deps.service.clusterConfig;
-    // Per-field semantics: explicit string sets, explicit `null` clears,
-    // missing key leaves the existing value untouched. Empty string = clear
-    // (so the operator's "I cleared the field" matches the wire shape).
-    const apply = (incoming: unknown, key: string) => {
-      if (incoming === undefined) return;
-      if (incoming === null || (typeof incoming === 'string' && incoming.trim() === '')) {
-        cfg.delete(key);
-      } else if (typeof incoming === 'string') {
-        cfg.set(key, incoming, 'admin');
-      } else {
-        throw new HttpError(400, `${key} must be a string or null`);
-      }
-    };
-    apply(body.oldPc, 'old_pc');
-    apply(body.oldPcUsername, 'old_pc_username');
-    apply(body.oldPcPassword, 'old_pc_password');
+    assertStringField(body.oldPc, 'oldPc');
+    assertStringField(body.oldPcUsername, 'oldPcUsername');
+    assertStringField(body.oldPcPassword, 'oldPcPassword');
+    applyStringField(cfg, body.oldPc, 'old_pc');
+    applyStringField(cfg, body.oldPcUsername, 'old_pc_username');
+    applyStringField(cfg, body.oldPcPassword, 'old_pc_password');
     return c.json({
       oldPc: cfg.get<string>('old_pc') ?? '',
       oldPcUsername: cfg.get<string>('old_pc_username') ?? '',
@@ -801,11 +811,15 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     };
   };
 
+  // Probe the PE cluster name once per boot and cache it in cluster_config
+  // (setIfAbsent, so an operator edit — if we ever add one — stays sticky).
+  // The boot-scoped flag also memoizes a null verdict: without it, a PC
+  // with no eligible cluster would re-fire the live probe on every GET.
+  let clusterNameProbeDone = false;
   router.get('/email-config', async (c) => {
-    // Probe the PE cluster name once per deployment and cache it —
-    // setIfAbsent, so an operator edit (if we ever add one) stays sticky.
     const cfg = deps.service.clusterConfig;
-    if (cfg.get<string>('cluster_name') === undefined) {
+    if (!clusterNameProbeDone && cfg.get<string>('cluster_name') === undefined) {
+      clusterNameProbeDone = true;
       const name = await probeClusterName({ nutanix: deps.nutanix, logger: consoleLogger });
       if (name) cfg.setIfAbsent('cluster_name', name);
     }
@@ -820,32 +834,23 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       vars?: unknown;
     };
     const cfg = deps.service.clusterConfig;
-    // Same per-field semantics as /planner-config: string sets, null or
-    // empty string clears, missing key leaves the stored value untouched.
-    const apply = (incoming: unknown, key: string) => {
-      if (incoming === undefined) return;
-      if (incoming === null || (typeof incoming === 'string' && incoming.trim() === '')) {
-        cfg.delete(key);
-      } else if (typeof incoming === 'string') {
-        cfg.set(key, incoming.trim(), 'admin');
-      } else {
-        throw new HttpError(400, `${key} must be a string or null`);
-      }
-    };
-    apply(body.mailtrapToken, 'mailtrap_token');
-    apply(body.fromEmail, 'email_from');
-    apply(body.fromName, 'email_from_name');
-    if (body.vars !== undefined) {
-      if (
-        body.vars === null ||
+    // Validate everything before writing anything (no partial writes).
+    assertStringField(body.mailtrapToken, 'mailtrapToken');
+    assertStringField(body.fromEmail, 'fromEmail');
+    assertStringField(body.fromName, 'fromName');
+    if (
+      body.vars !== undefined &&
+      (body.vars === null ||
         typeof body.vars !== 'object' ||
         Array.isArray(body.vars) ||
-        !Object.values(body.vars).every((v) => typeof v === 'string')
-      ) {
-        throw new HttpError(400, 'vars must be an object of strings');
-      }
-      cfg.set('email_vars', body.vars, 'admin');
+        !Object.values(body.vars).every((v) => typeof v === 'string'))
+    ) {
+      throw new HttpError(400, 'vars must be an object of strings');
     }
+    applyStringField(cfg, body.mailtrapToken, 'mailtrap_token');
+    applyStringField(cfg, body.fromEmail, 'email_from');
+    applyStringField(cfg, body.fromName, 'email_from_name');
+    if (body.vars !== undefined) cfg.set('email_vars', body.vars, 'admin');
     return c.json(emailConfigPayload());
   });
 
@@ -898,7 +903,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       throw new HttpError(400, 'emails must be a non-empty array of strings');
     }
     const cleaned = body.emails.map((e) => e.trim()).filter(Boolean);
-    const invalid = cleaned.filter((e) => !/^\S+@\S+\.\S+$/.test(e));
+    const invalid = cleaned.filter((e) => !EMAIL_RE.test(e));
     if (invalid.length > 0) {
       throw new HttpError(400, `invalid email(s): ${invalid.join(', ')}`);
     }
@@ -963,7 +968,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     let targets: Array<Pick<EmailRosterRow, 'seat' | 'email'> & { id?: number }>;
     if (mode === 'test') {
       const addr = typeof body.testAddress === 'string' ? body.testAddress.trim() : '';
-      if (!/^\S+@\S+\.\S+$/.test(addr)) throw new HttpError(400, 'testAddress must be an email');
+      if (!EMAIL_RE.test(addr)) throw new HttpError(400, 'testAddress must be an email');
       targets = [{ seat: 1, email: addr }];
     } else if (mode === 'rows') {
       const ids = Array.isArray(body.rosterIds)
@@ -976,21 +981,26 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       targets = roster.pendingFor(template.id);
     }
 
-    // Operator {VARS} first, then the per-recipient {ID} (= VDI seat).
-    let base = body.html;
-    let subject = body.subject.trim();
-    for (const [k, v] of Object.entries(vars)) {
-      if (!v.trim()) continue;
-      base = base.split(`{${k}}`).join(v.trim());
-      subject = subject.split(`{${k}}`).join(v.trim());
-    }
+    // Operator {VARS} first, then the per-recipient {ID} (= VDI seat) —
+    // in both the body and the subject.
+    const htmlBase = substituteVars(body.html, vars);
+    const subjectBase = substituteVars(body.subject.trim(), vars);
 
     // Sequential on purpose: a roomful of recipients at most, and
-    // Mailtrap rate-limits burst sends on free plans.
+    // Mailtrap rate-limits burst sends on free plans. The 10s per-send
+    // budget keeps a worst-case 20-seat batch under the server's 250s
+    // idleTimeout (index.ts) so the client never loses the report.
     const results: AdminEmailSendPayload['results'] = [];
     for (const t of targets) {
-      const html = base.split('{ID}').join(String(t.seat).padStart(2, '0'));
-      const r = await sendEmail({ token, fromEmail, fromName, to: t.email, subject, html });
+      const r = await sendEmail({
+        token,
+        fromEmail,
+        fromName,
+        to: t.email,
+        subject: substituteSeat(subjectBase, t.seat),
+        html: substituteSeat(htmlBase, t.seat),
+        timeoutMs: 10000,
+      });
       results.push({ to: t.email, seat: t.seat, ok: r.ok, ...(r.error ? { error: r.error } : {}) });
       if (r.ok && mode !== 'test' && t.id !== undefined) roster.markSent(t.id, template.id);
     }
@@ -1007,7 +1017,14 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       } else {
         cfg.delete(emailTplKey(template.id, template.locale));
       }
-      cfg.set('email_vars', vars, 'admin');
+      // Merge, don't replace: each template type carries only its own
+      // vars, and a summary send must not wipe the invitation's saved
+      // CLUSTER/PASSWORD for late roster additions.
+      cfg.set(
+        'email_vars',
+        { ...(cfg.get<Record<string, string>>('email_vars') ?? {}), ...vars },
+        'admin',
+      );
     }
 
     const failed = results.filter((r) => !r.ok).length;

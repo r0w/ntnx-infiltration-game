@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import grapesjs, { type Editor } from 'grapesjs';
+import { useEffect, useRef, type MutableRefObject } from 'react';
+import grapesjs from 'grapesjs';
 import presetNewsletter from 'grapesjs-preset-newsletter';
 import 'grapesjs/dist/css/grapes.min.css';
 
@@ -50,14 +50,21 @@ function reassemble(shell: Shell, bodyInner: string): string {
 export default function EmailStudio({
   html,
   onChange,
+  flushRef,
 }: {
   /** Full email document loaded into the studio at mount. Later edits
    *  flow OUT through onChange only — remount (key) to load new content. */
   html: string;
   onChange: (html: string) => void;
+  /**
+   * Receives a function that synchronously exports the current canvas
+   * through onChange. The parent MUST call it before reading the draft
+   * (send, view switch, dirty check): the export is debounced 400ms, so
+   * without a flush the last keystrokes would be read stale or lost.
+   */
+  flushRef?: MutableRefObject<(() => void) | null>;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const editorRef = useRef<Editor | null>(null);
   // Mount-time snapshot: the editor is uncontrolled after init.
   const initialHtml = useRef(html);
   const onChangeRef = useRef(onChange);
@@ -82,7 +89,6 @@ export default function EmailStudio({
       },
     });
     editor.setComponents(bodyInner);
-    editorRef.current = editor;
 
     let timer: ReturnType<typeof setTimeout> | undefined;
     const exportDraft = () => {
@@ -98,13 +104,23 @@ export default function EmailStudio({
       timer = setTimeout(exportDraft, 400);
     };
     editor.on('update', onUpdate);
+    if (flushRef) {
+      flushRef.current = () => {
+        clearTimeout(timer);
+        exportDraft();
+      };
+    }
 
     return () => {
+      // No flush here on purpose: on a template switch the parent has
+      // already replaced the draft, and a late export would overwrite it
+      // with the OLD template's canvas. Flush points are the parent's.
       clearTimeout(timer);
+      if (flushRef) flushRef.current = null;
       editor.off('update', onUpdate);
       editor.destroy();
-      editorRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return <div className="admin-emails-studio" ref={containerRef} />;

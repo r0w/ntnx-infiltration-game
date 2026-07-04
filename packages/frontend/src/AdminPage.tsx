@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   api,
@@ -16,6 +16,7 @@ import {
   type AdminPeerEntry,
   type AdminUserEntry,
 } from './api';
+import { EMAIL_RE } from '@ntnx-game/shared';
 import { ConfirmModal, Modal } from './Modal';
 
 // GrapesJS studio — lazy so the ~1MB editor only loads when the Emails tab shows it.
@@ -1851,19 +1852,11 @@ function PlannerConfigEditor({ password }: { password: string }) {
 }
 
 /**
- * Emails tab — send participant emails (mission invitation / lab summary)
- * from /admin, replacing the old escape-game blueprint day-2 actions.
- *
- * - Sender identity = a Mailtrap Send API token + a from address on a
- *   domain verified in that account; the server lists the account's
- *   verified domains to suggest one. Persisted server-side.
- * - Recipients live on a seat-numbered roster (email ↔ VDI account
- *   <CLUSTER>-User<seat>); each template type is one-shot per
- *   participant, so adding someone late only emails them. Per-row
- *   resend + delete.
- * - The body is edited in place in the rendered email (iframe in
- *   designMode) with a small formatting toolbar; raw-HTML source view
- *   as fallback. Edits + variables persist per deployment on send.
+ * Emails tab — the dispatch console for participant emails (issue #30).
+ * Sender = Mailtrap Send API token + verified from-domain; recipients =
+ * seat-numbered roster where each template type goes out once per agent;
+ * body edited in the GrapesJS studio (EmailStudio) with source/preview
+ * views. Drafts and vars persist server-side per deployment on send.
  */
 function EmailsTab({ password }: { password: string }) {
   // Sender config (mirrors PlannerConfigEditor).
@@ -1899,6 +1892,16 @@ function EmailsTab({ password }: { password: string }) {
   const [viewMode, setViewMode] = useState<'edit' | 'source' | 'preview'>('edit');
   // Bumped on every template (re)load so the studio remounts with the fresh draft.
   const [studioNonce, setStudioNonce] = useState(0);
+  // Synchronous mirror of `html` so handlers (send, dirty check) can read
+  // the draft right after a studio flush without waiting for a re-render.
+  const htmlRef = useRef('');
+  // Set by EmailStudio: synchronously exports the canvas into updateHtml.
+  const studioFlushRef = useRef<(() => void) | null>(null);
+  // Subject/html as loaded from the template — the dirty-draft baseline.
+  const loadedDraftRef = useRef<{ subject: string; html: string } | null>(null);
+  const [pendingSwitch, setPendingSwitch] = useState<{ key: string; thenSend: boolean } | null>(
+    null,
+  );
 
   // Roster.
   const [roster, setRoster] = useState<AdminEmailRosterEntry[] | null>(null);
@@ -1911,6 +1914,11 @@ function EmailsTab({ password }: { password: string }) {
   const [error, setError] = useState<string | null>(null);
 
   const selTemplate = templates?.find((t) => `${t.id}.${t.locale}` === selKey) ?? null;
+
+  const updateHtml = useCallback((v: string) => {
+    htmlRef.current = v;
+    setHtml(v);
+  }, []);
 
   const loadDomains = useCallback(async () => {
     setTokenStatus('checking');
@@ -1984,7 +1992,8 @@ function EmailsTab({ password }: { password: string }) {
       const t = tplList.find((t) => `${t.id}.${t.locale}` === key);
       if (!t) return;
       setSubject(t.subject);
-      setHtml(t.html);
+      updateHtml(t.html);
+      loadedDraftRef.current = { subject: t.subject, html: t.html };
       // Priority: last-used value for this deployment, then the template
       // default, then the derived ones — GAME_URL = this deployment's own
       // origin, CLUSTER = the probed PE cluster name, PASSWORD = same as
@@ -2005,7 +2014,7 @@ function EmailsTab({ password }: { password: string }) {
       setStudioNonce((n) => n + 1);
       setSendReport(null);
     },
-    [],
+    [updateHtml],
   );
 
   // Operator-filled {VARS} substituted for the preview; {ID} shows the
@@ -2026,11 +2035,12 @@ function EmailsTab({ password }: { password: string }) {
   // Hard-block sending only when Mailtrap explicitly rejected the token;
   // a transient probe failure ('error') warns without blocking.
   const canSend = wired && tokenStatus !== 'invalid';
-  const fromDomain = (savedCfg?.fromEmail ?? '').split('@')[1] ?? '';
+  // Email domains are case-insensitive — compare them that way.
+  const fromDomain = ((savedCfg?.fromEmail ?? '').split('@')[1] ?? '').toLowerCase();
   const fromDomainUnverified =
     tokenStatus === 'valid' &&
     fromDomain !== '' &&
-    (domains ?? []).every((d) => !d.verified || d.domain !== fromDomain);
+    (domains ?? []).every((d) => !d.verified || d.domain.toLowerCase() !== fromDomain);
   const cfgDirty =
     savedCfg !== null &&
     (token.trim() !== savedCfg.token ||
@@ -2041,19 +2051,37 @@ function EmailsTab({ password }: { password: string }) {
     (roster ?? []).filter((r) => r.sent[tplType] === undefined);
   const pending = selTemplate ? pendingFor(selTemplate.id) : [];
 
+  // Loading a template overwrites the draft; edits persist server-side
+  // only on send, so a dirty draft gets a discard confirmation first.
+  const requestTemplateChange = (key: string, thenSend = false) => {
+    if (!key || key === selKey) {
+      if (thenSend) setConfirmSend(true);
+      return;
+    }
+    studioFlushRef.current?.();
+    const loaded = loadedDraftRef.current;
+    const dirty =
+      selKey !== '' &&
+      loaded !== null &&
+      (subject !== loaded.subject || htmlRef.current !== loaded.html);
+    if (dirty) {
+      setPendingSwitch({ key, thenSend });
+      return;
+    }
+    applyTemplate(key, templates ?? [], savedVars, clusterName);
+    if (thenSend) setConfirmSend(true);
+  };
+
   // Per-type send button in the roster header. If the composer holds a
   // different type, load that type's template first (keeping the
   // current locale) so the confirm modal always shows what goes out.
   const requestSend = (tplType: 'invitation-vdi' | 'summary') => {
-    if (selTemplate?.id !== tplType) {
-      const locale = selTemplate?.locale ?? 'en';
-      const t =
-        templates?.find((t) => t.id === tplType && t.locale === locale) ??
-        templates?.find((t) => t.id === tplType);
-      if (!t) return;
-      applyTemplate(`${t.id}.${t.locale}`, templates ?? [], savedVars, clusterName);
-    }
-    setConfirmSend(true);
+    const locale = selTemplate?.locale ?? 'en';
+    const t =
+      templates?.find((t) => t.id === tplType && t.locale === locale) ??
+      templates?.find((t) => t.id === tplType);
+    if (!t) return;
+    requestTemplateChange(`${t.id}.${t.locale}`, true);
   };
   const verifiedDomains = (domains ?? []).filter((d) => d.verified);
 
@@ -2091,6 +2119,8 @@ function EmailsTab({ password }: { password: string }) {
 
   const send = async (mode: 'pending' | 'rows' | 'test', rosterIds?: number[]) => {
     if (!selTemplate) return;
+    // Pull any pending studio edits into the draft before reading it.
+    studioFlushRef.current?.();
     setBusy(mode === 'test' ? 'test' : 'send');
     setError(null);
     setSendReport(null);
@@ -2099,13 +2129,18 @@ function EmailsTab({ password }: { password: string }) {
         templateId: selTemplate.id,
         locale: selTemplate.locale,
         subject: subject.trim(),
-        html,
+        html: htmlRef.current,
         vars,
         mode,
         ...(rosterIds ? { rosterIds } : {}),
         ...(mode === 'test' ? { testAddress: testAddr.trim() } : {}),
       });
       setSendReport(r);
+      // A send-only Mailtrap token 401s on the accounts API but delivers
+      // fine — a successful dry run is proof enough to lift the block.
+      if (mode === 'test' && r.failed === 0 && tokenStatus === 'invalid') {
+        setTokenStatus('valid');
+      }
       if (mode !== 'test') {
         // Sends persist the draft + refresh the sent badges.
         const [ros, tpl, cfg] = await Promise.all([
@@ -2144,6 +2179,13 @@ function EmailsTab({ password }: { password: string }) {
     'invitation-vdi': 'invitation',
     summary: 'summary',
   };
+  // One option list shared by the dry-run and composer pickers.
+  const templateOptions = (templates ?? []).map((t) => (
+    <option key={`${t.id}.${t.locale}`} value={`${t.id}.${t.locale}`}>
+      {TEMPLATE_LABELS[t.id] ?? t.id} · {t.locale}
+      {t.overridden ? ' · edited' : ''}
+    </option>
+  ));
 
   return (
     <div className="admin-emails">
@@ -2164,7 +2206,10 @@ function EmailsTab({ password }: { password: string }) {
             {!wired ? (
               <span className="c-yellow">● channel down · set the token and from address</span>
             ) : tokenStatus === 'invalid' ? (
-              <span className="c-red">● channel down · Mailtrap rejected the token</span>
+              <span className="c-red">
+                ● Mailtrap rejected the token · sends disabled (a dry run can
+                prove a send-only token and re-open the channel)
+              </span>
             ) : tokenStatus === 'checking' ? (
               <span className="c-dim">● checking uplink…</span>
             ) : tokenStatus === 'error' ? (
@@ -2217,7 +2262,7 @@ function EmailsTab({ password }: { password: string }) {
               verified: {verifiedDomains.map((d) => d.domain).join(', ')}
               {verifiedDomains.map((d) => {
                 const suggestion = `tank@${d.domain}`;
-                return suggestion !== fromEmail.trim() ? (
+                return suggestion !== fromEmail.trim().toLowerCase() ? (
                   <button
                     key={d.domain}
                     type="button"
@@ -2294,10 +2339,10 @@ function EmailsTab({ password }: { password: string }) {
             {busy === 'roster' ? '…' : 'add'}
           </button>
         </div>
-        {roster && roster.length > 20 && (
+        {roster && roster.some((r) => r.seat > 20) && (
           <p className="admin-emails-warn c-yellow">
-            {roster.length} participants for 20 VDI accounts — seats above 20
-            have no matching account.
+            seats above 20 in use · those participants have no matching VDI
+            account.
           </p>
         )}
         {roster && roster.length > 0 ? (
@@ -2401,16 +2446,11 @@ function EmailsTab({ password }: { password: string }) {
             <select
               className="admin-cluster-input admin-emails-dryrun-select"
               value={selKey}
-              onChange={(e) => applyTemplate(e.target.value, templates ?? [], savedVars, clusterName)}
+              onChange={(e) => requestTemplateChange(e.target.value)}
               disabled={busy !== null || templates === null}
             >
               <option value="">choose…</option>
-              {(templates ?? []).map((t) => (
-                <option key={`${t.id}.${t.locale}`} value={`${t.id}.${t.locale}`}>
-                  {TEMPLATE_LABELS[t.id] ?? t.id} · {t.locale}
-                  {t.overridden ? ' · edited' : ''}
-                </option>
-              ))}
+              {templateOptions}
             </select>
             <input
               type="text"
@@ -2467,16 +2507,11 @@ function EmailsTab({ password }: { password: string }) {
             <select
               className="admin-cluster-input"
               value={selKey}
-              onChange={(e) => applyTemplate(e.target.value, templates ?? [], savedVars, clusterName)}
+              onChange={(e) => requestTemplateChange(e.target.value)}
               disabled={busy !== null || templates === null}
             >
               <option value="">choose…</option>
-              {(templates ?? []).map((t) => (
-                <option key={`${t.id}.${t.locale}`} value={`${t.id}.${t.locale}`}>
-                  {TEMPLATE_LABELS[t.id] ?? t.id} · {t.locale}
-                  {t.overridden ? ' · edited' : ''}
-                </option>
-              ))}
+              {templateOptions}
             </select>
           </div>
           {Object.keys(vars).map((k) => (
@@ -2515,7 +2550,10 @@ function EmailsTab({ password }: { password: string }) {
                     role="tab"
                     aria-selected={viewMode === m}
                     className={`admin-tab ${viewMode === m ? 'admin-tab-active' : ''}`}
-                    onClick={() => setViewMode(m)}
+                    onClick={() => {
+                      studioFlushRef.current?.();
+                      setViewMode(m);
+                    }}
                   >
                     {m}
                   </button>
@@ -2537,14 +2575,19 @@ function EmailsTab({ password }: { password: string }) {
               <Suspense
                 fallback={<p className="c-dim admin-emails-warn">loading editor…</p>}
               >
-                <EmailStudio key={`${selKey}:${studioNonce}`} html={html} onChange={setHtml} />
+                <EmailStudio
+                  key={`${selKey}:${studioNonce}`}
+                  html={html}
+                  onChange={updateHtml}
+                  flushRef={studioFlushRef}
+                />
               </Suspense>
             )}
             {viewMode === 'source' && (
               <textarea
                 className="admin-cluster-textarea admin-emails-editor"
                 value={html}
-                onChange={(e) => setHtml(e.target.value)}
+                onChange={(e) => updateHtml(e.target.value)}
                 disabled={busy !== null}
                 spellCheck={false}
               />
@@ -2569,6 +2612,25 @@ function EmailsTab({ password }: { password: string }) {
         )}
       </div>
 
+      {pendingSwitch && (
+        <ConfirmModal
+          title="discard draft edits"
+          confirmLabel="discard and switch"
+          danger
+          onConfirm={() => {
+            const p = pendingSwitch;
+            setPendingSwitch(null);
+            applyTemplate(p.key, templates ?? [], savedVars, clusterName);
+            if (p.thenSend) setConfirmSend(true);
+          }}
+          onCancel={() => setPendingSwitch(null)}
+        >
+          <p>
+            The current draft has unsent edits; loading another template
+            discards them. Continue?
+          </p>
+        </ConfirmModal>
+      )}
       {confirmSend && selTemplate && (
         <ConfirmModal
           title="send emails"

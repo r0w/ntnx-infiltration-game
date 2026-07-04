@@ -1035,7 +1035,7 @@ describe('email participant routes', () => {
     JSON.stringify({
       templateId: 'invitation-vdi',
       locale: 'en',
-      subject: 's',
+      subject: 'briefing {ID} on {CLUSTER}',
       html: '<b>agent {ID} on {CLUSTER}</b>',
       vars: { CLUSTER: 'DM3-POC004' },
       mode: 'pending',
@@ -1129,6 +1129,11 @@ describe('email participant routes', () => {
       '<b>agent 01 on DM3-POC004</b>',
       '<b>agent 02 on DM3-POC004</b>',
     ]);
+    // {ID} + {VARS} are substituted in the subject too.
+    expect(calls.map((c) => c.subject)).toEqual([
+      'briefing 01 on DM3-POC004',
+      'briefing 02 on DM3-POC004',
+    ]);
 
     // Late addition: a second pending send only reaches the newcomer.
     await addRoster(r, ['c@x.co']);
@@ -1171,6 +1176,28 @@ describe('email participant routes', () => {
     // summary family untouched everywhere; op@x.co not added to the roster.
     expect(after.entries).toHaveLength(3);
     expect(after.entries.every((e) => e.sent['summary'] === undefined)).toBe(true);
+  });
+
+  test('email_vars merge across template types (summary send keeps invitation vars)', async () => {
+    const db = freshDb();
+    const { r } = emailRouter(db);
+    await wireSender(r);
+    await addRoster(r, ['a@x.co']);
+    await r.request('/email-send', { method: 'POST', headers: JSON_AUTH, body: sendBody() });
+    await r.request('/email-send', {
+      method: 'POST',
+      headers: JSON_AUTH,
+      body: sendBody({
+        templateId: 'summary',
+        subject: 'debrief',
+        html: '<b>bye</b>',
+        vars: { SURVEY_URL: 'https://survey.example' },
+      }),
+    });
+    const cfg = (await (await r.request('/email-config', { headers: AUTH })).json()) as {
+      vars: Record<string, string>;
+    };
+    expect(cfg.vars).toEqual({ CLUSTER: 'DM3-POC004', SURVEY_URL: 'https://survey.example' });
   });
 
   test('failed sends stay pending (no markSent)', async () => {

@@ -180,31 +180,37 @@ export async function listMailtrapDomains(
     }
     if (!accRes.ok) return { domains: [], error: `accounts: HTTP ${accRes.status}` };
     const accounts = (await accRes.json()) as Array<{ id: number }>;
-    const domains: Array<{ domain: string; verified: boolean }> = [];
-    for (const acc of accounts) {
-      const dRes = await fetch(`https://mailtrap.io/api/accounts/${acc.id}/sending_domains`, {
-        headers,
-        signal: controller.signal,
-      });
-      if (!dRes.ok) continue;
-      const body = (await dRes.json()) as {
-        data?: Array<{
-          domain_name: string;
-          demo?: boolean;
-          dns_records?: Array<{ status: string }>;
-        }>;
-      };
-      for (const d of body.data ?? []) {
-        // demomailtrap.co & co: Mailtrap's sandbox domains only deliver to
-        // the account owner — useless for real participant sends.
-        if (d.demo) continue;
-        domains.push({
-          domain: d.domain_name,
-          verified: (d.dns_records ?? []).every((r) => r.status === 'pass'),
+    // Accounts are independent — fetch in parallel so the shared timeout
+    // bounds the slowest lookup, not the sum.
+    const perAccount = await Promise.all(
+      accounts.map(async (acc) => {
+        const dRes = await fetch(`https://mailtrap.io/api/accounts/${acc.id}/sending_domains`, {
+          headers,
+          signal: controller.signal,
         });
-      }
-    }
-    return { domains };
+        if (!dRes.ok) return [];
+        const body = (await dRes.json()) as {
+          data?: Array<{
+            domain_name: string;
+            demo?: boolean;
+            dns_records?: Array<{ status: string }>;
+          }>;
+        };
+        return (body.data ?? [])
+          // demomailtrap.co & co: Mailtrap's sandbox domains only deliver
+          // to the account owner — useless for real participant sends.
+          .filter((d) => !d.demo)
+          .map((d) => ({
+            domain: d.domain_name,
+            // A domain with no DNS records at all is not verified — don't
+            // let .every() on an empty array vouch for it.
+            verified:
+              (d.dns_records?.length ?? 0) > 0 &&
+              (d.dns_records ?? []).every((r) => r.status === 'pass'),
+          }));
+      }),
+    );
+    return { domains: perAccount.flat() };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { domains: [], error: controller.signal.aborted ? 'timeout' : msg };

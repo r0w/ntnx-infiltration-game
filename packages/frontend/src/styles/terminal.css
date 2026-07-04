@@ -1675,12 +1675,6 @@ a.terminal-link:visited {
     gap: 16px;
   }
 }
-.admin-cluster-intro {
-  color: #c4ced6;
-  font-size: 13px;
-  margin: 0 0 4px;
-  line-height: 1.5;
-}
 .admin-cluster-section {
   display: flex;
   flex-direction: column;
@@ -1867,24 +1861,18 @@ a.terminal-link:visited {
 .admin-emails-var-input { max-width: 380px; }
 .admin-emails-subject { margin-top: 12px; }
 .admin-emails-subject-input { max-width: 560px; }
-.admin-emails-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  margin-top: 12px;
-}
-@media (max-width: 980px) {
-  .admin-emails-grid { grid-template-columns: 1fr; }
-}
 .admin-emails-editor {
   font-family: var(--mono, monospace);
   font-size: 12px;
   min-height: 480px;
   white-space: pre;
+  width: 100%;
+  margin-top: 10px;
 }
 .admin-emails-preview {
   width: 100%;
   min-height: 480px;
+  margin-top: 10px;
   border: 1px solid #1b232b;
   border-radius: 4px;
   background: #0b0f1a; /* matches the templates' own background */
@@ -1912,28 +1900,12 @@ a.terminal-link:visited {
   flex-wrap: wrap;
 }
 .admin-emails-viewmodes { display: flex; gap: 4px; }
-.admin-emails-format { display: flex; align-items: center; gap: 4px; }
-.admin-emails-format-btn {
-  background: rgba(124, 220, 254, 0.03);
-  border: 1px solid #1b232b;
-  border-radius: 3px;
-  color: #e6edf3;
-  font: inherit;
-  font-size: 13px;
-  width: 28px;
-  height: 26px;
-  cursor: pointer;
-}
-.admin-emails-format-btn:hover { border-color: var(--accent); }
-.admin-emails-format-hint { font-size: 11px; margin-left: 8px; }
 .admin-emails-studio {
   margin-top: 10px;
   border: 1px solid #1b232b;
   border-radius: 4px;
   overflow: hidden;
 }
-.admin-emails-editor { margin-top: 10px; width: 100%; }
-.admin-emails-preview { margin-top: 10px; }
 .admin-emails-roster-table { margin-top: 12px; }
 /* Per-type send buttons in the roster header — briefing purple, they SEND. */
 .admin-emails-send-btn {
@@ -1972,8 +1944,6 @@ a.terminal-link:visited {
 }
 .admin-emails-dryrun-select { flex: 0 0 auto; }
 .admin-emails-roster-table .admin-planner-reveal { margin-left: 10px; }
-.admin-emails-seat { color: var(--accent); font-weight: 600; }
-.admin-emails-sendrow { margin-top: 14px; align-items: end; }
 .admin-emails-warn { font-size: 12px; margin: 8px 0 0; }
 .admin-emails-report { margin-top: 10px; font-size: 13px; }
 .admin-emails-report-list {
@@ -2360,14 +2330,6 @@ a.terminal-link:visited {
 .modal-cascade-hint { font-size: 11px; line-height: 1.5; }
 
 /* ─── /admin gates section ────────────────────────────────────────── */
-.admin-section-title {
-  margin: 0 0 10px;
-  font-size: 11px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--dim);
-}
 .admin-gates {
   margin-bottom: 24px;
 }
