@@ -122,7 +122,10 @@ def attempt_remove(node_uuid):
             tr = requests.get(task_url, auth=AUTH, headers=HEADERS, verify=False, timeout=30)
             data = tr.json().get('data') or {}
         except Exception as e:
+            # Back off before retrying so a transient blip doesn't burn the
+            # whole precheck window in a millisecond-fast busy-loop.
             print("  task poll error: %s — retrying" % str(e)[:120])
+            time.sleep(TASK_PRECHECK_INTERVAL_SEC)
             continue
         status = data.get('status')
         if status in ('FAILED', 'CANCELED', 'CANCELLED'):
