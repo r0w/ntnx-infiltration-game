@@ -1047,7 +1047,7 @@ describe('email participant routes', () => {
     let res = await r.request('/email-config', { headers: AUTH });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      mailtrapToken: '', fromEmail: '', fromName: '', vars: {},
+      mailtrapToken: '', fromEmail: '', fromName: '', vars: {}, clusterName: '',
     });
 
     res = await r.request('/email-config', {

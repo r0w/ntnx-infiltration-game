@@ -1855,10 +1855,17 @@ function EmailsTab({ password }: { password: string }) {
     null,
   );
   const [domainsError, setDomainsError] = useState<string | null>(null);
+  // Verdict of the domains lookup, which doubles as a token check:
+  // 'invalid' = Mailtrap rejected the token (sending disabled),
+  // 'error' = probe failed for another reason (warn, don't block).
+  const [tokenStatus, setTokenStatus] = useState<
+    'unknown' | 'checking' | 'valid' | 'invalid' | 'error'
+  >('unknown');
 
   // Composer.
   const [templates, setTemplates] = useState<AdminEmailTemplate[] | null>(null);
   const [savedVars, setSavedVars] = useState<Record<string, string>>({});
+  const [clusterName, setClusterName] = useState('');
   const [selKey, setSelKey] = useState('');
   const [subject, setSubject] = useState('');
   const [html, setHtml] = useState('');
@@ -1879,12 +1886,15 @@ function EmailsTab({ password }: { password: string }) {
   const selTemplate = templates?.find((t) => `${t.id}.${t.locale}` === selKey) ?? null;
 
   const loadDomains = useCallback(async () => {
+    setTokenStatus('checking');
     try {
       const d = await api.adminEmailDomains(password);
       setDomains(d.domains);
       setDomainsError(d.error ?? null);
+      setTokenStatus(d.unauthorized ? 'invalid' : d.error ? 'error' : 'valid');
     } catch (err) {
       setDomainsError(err instanceof Error ? err.message : String(err));
+      setTokenStatus('error');
     }
   }, [password]);
 
@@ -1902,6 +1912,7 @@ function EmailsTab({ password }: { password: string }) {
       setFromName(cfg.fromName);
       setSavedCfg({ token: cfg.mailtrapToken, fromEmail: cfg.fromEmail, fromName: cfg.fromName });
       setSavedVars(cfg.vars);
+      setClusterName(cfg.clusterName);
       setTemplates(tpl.templates);
       setRoster(ros.entries);
       if (cfg.mailtrapToken) void loadDomains();
@@ -1939,24 +1950,29 @@ function EmailsTab({ password }: { password: string }) {
   };
 
   const applyTemplate = useCallback(
-    (key: string, tplList: AdminEmailTemplate[], saved: Record<string, string>) => {
+    (key: string, tplList: AdminEmailTemplate[], saved: Record<string, string>, cluster: string) => {
       setSelKey(key);
       const t = tplList.find((t) => `${t.id}.${t.locale}` === key);
       if (!t) return;
       setSubject(t.subject);
       setHtml(t.html);
       // Priority: last-used value for this deployment, then the template
-      // default; GAME_URL falls back to this deployment's own origin.
-      setVars(
-        Object.fromEntries(
-          Object.keys(t.variables).map((k) => [
-            k,
-            saved[k]?.trim()
-              ? saved[k]
-              : t.variables[k] || (k === 'GAME_URL' ? window.location.origin : ''),
-          ]),
-        ),
+      // default, then the derived ones — GAME_URL = this deployment's own
+      // origin, CLUSTER = the probed PE cluster name, PASSWORD = same as
+      // CLUSTER (the HPoC VDI accounts use the cluster name as password).
+      const resolved = Object.fromEntries(
+        Object.keys(t.variables).map((k) => [
+          k,
+          saved[k]?.trim()
+            ? saved[k]
+            : t.variables[k] ||
+              (k === 'GAME_URL' ? window.location.origin : k === 'CLUSTER' ? cluster : ''),
+        ]),
       );
+      if ('PASSWORD' in resolved && !resolved.PASSWORD.trim()) {
+        resolved.PASSWORD = resolved.CLUSTER ?? '';
+      }
+      setVars(resolved);
       setSendReport(null);
     },
     [],
@@ -2011,6 +2027,14 @@ function EmailsTab({ password }: { password: string }) {
   );
 
   const wired = savedCfg !== null && savedCfg.token !== '' && savedCfg.fromEmail !== '';
+  // Hard-block sending only when Mailtrap explicitly rejected the token;
+  // a transient probe failure ('error') warns without blocking.
+  const canSend = wired && tokenStatus !== 'invalid';
+  const fromDomain = (savedCfg?.fromEmail ?? '').split('@')[1] ?? '';
+  const fromDomainUnverified =
+    tokenStatus === 'valid' &&
+    fromDomain !== '' &&
+    (domains ?? []).every((d) => !d.verified || d.domain !== fromDomain);
   const cfgDirty =
     savedCfg !== null &&
     (token.trim() !== savedCfg.token ||
@@ -2097,7 +2121,7 @@ function EmailsTab({ password }: { password: string }) {
       await api.adminEmailTemplateReset(password, selTemplate.id, selTemplate.locale);
       const tpl = await api.adminEmailTemplates(password);
       setTemplates(tpl.templates);
-      applyTemplate(selKey, tpl.templates, savedVars);
+      applyTemplate(selKey, tpl.templates, savedVars, clusterName);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -2123,10 +2147,20 @@ function EmailsTab({ password }: { password: string }) {
           </a>{' '}
           Send API. The from address must belong to a domain verified in the
           Mailtrap account owning the token.{' '}
-          {wired ? (
-            <span className="c-green">● wired</span>
-          ) : (
+          {!wired ? (
             <span className="c-yellow">● not wired — sending disabled</span>
+          ) : tokenStatus === 'invalid' ? (
+            <span className="c-red">● token rejected by Mailtrap — sending disabled</span>
+          ) : tokenStatus === 'checking' ? (
+            <span className="c-dim">● checking token…</span>
+          ) : tokenStatus === 'error' ? (
+            <span className="c-yellow">● token unverified (Mailtrap unreachable)</span>
+          ) : fromDomainUnverified ? (
+            <span className="c-yellow">
+              ● wired, but {fromDomain} is not a verified sending domain
+            </span>
+          ) : (
+            <span className="c-green">● wired</span>
           )}
         </p>
         <div className="admin-cluster-section">
@@ -2279,7 +2313,7 @@ function EmailsTab({ password }: { password: string }) {
                           <button
                             type="button"
                             className="admin-planner-reveal"
-                            disabled={busy !== null || !wired || !draftReady}
+                            disabled={busy !== null || !canSend || !draftReady}
                             onClick={() => void send('rows', [r.id])}
                             title="resend the current draft to this participant only"
                           >
@@ -2314,11 +2348,13 @@ function EmailsTab({ password }: { password: string }) {
               <button
                 type="button"
                 className="modal-btn modal-btn-danger"
-                disabled={busy !== null || !wired || !draftReady || pending.length === 0}
+                disabled={busy !== null || !canSend || !draftReady || pending.length === 0}
                 onClick={() => setConfirmSend(true)}
                 title={
-                  !wired
-                    ? 'configure the sender identity first'
+                  !canSend
+                    ? wired
+                      ? 'Mailtrap rejected the token'
+                      : 'configure the sender identity first'
                     : !draftReady
                       ? 'pick a template first'
                       : pending.length === 0
@@ -2350,7 +2386,7 @@ function EmailsTab({ password }: { password: string }) {
                 type="button"
                 className="modal-btn"
                 disabled={
-                  busy !== null || !wired || !draftReady || !/^\S+@\S+\.\S+$/.test(testAddr.trim())
+                  busy !== null || !canSend || !draftReady || !/^\S+@\S+\.\S+$/.test(testAddr.trim())
                 }
                 onClick={() => void send('test')}
                 title="send this draft to a single address; does not mark anyone as sent"
@@ -2391,7 +2427,7 @@ function EmailsTab({ password }: { password: string }) {
             <select
               className="admin-cluster-input"
               value={selKey}
-              onChange={(e) => applyTemplate(e.target.value, templates ?? [], savedVars)}
+              onChange={(e) => applyTemplate(e.target.value, templates ?? [], savedVars, clusterName)}
               disabled={busy !== null || templates === null}
             >
               <option value="">choose…</option>

@@ -217,3 +217,37 @@ export async function probeIntelligentOps(
     return { state: null, enableUrl, error: msg };
   }
 }
+
+/**
+ * Name of the first PE cluster (e.g. `DM3-POC004`) — seeds the {CLUSTER}
+ * variable of the participant emails (VDI accounts are named
+ * `<cluster>-User<seat>` and their password matches the cluster name on
+ * HPoC). null in mock mode or when the probe fails.
+ */
+export async function probeClusterName(
+  deps: Pick<ClusterStatusProbeDeps, 'nutanix' | 'logger'>,
+): Promise<string | null> {
+  const { nutanix, logger } = deps;
+  if (nutanix.mode === 'mock') return null;
+  try {
+    const res = await nutanix.request<{
+      entities?: Array<{
+        status?: {
+          name?: string;
+          resources?: { config?: { service_list?: string[] } };
+        };
+      }>;
+    }>('POST', '/api/nutanix/v3/clusters/list', { kind: 'cluster', length: 50 });
+    for (const e of res?.entities ?? []) {
+      const isPc = (e?.status?.resources?.config?.service_list ?? []).includes('PRISM_CENTRAL');
+      const name = e?.status?.name;
+      if (!isPc && name && name !== 'Unnamed') return name;
+    }
+    return null;
+  } catch (err) {
+    logger.warn('cluster name probe failed', {
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}

@@ -8,6 +8,7 @@ import type { LoadedPack } from '../pack-loader';
 import { analyzeDeps, cascadeDisable, type BrokenStage } from '../dep-analysis';
 import { probeClusterConfig } from '../cluster-config-probe';
 import {
+  probeClusterName,
   probeIntelligentOps,
   probeSoftwareVersions,
   type IntelligentOpsProbeResult,
@@ -65,6 +66,10 @@ export interface AdminEmailConfigPayload {
   fromName: string;
   /** Last-used template variable values ({CLUSTER}, {PASSWORD}, …), persisted per deployment. */
   vars: Record<string, string>;
+  /** PE cluster name probed from the live PC (e.g. `DM3-POC004`) — seeds
+   *  {CLUSTER} and, per the HPoC VDI convention, {PASSWORD}. '' when
+   *  unknown (mock mode / probe failed). */
+  clusterName: string;
 }
 
 export interface AdminEmailTemplatePayload {
@@ -792,10 +797,20 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       fromEmail: cfg.get<string>('email_from') ?? '',
       fromName: cfg.get<string>('email_from_name') ?? '',
       vars: cfg.get<Record<string, string>>('email_vars') ?? {},
+      clusterName: cfg.get<string>('cluster_name') ?? '',
     };
   };
 
-  router.get('/email-config', (c) => c.json(emailConfigPayload()));
+  router.get('/email-config', async (c) => {
+    // Probe the PE cluster name once per deployment and cache it —
+    // setIfAbsent, so an operator edit (if we ever add one) stays sticky.
+    const cfg = deps.service.clusterConfig;
+    if (cfg.get<string>('cluster_name') === undefined) {
+      const name = await probeClusterName({ nutanix: deps.nutanix, logger: consoleLogger });
+      if (name) cfg.setIfAbsent('cluster_name', name);
+    }
+    return c.json(emailConfigPayload());
+  });
 
   router.put('/email-config', async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as {

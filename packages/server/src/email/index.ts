@@ -136,7 +136,13 @@ export async function sendMailtrapEmail(args: MailtrapSendArgs): Promise<Mailtra
 export async function listMailtrapDomains(
   token: string,
   timeoutMs = 10000,
-): Promise<{ domains: Array<{ domain: string; verified: boolean }>; error?: string }> {
+): Promise<{
+  domains: Array<{ domain: string; verified: boolean }>;
+  /** True when Mailtrap explicitly rejected the token (401/403) — as
+   *  opposed to a transient network/API failure (`error` only). */
+  unauthorized?: boolean;
+  error?: string;
+}> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const headers = { Accept: 'application/json', 'Api-Token': token };
@@ -145,6 +151,9 @@ export async function listMailtrapDomains(
       headers,
       signal: controller.signal,
     });
+    if (accRes.status === 401 || accRes.status === 403) {
+      return { domains: [], unauthorized: true, error: `token rejected (HTTP ${accRes.status})` };
+    }
     if (!accRes.ok) return { domains: [], error: `accounts: HTTP ${accRes.status}` };
     const accounts = (await accRes.json()) as Array<{ id: number }>;
     const domains: Array<{ domain: string; verified: boolean }> = [];

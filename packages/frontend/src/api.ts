@@ -521,10 +521,11 @@ export const api = {
       body: JSON.stringify(body),
     }).then((res) => handle<AdminEmailConfigPayload>(res)),
   adminEmailDomains: (password: string) =>
-    adminGet<{ domains: Array<{ domain: string; verified: boolean }>; error?: string }>(
-      '/admin/email-domains',
-      password,
-    ),
+    adminGet<{
+      domains: Array<{ domain: string; verified: boolean }>;
+      unauthorized?: boolean;
+      error?: string;
+    }>('/admin/email-domains', password),
   adminEmailTemplates: (password: string) =>
     adminGet<{ templates: AdminEmailTemplate[] }>('/admin/email-templates', password),
   adminEmailTemplateReset: (password: string, id: string, locale: string) =>
@@ -572,6 +573,8 @@ export interface AdminEmailConfigPayload {
   fromEmail: string;
   fromName: string;
   vars: Record<string, string>;
+  /** PE cluster name probed live ('' when unknown) — default for {CLUSTER}/{PASSWORD}. */
+  clusterName: string;
 }
 
 export interface AdminEmailTemplate {
