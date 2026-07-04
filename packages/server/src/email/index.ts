@@ -5,16 +5,24 @@
 // runtime (and bundler) hand us the raw string — hence the casts.
 import invitationEnRaw from './templates/invitation.en.html' with { type: 'text' };
 import invitationFrRaw from './templates/invitation.fr.html' with { type: 'text' };
+import invitationVdiEnRaw from './templates/invitation-vdi.en.html' with { type: 'text' };
+import invitationVdiFrRaw from './templates/invitation-vdi.fr.html' with { type: 'text' };
+import invitationVpnEnRaw from './templates/invitation-vpn.en.html' with { type: 'text' };
+import invitationVpnFrRaw from './templates/invitation-vpn.fr.html' with { type: 'text' };
 import summaryEnRaw from './templates/summary.en.html' with { type: 'text' };
 import summaryFrRaw from './templates/summary.fr.html' with { type: 'text' };
 
 const invitationEn = invitationEnRaw as unknown as string;
 const invitationFr = invitationFrRaw as unknown as string;
+const invitationVdiEn = invitationVdiEnRaw as unknown as string;
+const invitationVdiFr = invitationVdiFrRaw as unknown as string;
+const invitationVpnEn = invitationVpnEnRaw as unknown as string;
+const invitationVpnFr = invitationVpnFrRaw as unknown as string;
 const summaryEn = summaryEnRaw as unknown as string;
 const summaryFr = summaryFrRaw as unknown as string;
 
 export interface EmailTemplate {
-  id: 'invitation' | 'summary';
+  id: 'invitation' | 'invitation-vdi' | 'invitation-vpn' | 'summary';
   locale: 'en' | 'fr';
   /** Default subject line — editable in the composer before sending. */
   subject: string;
@@ -43,6 +51,37 @@ export const EMAIL_TEMPLATES: EmailTemplate[] = [
     locale: 'fr',
     subject: 'Nutanix Cloud Operations Command Center - Briefing de Mission',
     html: invitationFr,
+    variables: { GAME_URL: '' },
+  },
+  // Legacy access variants, ported from the escape game: the event hands
+  // out per-seat VDI accounts ({CLUSTER}-User{ID} on a Parallels jump
+  // host) or a VPN profile, and the game URL is reached from inside.
+  {
+    id: 'invitation-vdi',
+    locale: 'en',
+    subject: 'Nutanix Cloud Operations Command Center - Mission Briefing',
+    html: invitationVdiEn,
+    variables: { GAME_URL: '', PARALLEL_URL: '', CLUSTER: '', PASSWORD: '' },
+  },
+  {
+    id: 'invitation-vdi',
+    locale: 'fr',
+    subject: 'Nutanix Cloud Operations Command Center - Briefing de Mission',
+    html: invitationVdiFr,
+    variables: { GAME_URL: '', PARALLEL_URL: '', CLUSTER: '', PASSWORD: '' },
+  },
+  {
+    id: 'invitation-vpn',
+    locale: 'en',
+    subject: 'Nutanix Cloud Operations Command Center - Mission Briefing',
+    html: invitationVpnEn,
+    variables: { GAME_URL: '' },
+  },
+  {
+    id: 'invitation-vpn',
+    locale: 'fr',
+    subject: 'Nutanix Cloud Operations Command Center - Briefing de Mission',
+    html: invitationVpnFr,
     variables: { GAME_URL: '' },
   },
   {

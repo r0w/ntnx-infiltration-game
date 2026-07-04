@@ -15,12 +15,12 @@
 </head>
 
 <body style="margin:0; padding:0; background-color:#0b0f1a;">
-  <!-- Préheader (masqué) -->
+  <!-- Preheader (hidden) -->
   <!--[if mso]>
   <div style="display:none; mso-hide:all;">
   <![endif]-->
   <div style="display:none; font-size:1px; line-height:1px; max-height:0px; max-width:0px; opacity:0; overflow:hidden;">
-    Briefing de mission – Accès initial et prochaines étapes.
+    Briefing de mission – Accès Initial et Instructions.
   </div>
   <!--[if mso]>
   </div>
@@ -30,8 +30,9 @@
     <tr>
       <td align="center" style="padding:24px 12px;">
 
-        <!-- Conteneur externe -->
+        <!-- Conteneur principal -->
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px; max-width:600px; background-color:#11162a; border:1px solid #1f2937;">
+          
           <!-- En-tête -->
           <tr>
             <td style="padding:22px 24px; background-color:#7855fa; color:#ffffff;">
@@ -72,7 +73,7 @@
               </div>
 
               <div style="font-size:15px; line-height:24px; margin:0 0 14px 0;">
-                Notre infrastructure cloud a été infiltrée et seule une personne possédant vos compétences peut en reprendre le contrôle.
+                Notre infrastructure cloud est sous forte pression et seule une personne possédant vos compétences peut en reprendre le contrôle.
               </div>
 
               <div style="font-size:15px; line-height:24px; margin:0 0 18px 0;">
@@ -90,26 +91,26 @@
                     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px; line-height:20px;">
                       <tr>
                         <td valign="top" style="width:35%; padding:6px 0; color:#cbd5e1; font-weight:bold;">
-                          Terminal de Mission :
+                          Hôte de Rebond Sécurisé :
                         </td>
                         <td valign="top" style="width:65%; padding:6px 0; color:#a5b4fc; word-break:break-word;">
-                          {GAME_URL}
+                          {PARALLEL_URL}
                         </td>
                       </tr>
                       <tr>
                         <td valign="top" style="padding:6px 0; color:#cbd5e1; font-weight:bold;">
-                          Indicatif :
+                          Utilisateur :
                         </td>
                         <td valign="top" style="padding:6px 0; color:#e6e6e6;">
-                          choisissez un trigramme de 3 lettres avec votre équipe
+                          {CLUSTER}-User{ID}
                         </td>
                       </tr>
                       <tr>
                         <td valign="top" style="padding:6px 0; color:#cbd5e1; font-weight:bold;">
-                          PIN :
+                          Mot de passe :
                         </td>
                         <td valign="top" style="padding:6px 0; color:#e6e6e6;">
-                          définissez-le à la première connexion ; il protège votre session
+                          {PASSWORD}
                         </td>
                       </tr>
                     </table>
@@ -119,7 +120,7 @@
               </table>
 
               <div style="font-size:15px; line-height:24px; margin:0 0 10px 0;">
-                Au lancement de l’opération, ouvrez un navigateur web et accédez à :
+                Une fois connecté, ouvrez un navigateur web et accédez à :
               </div>
 
               <!-- Bouton CTA -->
@@ -153,6 +154,10 @@
               </div>
 
               <div style="font-size:15px; line-height:24px; margin:0 0 14px 0;">
+                Une fois sur place, choisissez un trigramme de 3 lettres avec votre équipe et définissez un PIN à la première connexion ; il protège votre session.
+              </div>
+
+              <div style="font-size:15px; line-height:24px; margin:0 0 14px 0;">
                 Chaque défi mettra à l’épreuve votre compréhension de la Nutanix Cloud Platform : Administration, Réseau,
                 Protection des Données, Automatisation et bien plus encore.
               </div>
@@ -179,7 +184,7 @@
           <!-- Pied de page -->
           <tr>
             <td style="padding:16px 24px; background-color:#020617; color:#64748b; text-align:center; font-size:12px; line-height:18px; font-family:Arial, Helvetica, sans-serif;">
-              Ce message s’autodétruira une fois la mission commencée.
+              Ce message s’autodétruira dès le début de la mission.
             </td>
           </tr>
 

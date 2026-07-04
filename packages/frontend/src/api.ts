@@ -549,7 +549,7 @@ export interface AdminEmailConfigPayload {
 }
 
 export interface AdminEmailTemplate {
-  id: 'invitation' | 'summary';
+  id: 'invitation' | 'invitation-vdi' | 'invitation-vpn' | 'summary';
   locale: 'en' | 'fr';
   subject: string;
   html: string;

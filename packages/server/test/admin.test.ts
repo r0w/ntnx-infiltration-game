@@ -1031,14 +1031,19 @@ describe('email participant routes', () => {
     expect(after.fromName).toBe('');
   });
 
-  test('templates: 2 ids x 2 locales, html + subject non-empty', async () => {
+  test('templates: 4 ids x 2 locales, html + subject non-empty', async () => {
     const res = await router(freshDb()).request('/email-templates', { headers: AUTH });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       templates: Array<{ id: string; locale: string; subject: string; html: string }>;
     };
     const keys = body.templates.map((t) => `${t.id}.${t.locale}`).sort();
-    expect(keys).toEqual(['invitation.en', 'invitation.fr', 'summary.en', 'summary.fr']);
+    expect(keys).toEqual([
+      'invitation-vdi.en', 'invitation-vdi.fr',
+      'invitation-vpn.en', 'invitation-vpn.fr',
+      'invitation.en', 'invitation.fr',
+      'summary.en', 'summary.fr',
+    ]);
     for (const t of body.templates) {
       expect(t.subject.length).toBeGreaterThan(0);
       expect(t.html).toContain('<!doctype html>');
