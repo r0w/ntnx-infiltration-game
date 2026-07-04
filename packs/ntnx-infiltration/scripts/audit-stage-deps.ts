@@ -164,6 +164,9 @@ function loadStages(): Stage[] {
       rehydratable,
     });
   }
+  // Pack order, not filename order — "first producer wins" and the
+  // producer/consumer direction both depend on it.
+  stages.sort((a, b) => a.id - b.id);
   return stages;
 }
 
@@ -258,13 +261,24 @@ function printReport(r: Report): void {
  */
 function applyMode(stages: Stage[]): void {
   const allProducers = new Set<string>();
-  for (const s of stages) for (const v of s.produces) allProducers.add(v);
+  const firstProducer = new Map<string, number>();
+  for (const s of stages) {
+    for (const v of s.produces) {
+      allProducers.add(v);
+      if (!firstProducer.has(v)) firstProducer.set(v, s.id);
+    }
+  }
 
   let updated = 0;
   for (const s of stages) {
     const selfProduced = new Set(s.produces);
     const needs = s.consumes
-      .filter((v) => !selfProduced.has(v))
+      // A stage that consumes a var it also RE-captures (live-migrate-vm
+      // reads the previous HostUUID then stores the new one) still needs
+      // the earlier producer — only the var's ORIGIN stage gets to drop it
+      // from needs. Without this, fillMissingDeps never rehydrates
+      // create-vm on a resumed session and the player is stuck.
+      .filter((v) => !(selfProduced.has(v) && firstProducer.get(v) === s.id))
       .filter((v) => !ENV_SEEDED.has(v))
       .filter((v) => !IGNORE_VARS.has(v))
       // Only declare needs for vars we actually know are produced somewhere

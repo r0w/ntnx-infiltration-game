@@ -1,6 +1,9 @@
 {
   "name": "live-migrate-vm",
   "active": true,
+  "requires": [
+    "MultiNode"
+  ],
   "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
@@ -12,7 +15,6 @@
     "stage-014.line-06"
   ],
   "saveScore": false,
-  "requires": ["MultiNode"],
   "check": {
     "fn": "CheckLiveMigration"
   },
@@ -20,6 +22,7 @@
     "HostUUID"
   ],
   "needs": [
+    "HostUUID",
     "Trigram"
   ]
 }
