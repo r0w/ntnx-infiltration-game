@@ -15,9 +15,6 @@
   "check": {
     "fn": "CheckProject"
   },
-  "captures": [
-    "ProjectUUID"
-  ],
   "needs": [
     "Trigram",
     "Username"

@@ -39,6 +39,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Checks no longer false-fail after a player re-creates a resource (image,
+  subnet, project, category, user, policies, app): entities are re-resolved
+  by name at check time instead of trusting a UUID remembered earlier.
 - The install's node-shrink step only runs on a 4+ node cluster, so a smaller
   cluster no longer fails the deploy on a doomed node removal.
 - Deployment is resilient to transient Prism API blips: a single hiccup during

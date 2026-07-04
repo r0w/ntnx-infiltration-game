@@ -7,9 +7,15 @@ import {
   listAll,
   listAllV3,
   localizedHint,
+  lookupAppUuid,
+  lookupCategoryUuid,
+  lookupImageUuid,
+  lookupOrSkip,
+  lookupProjectUuid,
+  lookupProtectionPolicyUuid,
+  lookupSubnetUuid,
   lookupUserUuid,
   nutanixErrorDetail,
-  recoverVar,
 } from './helpers';
 
 /**
@@ -136,11 +142,7 @@ async function CheckUser(ctx: CheckContext): Promise<CheckResult> {
     if (found.extId) {
       ctx.cache.set({ kind: 'user', logicalName: expected, uuid: found.extId });
     }
-    return {
-      pass: true,
-      detail: `User '${expected}' found.`,
-      captured: found.extId ? { UserUUID: found.extId } : undefined,
-    };
+    return { pass: true, detail: `User '${expected}' found.` };
   } catch (err) {
     return { pass: false, detail: `IAM query failed: ${nutanixErrorDetail(err)}` };
   }
@@ -151,15 +153,20 @@ async function CheckUser(ctx: CheckContext): Promise<CheckResult> {
  * `checkAuthorizationPolicyAssignement` : verifies `{Trigram}-auth` exists
  * and asserts (a) `role` matches the `Super Admin` system role's extId,
  * (b) at least one identity entry has `identityFilter.user.uuid.anyof`
- * containing `UserUUID`. Without these, a player could pass with a
- * policy that grants the wrong role or targets a different user.
+ * containing the `{Trigram}-adm` user's uuid (resolved by name at check
+ * time). Without these, a player could pass with a policy that grants the
+ * wrong role or targets a different user.
  */
 async function CheckAuthPolicy(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const expected = `${trigram}-auth`;
   const expectedLc = expected.toLowerCase();
-  const userUuid = ctx.vars.get('UserUUID');
   try {
+    // The user binding is the point of this stage — no user, no pass.
+    const userUuid = await lookupUserUuid(ctx, `${trigram}-adm`);
+    if (!userUuid) {
+      return { pass: false, detail: `User '${trigram}-adm' not found on the cluster.` };
+    }
     // v4 authz policies carry the identifier on `displayName`. Top-level
     // `name` is null in list responses — the cached `cacheEntity` helper
     // only matches on `name`, so open-code the find+cache here. Match
@@ -195,18 +202,16 @@ async function CheckAuthPolicy(ctx: CheckContext): Promise<CheckResult> {
         detail: `Authorization policy '${expected}' is not bound to the Super Admin role.`,
       };
     }
-    if (typeof userUuid === 'string' && userUuid.length > 0) {
-      const userBound = (found.identities ?? []).some((id) => {
-        const anyof =
-          id.identityFilter?.user?.uuid?.anyof ?? id.$reserved?.user?.uuid?.anyof ?? [];
-        return anyof.includes(userUuid);
-      });
-      if (!userBound) {
-        return {
-          pass: false,
-          detail: `Authorization policy '${expected}' does not target '${trigram}-adm'.`,
-        };
-      }
+    const userBound = (found.identities ?? []).some((id) => {
+      const anyof =
+        id.identityFilter?.user?.uuid?.anyof ?? id.$reserved?.user?.uuid?.anyof ?? [];
+      return anyof.includes(userUuid);
+    });
+    if (!userBound) {
+      return {
+        pass: false,
+        detail: `Authorization policy '${expected}' does not target '${trigram}-adm'.`,
+      };
     }
     if (found.extId) {
       ctx.cache.set({ kind: 'authPolicy', logicalName: expected, uuid: found.extId });
@@ -285,7 +290,6 @@ async function CheckProject(ctx: CheckContext): Promise<CheckResult> {
     return {
       pass: true,
       detail: `Project '${expected}' has ${accounts.length} infrastructure account(s) attached.`,
-      captured: found.metadata?.uuid ? { ProjectUUID: found.metadata.uuid } : undefined,
     };
   } catch (err) {
     return { pass: false, detail: `Project query failed: ${nutanixErrorDetail(err)}` };
@@ -342,7 +346,6 @@ async function CheckNetwork(ctx: CheckContext): Promise<CheckResult> {
     return {
       pass: true,
       detail: `Subnet '${expected}' found (VLAN ${actualVlan}, advanced networking).`,
-      captured: found.extId ? { NetworkUUID: found.extId } : undefined,
     };
   } catch (err) {
     return { pass: false, detail: `Subnet query failed: ${nutanixErrorDetail(err)}` };
@@ -354,8 +357,7 @@ async function CheckNetwork(ctx: CheckContext): Promise<CheckResult> {
 /**
  * Stage 11 `add-ubuntu-image`. Verifies `{Trigram}-ubuntu` exists in the
  * image library as a disk image (not an ISO — the stage prose is explicit).
- * Captures ImageUUID so CheckVM can verify the VM's boot disk references it
- * later.
+ * CheckVM re-resolves the image by name when it verifies the boot disk.
  */
 async function CheckImage(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
@@ -377,11 +379,7 @@ async function CheckImage(ctx: CheckContext): Promise<CheckResult> {
     if (found.extId) {
       ctx.cache.set({ kind: 'image', logicalName: expected, uuid: found.extId });
     }
-    return {
-      pass: true,
-      detail: `Image '${expected}' found (disk).`,
-      captured: found.extId ? { ImageUUID: found.extId } : undefined,
-    };
+    return { pass: true, detail: `Image '${expected}' found (disk).` };
   } catch (err) {
     return { pass: false, detail: `Image query failed: ${nutanixErrorDetail(err)}` };
   }
@@ -484,10 +482,8 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
         }),
       };
     }
-    // NIC count + subnet binding. Self-heal NetworkUUID from the cluster
-    // when the session var is missing (server restart, fresh resume, etc.) —
-    // invisible to the player; only fails the assertion when the subnet
-    // truly doesn't exist on the cluster.
+    // NIC count + subnet binding, subnet resolved by name (issue #31).
+    // Transport blip → skip the assertion; real miss → fail.
     const nics = found.nics ?? [];
     if (nics.length !== 2) {
       return {
@@ -507,18 +503,24 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
         ),
       };
     }
-    const networkUuid = await recoverVar(ctx, 'NetworkUUID', 'create-vm', async () => {
-      const subnets = await listAll<{ extId?: string; name?: string }>(
-        ctx,
-        '/api/networking/v4.0/config/subnets',
-      );
-      return subnets.find((s) => s.name === `${trigram}-subnet`)?.extId;
-    });
-    if (networkUuid) {
+    const net = await lookupOrSkip(ctx, 'CheckVM: subnet', () =>
+      lookupSubnetUuid(ctx, `${trigram}-subnet`),
+    );
+    if (!net.failed && !net.uuid) {
+      return {
+        pass: false,
+        detail: `Subnet '${trigram}-subnet' not found on the cluster.`,
+        hint: localizedHint(ctx, {
+          en: `Your '${trigram}-subnet' is missing — re-create it.`,
+          fr: `Votre '${trigram}-subnet' n'existe plus — re-créez-le.`,
+        }),
+      };
+    }
+    if (net.uuid) {
       const onSubnet = nics.some(
         (n) =>
-          n?.nicNetworkInfo?.subnet?.extId === networkUuid ||
-          n?.networkInfo?.subnet?.extId === networkUuid,
+          n?.nicNetworkInfo?.subnet?.extId === net.uuid ||
+          n?.networkInfo?.subnet?.extId === net.uuid,
       );
       if (!onSubnet) {
         return {
@@ -531,18 +533,17 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
         };
       }
     }
-    // Boot disk image binding. Same self-heal pattern for ImageUUID.
-    const imageUuid = await recoverVar(ctx, 'ImageUUID', 'create-vm', async () => {
-      const images = await listAll<{ extId?: string; name?: string }>(
-        ctx,
-        '/api/vmm/v4.0/content/images',
-      );
-      return images.find((i) => i.name === `${trigram}-ubuntu`)?.extId;
-    });
-    if (imageUuid) {
+    // Boot disk image binding — same treatment.
+    const img = await lookupOrSkip(ctx, 'CheckVM: image', () =>
+      lookupImageUuid(ctx, `${trigram}-ubuntu`),
+    );
+    if (!img.failed && !img.uuid) {
+      return { pass: false, detail: `Image '${trigram}-ubuntu' not found in library.` };
+    }
+    if (img.uuid) {
       const disks = found.disks ?? [];
       const bootImg = disks[0]?.backingInfo?.dataSource?.reference?.imageExtId;
-      if (bootImg !== imageUuid) {
+      if (bootImg !== img.uuid) {
         return {
           pass: false,
           detail: `VM '${expected}' boot disk is not based on '${trigram}-ubuntu'.`,
@@ -553,24 +554,13 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
         };
       }
     }
-    // Resolve the player's project UUID (session var, or self-heal by name).
-    const projectUuid = await recoverVar(ctx, 'ProjectUUID', 'create-vm', async () => {
-      try {
-        const projects = await listAllV3<{
-          spec?: { name?: string };
-          status?: { name?: string };
-          metadata?: { name?: string; uuid?: string };
-        }>(ctx, '/api/nutanix/v3/projects/list');
-        return projects.find(
-          (p) =>
-            p.spec?.name === `${trigram}-proj` ||
-            p.status?.name === `${trigram}-proj` ||
-            p.metadata?.name === `${trigram}-proj`,
-        )?.metadata?.uuid;
-      } catch {
-        return undefined;
-      }
-    });
+    // Player's project, by name (v3 — projects have no v4 home).
+    const proj = await lookupOrSkip(ctx, 'CheckVM: project', () =>
+      lookupProjectUuid(ctx, `${trigram}-proj`),
+    );
+    if (!proj.failed && !proj.uuid) {
+      return { pass: false, detail: `Project '${trigram}-proj' not found.` };
+    }
     // Cloud-init: v4 GET stops returning `guestCustomization` on PC 7.3+
     // (always null even when set); the v3 mirror also drops the key. Mirror
     // Python `hasVMCloudinit`: only fail when v3 explicitly returns the key
@@ -602,12 +592,12 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
     // Manage Ownership sets BOTH the project and the owner on the VM (the
     // Prism dialog requires both). Read them straight from the v4 payload —
     // reliable on PC 7.x where v3 was flaky.
-    if (projectUuid) {
+    if (proj.uuid) {
       const vmProj = found.project?.extId;
-      if (!vmProj || vmProj !== projectUuid) {
+      if (!vmProj || vmProj !== proj.uuid) {
         return {
           pass: false,
-          detail: `VM '${expected}' project is '${vmProj ?? 'none'}', expected '${projectUuid}'.`,
+          detail: `VM '${expected}' project is '${vmProj ?? 'none'}', expected '${proj.uuid}'.`,
           hint: localizedHint(ctx, {
             en: `VM is not in your project — use Manage Ownership.`,
             fr: `La VM n'est pas dans votre projet — utilisez Manage Ownership.`,
@@ -616,12 +606,15 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
       }
     }
     // Owner must be theprojectmanager (a project member, added at create-project).
-    const pmUuid = await recoverVar(ctx, 'ProjectManagerUUID', 'create-vm', () =>
+    const pm = await lookupOrSkip(ctx, 'CheckVM: owner user', () =>
       lookupUserUuid(ctx, 'theprojectmanager'),
     );
-    if (pmUuid) {
+    if (!pm.failed && !pm.uuid) {
+      return { pass: false, detail: `User 'theprojectmanager' not found on the cluster.` };
+    }
+    if (pm.uuid) {
       const owner = found.ownershipInfo?.owner?.extId;
-      if (owner !== pmUuid) {
+      if (owner !== pm.uuid) {
         return {
           pass: false,
           detail: `VM '${expected}' owner is '${owner ?? 'none'}', expected theprojectmanager.`,
@@ -748,8 +741,8 @@ async function CheckRestoreVM(ctx: CheckContext): Promise<CheckResult> {
 /**
  * Stage 15 `create-category`. Verifies the `{Trigram}-cat` category carries
  * both `Critical` and `Test` values (v4 models each key:value as a separate
- * category entity). Captures CatUUID pointing at the `Critical` entity —
- * CheckCatVM uses it to check the VM was tagged with that specific value.
+ * category entity). CheckCatVM and CheckSecurityPolicy re-resolve the
+ * `Critical` entity by key:value when they need it.
  */
 async function CheckCat(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
@@ -777,11 +770,9 @@ async function CheckCat(ctx: CheckContext): Promise<CheckResult> {
         });
       }
     }
-    const critical = matching.find((c) => c.value === 'Critical');
     return {
       pass: true,
       detail: `Category '${expectedKey}' created with values Critical + Test.`,
-      captured: critical?.extId ? { CatUUID: critical.extId } : undefined,
     };
   } catch (err) {
     return { pass: false, detail: `Category query failed: ${nutanixErrorDetail(err)}` };
@@ -790,20 +781,21 @@ async function CheckCat(ctx: CheckContext): Promise<CheckResult> {
 
 /**
  * Stage 16 `apply-category-to-vm`. Verifies `{Trigram}-vm` has the
- * `{Trigram}-cat:Critical` category (by extId captured in CheckCat) applied.
- * In v4, VMs carry a `categories` list of category-entity references.
+ * `{Trigram}-cat:Critical` category applied (entity resolved by key:value
+ * at check time). In v4, VMs carry a `categories` list of category-entity
+ * references.
  */
 async function CheckCatVM(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const vmName = `${trigram}-vm`;
-  const catUuid = ctx.vars.get('CatUUID');
-  if (typeof catUuid !== 'string' || catUuid.length === 0) {
-    return {
-      pass: false,
-      detail: 'Category UUID missing — CheckCat must have run first.',
-    };
-  }
   try {
+    const catUuid = await lookupCategoryUuid(ctx, `${trigram}-cat`, 'Critical');
+    if (!catUuid) {
+      return {
+        pass: false,
+        detail: `Category '${trigram}-cat:Critical' not found on the cluster — re-create it.`,
+      };
+    }
     // The list endpoint's default projection omits `categories` entirely —
     // we have to opt in via `$select=extId,name,categories`. Also note the
     // path is v4.2 on live (v4.0 works too, but v4.2 is what actually
@@ -900,8 +892,15 @@ interface MsegRule {
 async function CheckSecurityPolicy(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const expected = `${trigram}-mseg-policy`;
-  const catUuid = ctx.vars.get('CatUUID');
   try {
+    // Scoping to the category is the point — no category, no pass.
+    const catUuid = await lookupCategoryUuid(ctx, `${trigram}-cat`, 'Critical');
+    if (!catUuid) {
+      return {
+        pass: false,
+        detail: `Category '${trigram}-cat:Critical' not found on the cluster — re-create it.`,
+      };
+    }
     const policies = await listAll<{ extId?: string; name?: string; state?: string }>(
       ctx,
       '/api/microseg/v4.0/config/policies',
@@ -921,16 +920,14 @@ async function CheckSecurityPolicy(ctx: CheckContext): Promise<CheckResult> {
       `/api/microseg/v4.0/config/policies/${found.extId}`,
     );
     const rules = detail?.data?.rules ?? [];
-    if (typeof catUuid === 'string' && catUuid.length > 0) {
-      const scoped = rules.some((r) =>
-        (r.spec?.securedGroupCategoryReferences ?? []).includes(catUuid),
-      );
-      if (!scoped) {
-        return {
-          pass: false,
-          detail: `Security policy '${expected}' is not scoped to '${trigram}-cat:Critical'.`,
-        };
-      }
+    const scoped = rules.some((r) =>
+      (r.spec?.securedGroupCategoryReferences ?? []).includes(catUuid),
+    );
+    if (!scoped) {
+      return {
+        pass: false,
+        detail: `Security policy '${expected}' is not scoped to '${trigram}-cat:Critical'.`,
+      };
     }
     // Python `CheckSecurityPolicy` only asserts "≥1 rule has
     // is_all_protocol_allowed" (no destAllowSpec clause). Match the
@@ -1119,7 +1116,6 @@ async function CheckProtectionPolicy(ctx: CheckContext): Promise<CheckResult> {
     return {
       pass: true,
       detail: `Protection policy '${expected}' (RPO=3600s, DAILY rollup, scoped to '${matchingCat.key}:${matchingCat.value}').`,
-      captured: found.extId ? { ProtectionPolicyUUID: found.extId } : undefined,
     };
   } catch (err) {
     return { pass: false, detail: `Protection policy query failed: ${nutanixErrorDetail(err)}` };
@@ -1136,9 +1132,17 @@ async function CheckProtectionPolicy(ctx: CheckContext): Promise<CheckResult> {
  * the security namespace on v4, not the guessed `/approvals/`).
  */
 async function CheckApprovalPolicy(ctx: CheckContext): Promise<CheckResult> {
+  const trigram = getTrigram(ctx);
   const expectedName = 'master-appr-policy';
-  const protectionUuid = ctx.vars.get('ProtectionPolicyUUID');
   try {
+    // The protection-policy link is the point — no policy, no pass.
+    const protectionUuid = await lookupProtectionPolicyUuid(ctx, `${trigram}-prot-policy`);
+    if (!protectionUuid) {
+      return {
+        pass: false,
+        detail: `Protection policy '${trigram}-prot-policy' not found on the cluster.`,
+      };
+    }
     // Linked protection policies live on `securedPolicies[]` (not
     // `targetPolicyExtIds` — that's the create-time DTO only). Each entry
     // has `policyExtId` + `policyType: 'PROTECTION_POLICY'`. Confirmed
@@ -1158,16 +1162,14 @@ async function CheckApprovalPolicy(ctx: CheckContext): Promise<CheckResult> {
         detail: `Approval policy '${expectedName}' not found.`,
       };
     }
-    if (typeof protectionUuid === 'string' && protectionUuid.length > 0) {
-      const linked = (found.securedPolicies ?? []).some(
-        (sp) => sp.policyExtId === protectionUuid,
-      );
-      if (!linked) {
-        return {
-          pass: false,
-          detail: `Approval policy not linked to your protection policy — associate them.`,
-        };
-      }
+    const linked = (found.securedPolicies ?? []).some(
+      (sp) => sp.policyExtId === protectionUuid,
+    );
+    if (!linked) {
+      return {
+        pass: false,
+        detail: `Approval policy not linked to your protection policy — associate them.`,
+      };
     }
     if (found.extId) {
       ctx.cache.set({ kind: 'approvalPolicy', logicalName: expectedName, uuid: found.extId });
@@ -1641,13 +1643,10 @@ async function CheckCloneApp(ctx: CheckContext): Promise<CheckResult> {
         detail: `VPC '${expectedVpc}' not found — the blueprint launch should have created it via the vpcName runtime input.`,
       };
     }
-    const captured: Record<string, unknown> = {};
-    if (foundApp.metadata?.uuid) captured.AppUUID = foundApp.metadata.uuid;
-    if (foundVpc.extId) captured.VpcUUID = foundVpc.extId;
     return {
       pass: true,
       detail: `Application '${expectedApp}' launched from CloneProd; VPC '${expectedVpc}' present.`,
-      captured: Object.keys(captured).length > 0 ? captured : undefined,
+      captured: foundVpc.extId ? { VpcUUID: foundVpc.extId } : undefined,
     };
   } catch (err) {
     return { pass: false, detail: `App/VPC query failed: ${nutanixErrorDetail(err)}` };
@@ -1663,13 +1662,17 @@ async function CheckCloneApp(ctx: CheckContext): Promise<CheckResult> {
 async function CheckSchedDay2(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const expected = `${trigram}-sched`;
-  const appUuid = ctx.vars.get('AppUUID');
   try {
+    // The schedule must target the player's app — no app, no pass.
+    const appUuid = await lookupAppUuid(ctx, `${trigram}-app`);
+    if (!appUuid) {
+      return { pass: false, detail: `Application '${trigram}-app' not found.` };
+    }
     // Calm app-scheduler entities live on `/api/nutanix/v3/jobs/list` —
     // the GUI calls them "Self-Service > Policies" but they're modeled as
     // jobs in the v3 API. Original Python `CheckSchedDay2` looks for
     // `entities[?(metadata.name=='{trigram}-sched')].resources` and
-    // verifies `executable.entity.uuid == AppUUID`.
+    // verifies `executable.entity.uuid` targets the player's app.
     //
     // Note: v3 jobs list returns `entities[].resources` at top level (NOT
     // nested under `status.resources` like apps/blueprints). Different
@@ -1687,14 +1690,12 @@ async function CheckSchedDay2(ctx: CheckContext): Promise<CheckResult> {
       (j) => j.metadata?.name === expected || j.resources?.name === expected,
     );
     if (!found) return { pass: false, detail: `Scheduled policy '${expected}' not found.` };
-    if (typeof appUuid === 'string' && appUuid.length > 0) {
-      const target = found.resources?.executable?.entity?.uuid;
-      if (target !== appUuid) {
-        return {
-          pass: false,
-          detail: `Schedule '${expected}' targets '${target ?? '?'}' (expected app UUID '${appUuid}').`,
-        };
-      }
+    const target = found.resources?.executable?.entity?.uuid;
+    if (target !== appUuid) {
+      return {
+        pass: false,
+        detail: `Schedule '${expected}' targets '${target ?? '?'}' (expected app UUID '${appUuid}').`,
+      };
     }
     return { pass: true, detail: `Schedule '${expected}' targets the player's app.` };
   } catch (err) {

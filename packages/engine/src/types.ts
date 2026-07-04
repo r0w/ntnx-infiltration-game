@@ -116,11 +116,11 @@ export interface StageDefinition {
    */
   waitForInputValue?: string;
   /**
-   * Session variables this stage requires to be set before it can run.
-   * Typically populated by upstream stages' captures (e.g. ProtectionPolicyUUID
-   * comes from CheckProtectionPolicy). If any listed variable is missing on
-   * advance, the gate returns `missing-upstream` and the runtime may
-   * auto-rehydrate the producer stages (see StageRunner.rehydrate).
+   * Session variables this stage requires: player inputs (Trigram,
+   * Username) or historical state (HostUUID from CheckVM). Entity UUIDs
+   * are resolved by name at check time instead (issue #31). If a listed
+   * var is missing on advance, the gate returns `missing-upstream` and the
+   * runtime may auto-rehydrate the producer (see StageRunner.rehydrate).
    */
   needs?: string[];
   /**

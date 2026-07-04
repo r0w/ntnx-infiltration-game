@@ -17,9 +17,6 @@
   "check": {
     "fn": "CheckCat"
   },
-  "captures": [
-    "CatUUID"
-  ],
   "needs": [
     "Trigram"
   ]
