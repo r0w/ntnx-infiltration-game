@@ -10,6 +10,7 @@ import {
   lookupAppUuid,
   lookupCategoryUuid,
   lookupImageUuid,
+  lookupOrSkip,
   lookupProjectUuid,
   lookupProtectionPolicyUuid,
   lookupSubnetUuid,
@@ -160,13 +161,12 @@ async function CheckAuthPolicy(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const expected = `${trigram}-auth`;
   const expectedLc = expected.toLowerCase();
-  // The user binding is the point of this stage — refuse to pass when the
-  // user itself can't be resolved (deleted mid-session, IAM unreachable).
-  const userUuid = await lookupUserUuid(ctx, `${trigram}-adm`);
-  if (!userUuid) {
-    return { pass: false, detail: `User '${trigram}-adm' not found on the cluster.` };
-  }
   try {
+    // The user binding is the point of this stage — no user, no pass.
+    const userUuid = await lookupUserUuid(ctx, `${trigram}-adm`);
+    if (!userUuid) {
+      return { pass: false, detail: `User '${trigram}-adm' not found on the cluster.` };
+    }
     // v4 authz policies carry the identifier on `displayName`. Top-level
     // `name` is null in list responses — the cached `cacheEntity` helper
     // only matches on `name`, so open-code the find+cache here. Match
@@ -482,10 +482,8 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
         }),
       };
     }
-    // NIC count + subnet binding. The subnet is resolved by name at check
-    // time (issue #31): a stored UUID goes stale if the player re-creates
-    // the subnet, whereas the name is the contract. Unresolvable subnet →
-    // skip the binding assertion.
+    // NIC count + subnet binding, subnet resolved by name (issue #31).
+    // Transport blip → skip the assertion; real miss → fail.
     const nics = found.nics ?? [];
     if (nics.length !== 2) {
       return {
@@ -505,12 +503,24 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
         ),
       };
     }
-    const networkUuid = await lookupSubnetUuid(ctx, `${trigram}-subnet`);
-    if (networkUuid) {
+    const net = await lookupOrSkip(ctx, 'CheckVM: subnet', () =>
+      lookupSubnetUuid(ctx, `${trigram}-subnet`),
+    );
+    if (!net.failed && !net.uuid) {
+      return {
+        pass: false,
+        detail: `Subnet '${trigram}-subnet' not found on the cluster.`,
+        hint: localizedHint(ctx, {
+          en: `Your '${trigram}-subnet' is missing — re-create it.`,
+          fr: `Votre '${trigram}-subnet' n'existe plus — re-créez-le.`,
+        }),
+      };
+    }
+    if (net.uuid) {
       const onSubnet = nics.some(
         (n) =>
-          n?.nicNetworkInfo?.subnet?.extId === networkUuid ||
-          n?.networkInfo?.subnet?.extId === networkUuid,
+          n?.nicNetworkInfo?.subnet?.extId === net.uuid ||
+          n?.networkInfo?.subnet?.extId === net.uuid,
       );
       if (!onSubnet) {
         return {
@@ -523,12 +533,17 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
         };
       }
     }
-    // Boot disk image binding — same resolve-by-name treatment.
-    const imageUuid = await lookupImageUuid(ctx, `${trigram}-ubuntu`);
-    if (imageUuid) {
+    // Boot disk image binding — same treatment.
+    const img = await lookupOrSkip(ctx, 'CheckVM: image', () =>
+      lookupImageUuid(ctx, `${trigram}-ubuntu`),
+    );
+    if (!img.failed && !img.uuid) {
+      return { pass: false, detail: `Image '${trigram}-ubuntu' not found in library.` };
+    }
+    if (img.uuid) {
       const disks = found.disks ?? [];
       const bootImg = disks[0]?.backingInfo?.dataSource?.reference?.imageExtId;
-      if (bootImg !== imageUuid) {
+      if (bootImg !== img.uuid) {
         return {
           pass: false,
           detail: `VM '${expected}' boot disk is not based on '${trigram}-ubuntu'.`,
@@ -539,8 +554,13 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
         };
       }
     }
-    // Resolve the player's project by name (v3 — projects have no v4 home).
-    const projectUuid = await lookupProjectUuid(ctx, `${trigram}-proj`);
+    // Player's project, by name (v3 — projects have no v4 home).
+    const proj = await lookupOrSkip(ctx, 'CheckVM: project', () =>
+      lookupProjectUuid(ctx, `${trigram}-proj`),
+    );
+    if (!proj.failed && !proj.uuid) {
+      return { pass: false, detail: `Project '${trigram}-proj' not found.` };
+    }
     // Cloud-init: v4 GET stops returning `guestCustomization` on PC 7.3+
     // (always null even when set); the v3 mirror also drops the key. Mirror
     // Python `hasVMCloudinit`: only fail when v3 explicitly returns the key
@@ -572,12 +592,12 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
     // Manage Ownership sets BOTH the project and the owner on the VM (the
     // Prism dialog requires both). Read them straight from the v4 payload —
     // reliable on PC 7.x where v3 was flaky.
-    if (projectUuid) {
+    if (proj.uuid) {
       const vmProj = found.project?.extId;
-      if (!vmProj || vmProj !== projectUuid) {
+      if (!vmProj || vmProj !== proj.uuid) {
         return {
           pass: false,
-          detail: `VM '${expected}' project is '${vmProj ?? 'none'}', expected '${projectUuid}'.`,
+          detail: `VM '${expected}' project is '${vmProj ?? 'none'}', expected '${proj.uuid}'.`,
           hint: localizedHint(ctx, {
             en: `VM is not in your project — use Manage Ownership.`,
             fr: `La VM n'est pas dans votre projet — utilisez Manage Ownership.`,
@@ -586,10 +606,15 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
       }
     }
     // Owner must be theprojectmanager (a project member, added at create-project).
-    const pmUuid = await lookupUserUuid(ctx, 'theprojectmanager');
-    if (pmUuid) {
+    const pm = await lookupOrSkip(ctx, 'CheckVM: owner user', () =>
+      lookupUserUuid(ctx, 'theprojectmanager'),
+    );
+    if (!pm.failed && !pm.uuid) {
+      return { pass: false, detail: `User 'theprojectmanager' not found on the cluster.` };
+    }
+    if (pm.uuid) {
       const owner = found.ownershipInfo?.owner?.extId;
-      if (owner !== pmUuid) {
+      if (owner !== pm.uuid) {
         return {
           pass: false,
           detail: `VM '${expected}' owner is '${owner ?? 'none'}', expected theprojectmanager.`,
@@ -763,14 +788,14 @@ async function CheckCat(ctx: CheckContext): Promise<CheckResult> {
 async function CheckCatVM(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const vmName = `${trigram}-vm`;
-  const catUuid = await lookupCategoryUuid(ctx, `${trigram}-cat`, 'Critical');
-  if (!catUuid) {
-    return {
-      pass: false,
-      detail: `Category '${trigram}-cat:Critical' not found on the cluster — re-create it.`,
-    };
-  }
   try {
+    const catUuid = await lookupCategoryUuid(ctx, `${trigram}-cat`, 'Critical');
+    if (!catUuid) {
+      return {
+        pass: false,
+        detail: `Category '${trigram}-cat:Critical' not found on the cluster — re-create it.`,
+      };
+    }
     // The list endpoint's default projection omits `categories` entirely —
     // we have to opt in via `$select=extId,name,categories`. Also note the
     // path is v4.2 on live (v4.0 works too, but v4.2 is what actually
@@ -867,15 +892,15 @@ interface MsegRule {
 async function CheckSecurityPolicy(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const expected = `${trigram}-mseg-policy`;
-  // Scoping to the category is the point — fail when it can't be resolved.
-  const catUuid = await lookupCategoryUuid(ctx, `${trigram}-cat`, 'Critical');
-  if (!catUuid) {
-    return {
-      pass: false,
-      detail: `Category '${trigram}-cat:Critical' not found on the cluster — re-create it.`,
-    };
-  }
   try {
+    // Scoping to the category is the point — no category, no pass.
+    const catUuid = await lookupCategoryUuid(ctx, `${trigram}-cat`, 'Critical');
+    if (!catUuid) {
+      return {
+        pass: false,
+        detail: `Category '${trigram}-cat:Critical' not found on the cluster — re-create it.`,
+      };
+    }
     const policies = await listAll<{ extId?: string; name?: string; state?: string }>(
       ctx,
       '/api/microseg/v4.0/config/policies',
@@ -1109,15 +1134,15 @@ async function CheckProtectionPolicy(ctx: CheckContext): Promise<CheckResult> {
 async function CheckApprovalPolicy(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const expectedName = 'master-appr-policy';
-  // The protection-policy link is the point — fail when it can't be resolved.
-  const protectionUuid = await lookupProtectionPolicyUuid(ctx, `${trigram}-prot-policy`);
-  if (!protectionUuid) {
-    return {
-      pass: false,
-      detail: `Protection policy '${trigram}-prot-policy' not found on the cluster.`,
-    };
-  }
   try {
+    // The protection-policy link is the point — no policy, no pass.
+    const protectionUuid = await lookupProtectionPolicyUuid(ctx, `${trigram}-prot-policy`);
+    if (!protectionUuid) {
+      return {
+        pass: false,
+        detail: `Protection policy '${trigram}-prot-policy' not found on the cluster.`,
+      };
+    }
     // Linked protection policies live on `securedPolicies[]` (not
     // `targetPolicyExtIds` — that's the create-time DTO only). Each entry
     // has `policyExtId` + `policyType: 'PROTECTION_POLICY'`. Confirmed
@@ -1637,12 +1662,12 @@ async function CheckCloneApp(ctx: CheckContext): Promise<CheckResult> {
 async function CheckSchedDay2(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const expected = `${trigram}-sched`;
-  // The schedule must target the player's app — fail when it can't resolve.
-  const appUuid = await lookupAppUuid(ctx, `${trigram}-app`);
-  if (!appUuid) {
-    return { pass: false, detail: `Application '${trigram}-app' not found.` };
-  }
   try {
+    // The schedule must target the player's app — no app, no pass.
+    const appUuid = await lookupAppUuid(ctx, `${trigram}-app`);
+    if (!appUuid) {
+      return { pass: false, detail: `Application '${trigram}-app' not found.` };
+    }
     // Calm app-scheduler entities live on `/api/nutanix/v3/jobs/list` —
     // the GUI calls them "Self-Service > Policies" but they're modeled as
     // jobs in the v3 API. Original Python `CheckSchedDay2` looks for

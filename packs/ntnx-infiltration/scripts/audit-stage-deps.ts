@@ -36,11 +36,8 @@ const ENV_SEEDED = new Set(['PC', 'PCUser', 'PCPassword', 'Vlanid', 'ImageURL'])
 // Known check → captured variable names. Derived from reading
 // packs/ntnx-infiltration/checks/index.ts — each check's `captured` return.
 // Kept as explicit mapping so the audit doesn't parse TypeScript.
-// Since issue #31, checks re-resolve entity UUIDs by trigram-prefixed name
-// at check time instead of trusting stored vars (which went stale when a
-// resource was re-created). Only genuinely historical state is captured:
-// HostUUID (live-migration compares current vs previous host) and VMUUID
-// (recovery-point action + incident-freeze invalidation).
+// Since issue #31 checks resolve entities by name; only historical state
+// is captured (HostUUID: previous host, VMUUID: recovery point + incident).
 const CHECK_CAPTURES: Record<string, string[]> = {
   CheckVM: ['VMUUID', 'HostUUID'],
   CheckLiveMigration: ['HostUUID'],
@@ -137,10 +134,8 @@ function loadStages(): Stage[] {
       for (const v of scanVarRefs(template)) consumes.add(v);
       for (const v of scanInputVars(template)) produces.add(v);
     }
-    // Note: deliberately NOT seeding `produces` from the file's existing
-    // `captures` — that made stale captures self-perpetuating across
-    // `--apply` runs. Produces derive only from prose `<input/>` tokens and
-    // the CHECK_CAPTURES map.
+    // Produces derive from prose `<input/>` + CHECK_CAPTURES only — seeding
+    // from the file's own `captures` made stale captures self-perpetuating.
     if (json.check?.fn) {
       for (const v of CHECK_CAPTURES[json.check.fn] ?? []) produces.add(v);
       for (const v of CHECK_CONSUMES[json.check.fn] ?? []) consumes.add(v);
@@ -273,11 +268,8 @@ function applyMode(stages: Stage[]): void {
   for (const s of stages) {
     const selfProduced = new Set(s.produces);
     const needs = s.consumes
-      // A stage that consumes a var it also RE-captures (live-migrate-vm
-      // reads the previous HostUUID then stores the new one) still needs
-      // the earlier producer — only the var's ORIGIN stage gets to drop it
-      // from needs. Without this, fillMissingDeps never rehydrates
-      // create-vm on a resumed session and the player is stuck.
+      // A re-capturer (live-migrate-vm reads then rewrites HostUUID) still
+      // needs the origin stage; only the origin drops the var from needs.
       .filter((v) => !(selfProduced.has(v) && firstProducer.get(v) === s.id))
       .filter((v) => !ENV_SEEDED.has(v))
       .filter((v) => !IGNORE_VARS.has(v))
