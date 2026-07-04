@@ -2127,30 +2127,36 @@ function EmailsTab({ password }: { password: string }) {
       {error && <div className="app-error">{error}</div>}
 
       <div className="admin-emails-toprow">
-            <div className="admin-cluster admin-cluster-block admin-emails-config">
-        <p className="admin-cluster-intro">
-          <strong>Sender identity</strong> · emails go out through the{' '}
-          <a href="https://mailtrap.io" target="_blank" rel="noreferrer">
-            Mailtrap
-          </a>{' '}
-          Send API. The from address must belong to a domain verified in the
-          Mailtrap account owning the token.{' '}
-          {!wired ? (
-            <span className="c-yellow">● not wired — sending disabled</span>
-          ) : tokenStatus === 'invalid' ? (
-            <span className="c-red">● token rejected by Mailtrap — sending disabled</span>
-          ) : tokenStatus === 'checking' ? (
-            <span className="c-dim">● checking token…</span>
-          ) : tokenStatus === 'error' ? (
-            <span className="c-yellow">● token unverified (Mailtrap unreachable)</span>
-          ) : fromDomainUnverified ? (
-            <span className="c-yellow">
-              ● wired, but {fromDomain} is not a verified sending domain
-            </span>
-          ) : (
-            <span className="c-green">● wired</span>
-          )}
-        </p>
+            <div className="admin-cluster admin-emails-panel admin-emails-config">
+        <div className="admin-emails-head">
+          <span className="admin-emails-eyebrow">Uplink</span>
+          <h3 className="admin-emails-title">Sender identity</h3>
+          <p className="admin-emails-desc">
+            Briefings go out through the{' '}
+            <a href="https://mailtrap.io" target="_blank" rel="noreferrer">
+              Mailtrap
+            </a>{' '}
+            Send API; the from address must sit on a domain verified in the
+            account owning the token.
+          </p>
+          <p className="admin-emails-channel">
+            {!wired ? (
+              <span className="c-yellow">● channel down · set the token and from address</span>
+            ) : tokenStatus === 'invalid' ? (
+              <span className="c-red">● channel down · Mailtrap rejected the token</span>
+            ) : tokenStatus === 'checking' ? (
+              <span className="c-dim">● checking uplink…</span>
+            ) : tokenStatus === 'error' ? (
+              <span className="c-yellow">● uplink unverified · Mailtrap unreachable</span>
+            ) : fromDomainUnverified ? (
+              <span className="c-yellow">
+                ● channel open · but {fromDomain} is not a verified sending domain
+              </span>
+            ) : (
+              <span className="c-green">● channel open · sending as {savedCfg?.fromEmail}</span>
+            )}
+          </p>
+        </div>
         <div className="admin-cluster-section">
           <label className="admin-cluster-label">
             Mailtrap API token
@@ -2236,13 +2242,16 @@ function EmailsTab({ password }: { password: string }) {
           )}
         </div>
       </div>
-        <div className="admin-cluster-block admin-emails-rosterblock">
-        <p className="admin-cluster-intro">
-          <strong>Roster</strong> · each participant gets a seat = their VDI
-          account number (<code>{'{CLUSTER}'}-User{'{ID}'}</code>). A template
-          is sent <em>once</em> per participant: adding someone later only
-          emails them. Deleting frees the seat.
-        </p>
+        <div className="admin-emails-panel admin-emails-rosterblock">
+        <div className="admin-emails-head">
+          <span className="admin-emails-eyebrow">Manifest</span>
+          <h3 className="admin-emails-title">Agent roster</h3>
+          <p className="admin-emails-desc">
+            One seat per participant = their VDI account. Each briefing goes
+            out <em>once</em>: adding someone later only emails them. Deleting
+            frees the seat.
+          </p>
+        </div>
         <div className="admin-emails-test-row admin-emails-add-row">
           <input
             type="text"
@@ -2309,13 +2318,22 @@ function EmailsTab({ password }: { password: string }) {
               <tbody>
                 {roster.map((r) => (
                   <tr key={r.id}>
-                    <td className="admin-emails-seat">{String(r.seat).padStart(2, '0')}</td>
+                    <td>
+                      <span className="admin-emails-chip">
+                        <b>{String(r.seat).padStart(2, '0')}</b>
+                        {(savedVars.CLUSTER?.trim() || clusterName) &&
+                          `${savedVars.CLUSTER?.trim() || clusterName}-User${String(r.seat).padStart(2, '0')}`}
+                      </span>
+                    </td>
                     <td>{r.email}</td>
                     {(['invitation-vdi', 'summary'] as const).map((tplType) => (
                       <td key={tplType}>
                         {r.sent[tplType] ? (
-                          <span className="c-green" title={new Date(r.sent[tplType]).toLocaleString()}>
-                            ✓ {fmtAge(r.sent[tplType])}
+                          <span
+                            className="admin-emails-sent"
+                            title={new Date(r.sent[tplType]).toLocaleString()}
+                          >
+                            ✓ sent {fmtAge(r.sent[tplType])}
                           </span>
                         ) : (
                           <span className="c-dim">—</span>
@@ -2354,7 +2372,10 @@ function EmailsTab({ password }: { password: string }) {
         )}
         <div className="admin-emails-dryrun">
           <label className="admin-cluster-label">
-            Dry run · pick a template, send it to one address (marks nobody as sent)
+            Dry run
+            <span className="admin-emails-label-hint">
+              pick a template, send it to one address; marks nobody as sent
+            </span>
           </label>
           <div className="admin-emails-test-row">
             <select
@@ -2411,14 +2432,16 @@ function EmailsTab({ password }: { password: string }) {
       </div>
       </div>
 
-      <div className="admin-cluster-block">
-        <p className="admin-cluster-intro">
-          <strong>Edit templates</strong> · this section is for tweaking the
-          content: pick a template, fill the variables, edit it visually (or
-          in the HTML source). Sending happens from the roster above and uses
-          the current draft, which then becomes this deployment&apos;s template
-          for the next batches.
-        </p>
+      <div className="admin-emails-panel">
+        <div className="admin-emails-head">
+          <span className="admin-emails-eyebrow">Briefing room</span>
+          <h3 className="admin-emails-title">Edit templates</h3>
+          <p className="admin-emails-desc">
+            Pick a template, fill the variables, edit it visually or in the
+            HTML source. Sending happens from the manifest above and saves the
+            draft as this deployment&apos;s template.
+          </p>
+        </div>
         <div className="admin-emails-compose-row">
           <div className="admin-cluster-section">
             <label className="admin-cluster-label">Template</label>

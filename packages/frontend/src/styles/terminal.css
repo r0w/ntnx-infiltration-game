@@ -1752,12 +1752,65 @@ a.terminal-link:visited {
   margin-top: 6px;
 }
 .admin-peers-add-row .admin-cluster-input { max-width: none; flex: 1 1 auto; }
-/* Emails tab — full-width (HTML editor + rendered preview side by side). */
+/* Emails tab — the dispatch console. It borrows the material of the
+   briefings it sends: same night-blue card + border as the email
+   container, and the briefing purple marks everything that SENDS
+   (dispatch buttons, delivered stamps). Cyan stays for generic controls. */
 .admin-emails {
+  --em-purple: #8b74ff;      /* briefing #7855fa, lifted for dark-bg contrast */
+  --em-lilac: #c6befe;       /* the templates' own soft lilac */
+  --em-panel: #0d1420;
+  --em-border: #1f2937;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
 }
+.admin-emails-panel {
+  background: var(--em-panel);
+  border: 1px solid var(--em-border);
+  border-radius: 6px;
+  padding: 16px 18px 18px;
+  min-width: 0;
+}
+.admin-emails-head { margin: 0 0 12px; }
+.admin-emails-eyebrow {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--em-lilac);
+  opacity: 0.8;
+}
+.admin-emails-title {
+  margin: 3px 0 4px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--fg);
+}
+.admin-emails-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--dim);
+  max-width: 72ch;
+}
+.admin-emails-channel { margin: 8px 0 0; font-size: 12px; }
+.admin-emails-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: #0b1020;
+  border: 1px solid var(--em-border);
+  border-radius: 4px;
+  padding: 2px 9px;
+  font-size: 12px;
+  color: #a5b4fc;
+  white-space: nowrap;
+}
+.admin-emails-chip b { color: var(--em-purple); }
+.admin-emails-sent { color: var(--em-purple); font-size: 12px; white-space: nowrap; }
 .admin-emails-config { max-width: 720px; }
 /* Top row: sender identity left, roster right — uses the page width. */
 .admin-emails-toprow {
@@ -1848,12 +1901,12 @@ a.terminal-link:visited {
 .admin-emails-editor { margin-top: 10px; width: 100%; }
 .admin-emails-preview { margin-top: 10px; }
 .admin-emails-roster-table { margin-top: 12px; }
-/* Per-type send buttons in the roster header — must read as buttons. */
+/* Per-type send buttons in the roster header — briefing purple, they SEND. */
 .admin-emails-send-btn {
   margin-left: 10px;
-  background: rgba(120, 85, 250, 0.18);
-  border: 1px solid var(--accent);
-  color: var(--accent);
+  background: rgba(139, 116, 255, 0.16);
+  border: 1px solid var(--em-purple);
+  color: #d9d2ff;
   font: inherit;
   font-size: 11px;
   font-weight: 600;
@@ -1864,7 +1917,7 @@ a.terminal-link:visited {
   cursor: pointer;
 }
 .admin-emails-send-btn:hover:not(:disabled) {
-  background: var(--accent);
+  background: var(--em-purple);
   color: #0b0f1a;
 }
 .admin-emails-send-btn:disabled {
@@ -2593,4 +2646,11 @@ a.terminal-link:visited {
 .terminal-input-hint {
   font-size: 11px;
   align-self: center;
+}
+.admin-emails-label-hint {
+  margin-left: 10px;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--dim);
+  font-size: 11px;
 }
