@@ -237,12 +237,11 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
         print("  [warn] create_project task FAILED (attempt %d/%d) — purging the "
               "ERROR project and retrying" % (attempt + 1, CREATE_POLLS))
         # The half-created project lands in state ERROR and would block the
-        # re-POST on duplicate name. The lookup deletes ERROR projects; if it
-        # somehow reports a healthy one, adopt it instead.
-        existing = _find_existing_safe()
-        if existing:
-            print("  [recover] project healthy despite the FAILED task — adopting %s" % existing)
-            return existing
+        # re-POST on duplicate name. The lookup deletes ERROR projects. Never
+        # adopt here: a lagging CREATING/COMPLETE state can't be trusted after
+        # a FAILED create task — if it still holds the name, the next POST
+        # duplicates and the dup branch re-runs the lookup until it's purged.
+        _find_existing_safe()
         time.sleep(5)
     raise Exception("create project failed after %d attempts: %s" % (CREATE_POLLS, last))
 

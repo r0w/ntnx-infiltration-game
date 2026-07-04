@@ -204,6 +204,40 @@ def test_create_project_retries_when_create_task_fails():
     assert fake_req.post.calls == 2
 
 
+def test_create_project_never_adopts_after_failed_task():
+    # A project whose create task FAILED is never healthy, even if its state
+    # still reads CREATING (lag) — must NOT be adopted (Gemini review). The
+    # next POST duplicates and the dup branch purges it once it hits ERROR.
+    # attempt1: 202 -> task FAILED -> lookup sees CREATING (ignored)
+    # attempt2: dup 400 -> lookup sees ERROR -> delete + settle
+    # attempt3: 202 -> task SUCCEEDED.
+    fake_req = FakeReq(post=[
+        FakeResp(202, {"status": {"execution_context": {"task_uuid": "t-fail"}}}),
+        FakeResp(400, text='{"reason":"DUPLICATE_ENTITY"}'),
+        FakeResp(202, {"status": {"execution_context": {"task_uuid": "t-ok"}}}),
+    ])
+    sess = FakeSession(
+        get=[
+            FakeResp(200, {"status": "FAILED",
+                           "entity_reference_list": [{"uuid": "p-doomed"}]}),
+            FakeResp(200, {"status": "SUCCEEDED",
+                           "entity_reference_list": [{"uuid": "proj-final"}]}),
+        ],
+        post=[
+            FakeResp(200, {"entities": [
+                {"metadata": {"uuid": "p-doomed"}, "status": {"state": "CREATING"}}]}),
+            FakeResp(200, {"entities": [
+                {"metadata": {"uuid": "p-doomed"}, "status": {"state": "ERROR"}}]}),
+            FakeResp(200, {"entities": []}),
+        ],
+        delete=[FakeResp(202)],
+    )
+    ns = _load(sess, fake_req)
+    assert ns["create_project"]("acc", "pri", "sec") == "proj-final"
+    assert sess.delete.calls == 1
+    assert fake_req.post.calls == 3
+
+
 def test_create_project_does_not_treat_not_found_as_duplicate():
     # A 422 "subnet does not exist" must NOT be mistaken for a duplicate (the
     # old "EXIST" token matched "does not exist") — it's a genuine failure.
