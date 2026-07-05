@@ -156,6 +156,11 @@ function AdminDashboard({
   const [gates, setGates] = useState<AdminGateEntry[] | null>(null);
   const [lunch, setLunch] = useState<AdminLunchStatus | null>(null);
   const [lunchBusy, setLunchBusy] = useState(false);
+  // Intelligent Ops state, page-wide: create-report hard-depends on it and
+  // enabling is a manual Prism step, so the operator must see the warning
+  // from any tab (same idea as the lunch strip), not just Cluster.
+  const [iops, setIops] = useState<AdminClusterStatusPayload['intelligentOps'] | null>(null);
+  const [iopsBusy, setIopsBusy] = useState(false);
   const [packStages, setPackStages] = useState<AdminPackStageEntry[] | null>(null);
   const [packBrokenCount, setPackBrokenCount] = useState(0);
   const [packMeta, setPackMeta] = useState<{
@@ -253,6 +258,26 @@ function AdminDashboard({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // The IOps probe is a live PC round-trip (~1-2 s) — poll it on its own
+  // slow cadence instead of piggybacking the 5 s refresh loop.
+  const refreshIops = useCallback(async () => {
+    setIopsBusy(true);
+    try {
+      setIops((await api.adminClusterStatus(password)).intelligentOps);
+    } catch {
+      // Keep the last known state; the banner only fires on a confirmed
+      // DISABLED, never on a probe hiccup.
+    } finally {
+      setIopsBusy(false);
+    }
+  }, [password]);
+
+  useEffect(() => {
+    void refreshIops();
+    const id = window.setInterval(() => void refreshIops(), 60_000);
+    return () => window.clearInterval(id);
+  }, [refreshIops]);
 
   // Auto-refresh every 5 s so the waiting-count and unlock-state stay live
   // while the operator watches without having to click refresh.
@@ -577,6 +602,34 @@ function AdminDashboard({
             <strong>lunch lock active</strong> — {lunch.affectedCount} active session
             {lunch.affectedCount === 1 ? '' : 's'} will be parked at the next transition. Click{' '}
             <em>resume</em> in the header when you&apos;re ready.
+          </span>
+        </div>
+      )}
+      {iops?.state === 'DISABLED' && (
+        <div className="admin-iops-strip" role="alert">
+          <span className="admin-iops-strip-icon" aria-hidden="true">⚠</span>
+          <span>
+            <strong>Intelligent Operations is disabled</strong> — the create-report stage
+            fails until it&apos;s enabled (manual Prism step, no API).{' '}
+            {iops.enableUrl && (
+              <a
+                href={iops.enableUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="admin-iops-strip-link"
+              >
+                activate in Prism →
+              </a>
+            )}{' '}
+            <button
+              type="button"
+              className="app-reset admin-iops-strip-recheck"
+              onClick={() => void refreshIops()}
+              disabled={iopsBusy}
+              title="re-probe Prism for the current state"
+            >
+              {iopsBusy ? '…' : 're-check'}
+            </button>
           </span>
         </div>
       )}
