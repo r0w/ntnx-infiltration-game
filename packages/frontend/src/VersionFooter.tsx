@@ -251,8 +251,12 @@ function Markdown({ source }: { source: string }) {
       list.push(item[1]);
     } else if (line.trim() === '') {
       flushList();
+    } else if (list.length > 0) {
+      // Soft-wrapped bullet: CHANGELOG.md hard-wraps long bullets at ~80
+      // columns and GitHub keeps the newline, so a non-empty line while a
+      // list is open continues the previous item — not a new paragraph.
+      list[list.length - 1] += ` ${line.trim()}`;
     } else {
-      flushList();
       blocks.push(
         <p key={`p${key++}`} className="changelog-md-p">
           {renderInline(line, `p${key}`)}
