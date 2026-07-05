@@ -494,6 +494,16 @@ export class SessionService {
   }
 
   /**
+   * The trigram the player typed in-game, or null before capture. The
+   * sessions.trigram column is a placeholder (= session id) kept only for
+   * the legacy NOT NULL + unique constraints — never expose it to clients.
+   */
+  capturedTrigram(sessionId: string): string | null {
+    const v = this.variables.all(sessionId).Trigram;
+    return typeof v === 'string' && v.length > 0 ? v : null;
+  }
+
+  /**
    * Fire the registered act handler for the stage the session is awaiting on,
    * reusing its live vars + cluster cache + nutanix client. Powers the auto-play
    * "Ok" shortcut: the cluster resource must exist before the check runs, so we

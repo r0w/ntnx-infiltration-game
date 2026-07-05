@@ -37,6 +37,14 @@ Tested versions (do not deviate, the BP assumes these structurally):
 | Flow Networking   | enabled                              |
 | Flow Security     | enabled                              |
 | Leap (DR)         | enabled                              |
+| Intelligent Ops   | enabled (manual Prism step, no API)  |
+
+Intelligent Operations powers the reporting API that stage 26
+(`create-report`) validates against - with it disabled the stage fails
+with a 503 until you enable it. Fresh HPoCs ship with it **off**:
+enable it in Prism (Settings → Intelligent Operations) before the
+event. `/admin` shows a red banner on every tab while it's off, with a
+deep-link to the right Prism screen.
 
 Cluster shape:
 
