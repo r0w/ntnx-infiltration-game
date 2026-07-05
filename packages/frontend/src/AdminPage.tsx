@@ -156,6 +156,12 @@ function AdminDashboard({
   const [gates, setGates] = useState<AdminGateEntry[] | null>(null);
   const [lunch, setLunch] = useState<AdminLunchStatus | null>(null);
   const [lunchBusy, setLunchBusy] = useState(false);
+  // Intelligent Ops state, page-wide: create-report hard-depends on it and
+  // enabling is a manual Prism step, so the operator must see the warning
+  // from any tab (same idea as the lunch strip), not just Cluster.
+  const [iops, setIops] = useState<AdminClusterStatusPayload['intelligentOps'] | null>(null);
+  const [iopsBusy, setIopsBusy] = useState(false);
+  const [iopsError, setIopsError] = useState<string | null>(null);
   const [packStages, setPackStages] = useState<AdminPackStageEntry[] | null>(null);
   const [packBrokenCount, setPackBrokenCount] = useState(0);
   const [packMeta, setPackMeta] = useState<{
@@ -253,6 +259,29 @@ function AdminDashboard({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // The IOps probe is a live PC round-trip (~1-2 s) — poll it on its own
+  // slow cadence instead of piggybacking the 5 s refresh loop.
+  const refreshIops = useCallback(async () => {
+    setIopsBusy(true);
+    try {
+      setIops((await api.adminClusterStatus(password)).intelligentOps);
+      setIopsError(null);
+    } catch (err) {
+      // Keep the last known state; the banner only fires on a confirmed
+      // DISABLED, never on a probe hiccup. The Cluster tab card surfaces
+      // the error text.
+      setIopsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIopsBusy(false);
+    }
+  }, [password]);
+
+  useEffect(() => {
+    void refreshIops();
+    const id = window.setInterval(() => void refreshIops(), 60_000);
+    return () => window.clearInterval(id);
+  }, [refreshIops]);
 
   // Auto-refresh every 5 s so the waiting-count and unlock-state stay live
   // while the operator watches without having to click refresh.
@@ -580,6 +609,34 @@ function AdminDashboard({
           </span>
         </div>
       )}
+      {iops?.state === 'DISABLED' && (
+        <div className="admin-iops-strip" role="alert">
+          <span className="admin-iops-strip-icon" aria-hidden="true">⚠</span>
+          <span>
+            <strong>Intelligent Operations is disabled</strong> — the create-report stage
+            fails until it&apos;s enabled (manual Prism step, no API).{' '}
+            {iops.enableUrl && (
+              <a
+                href={iops.enableUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="admin-iops-strip-link"
+              >
+                activate in Prism →
+              </a>
+            )}{' '}
+            <button
+              type="button"
+              className="app-reset admin-iops-strip-recheck"
+              onClick={() => void refreshIops()}
+              disabled={iopsBusy}
+              title="re-probe Prism for the current state"
+            >
+              {iopsBusy ? '…' : 're-check'}
+            </button>
+          </span>
+        </div>
+      )}
       {error && <div className="app-error">{error}</div>}
       {tab === 'users' && gates && gates.length > 0 && (
         <section className="admin-gates admin-panel">
@@ -852,7 +909,15 @@ function AdminDashboard({
           />
         </section>
       )}
-      {tab === 'cluster' && <ClusterConfigEditor password={password} />}
+      {tab === 'cluster' && (
+        <ClusterConfigEditor
+          password={password}
+          iops={iops}
+          iopsBusy={iopsBusy}
+          iopsError={iopsError}
+          onRefreshIops={refreshIops}
+        />
+      )}
       {tab === 'emails' && <EmailsTab password={password} />}
       {tab === 'scoreboard' && <PeersEditor password={password} />}
       {packDisableTarget && (
@@ -1378,7 +1443,20 @@ function fmtAge(ts: number): string {
   return `${d}d ago`;
 }
 
-function ClusterConfigEditor({ password }: { password: string }) {
+interface IopsViewProps {
+  iops: AdminClusterStatusPayload['intelligentOps'] | null;
+  iopsBusy: boolean;
+  iopsError: string | null;
+  onRefreshIops: () => void;
+}
+
+function ClusterConfigEditor({
+  password,
+  iops,
+  iopsBusy,
+  iopsError,
+  onRefreshIops,
+}: { password: string } & IopsViewProps) {
   const [data, setData] = useState<AdminClusterConfigPayload | null>(null);
   const [serialsText, setSerialsText] = useState('');
   const [lcmText, setLcmText] = useState('');
@@ -1454,7 +1532,12 @@ function ClusterConfigEditor({ password }: { password: string }) {
   return (
     <div className="admin-cluster admin-cluster-grid">
       <div className="admin-cluster-col">
-        <IntelligentOpsStatus password={password} />
+        <IntelligentOpsStatus
+          iops={iops}
+          iopsBusy={iopsBusy}
+          iopsError={iopsError}
+          onRefreshIops={onRefreshIops}
+        />
         <PolicyEngineStatus password={password} />
         <PlannerConfigEditor password={password} />
       </div>
@@ -1543,40 +1626,22 @@ function ClusterConfigEditor({ password }: { password: string }) {
 
 /**
  * Read-only display of Prism Central product enablement (Intelligent
- * Operations). Live-fetched on every Cluster tab open — no caching, the
- * operator clicks Enable in Prism UI and wants to see the flip without
- * restarting the backend.
+ * Operations). State lives in AdminDashboard (shared with the page-wide
+ * warning banner, single probe) — this card only renders it and forwards
+ * the refresh click, so the banner and the card can never disagree.
  */
-function IntelligentOpsStatus({ password }: { password: string }) {
-  const [data, setData] = useState<AdminClusterStatusPayload | null>(null);
-  const [busy, setBusy] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+function IntelligentOpsStatus({ iops, iopsBusy, iopsError, onRefreshIops }: IopsViewProps) {
+  const busy = iopsBusy;
 
-  const load = useCallback(async () => {
-    setBusy(true);
-    setErr(null);
-    try {
-      setData(await api.adminClusterStatus(password));
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }, [password]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  if (busy && !data) {
+  if (busy && !iops) {
     return <div className="admin-empty">loading cluster status…</div>;
   }
-  if (err) {
-    return <div className="app-error">cluster status: {err}</div>;
+  if (iopsError && !iops) {
+    return <div className="app-error">cluster status: {iopsError}</div>;
   }
-  if (!data) return null;
+  if (!iops) return null;
 
-  const { state, enableUrl, error } = data.intelligentOps;
+  const { state, enableUrl, error } = iops;
   const stateClass =
     state === 'ENABLED' ? 'c-green' : state === 'DISABLED' ? 'c-red' : 'c-dim';
   const stateLabel = state ?? 'unknown';
@@ -1589,7 +1654,7 @@ function IntelligentOpsStatus({ password }: { password: string }) {
         <button
           type="button"
           className="app-reset admin-cluster-iops-refresh"
-          onClick={() => void load()}
+          onClick={onRefreshIops}
           disabled={busy}
           title="re-probe Prism for the current state"
         >

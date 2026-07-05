@@ -15,9 +15,18 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- `/admin` shows a red banner on every tab while Intelligent Operations is
+  disabled on the cluster (it blocks the create-report stage), with a Prism
+  deep-link and a re-check button.
+
 ### Changed
 
 ### Fixed
+
+- The changelog dialog no longer breaks long release-note bullets into stray
+  paragraphs.
+- The session API returns the player's actual trigram (or none before login)
+  instead of an internal placeholder id.
 
 ## [0.3.0] - 2026-07-04
 
