@@ -2222,6 +2222,42 @@ a.terminal-link:visited {
 }
 .admin-lunch-strip em { font-style: normal; color: #ffd07a; }
 
+/* Same shape as the lunch strip, red-tinted: this one is a blocker. */
+.admin-iops-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border: 1px solid #b0524e;
+  background: rgba(224, 82, 72, 0.08);
+  border-radius: 4px;
+  font-size: 13px;
+  color: #d99a94;
+}
+.admin-iops-strip-icon { font-size: 18px; }
+.admin-iops-strip strong {
+  color: #ff9d94;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+  margin-right: 4px;
+}
+.admin-iops-strip-link {
+  color: #ff9d94;
+  text-decoration: underline dotted;
+}
+.admin-iops-strip-recheck {
+  color: #d99a94;
+  border: 1px solid #b0524e;
+  border-radius: 3px;
+  padding: 1px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  background: transparent;
+}
+.admin-iops-strip-recheck:hover { color: #ff9d94; }
+
 /* ─── /admin tabs ─────────────────────────────────────────────────── */
 .admin-tabs {
   display: flex;
