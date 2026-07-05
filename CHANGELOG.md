@@ -23,6 +23,11 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- The changelog dialog no longer breaks long release-note bullets into stray
+  paragraphs.
+- The session API returns the player's actual trigram (or none before login)
+  instead of an internal placeholder id.
+
 ## [0.3.0] - 2026-07-04
 
 ### Added
