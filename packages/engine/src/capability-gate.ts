@@ -22,8 +22,8 @@ export type SessionGateInput = Pick<
   'capabilities' | 'clusterProfile' | 'currentStage'
 > & {
   /**
-   * Stage IDs explicitly unlocked by an admin. A stage with `adminGate: true`
-   * stays gated unless its id is in this set. Optional so call sites that
+   * Stage indices explicitly unlocked by an admin. A stage with `adminGate: true`
+   * stays gated unless its index is in this set. Optional so call sites that
    * predate adminGate keep type-checking with no behavior change.
    */
   gateUnlocks?: ReadonlySet<number>;
@@ -44,7 +44,7 @@ export function gateStage(
   vars?: VarsLookup,
 ): GateVerdict {
   if (!stage.active) return { allowed: false, reason: 'inactive' };
-  if (stage.id <= session.currentStage) return { allowed: false, reason: 'already-passed' };
+  if (stage.index <= session.currentStage) return { allowed: false, reason: 'already-passed' };
   // `requires` is always enforced. `requiresOnOther` adds extra caps only
   // when the session is on a shared cluster — used by stages whose check
   // depends on optional cluster features (e.g. Calm policy engine for
@@ -66,7 +66,7 @@ export function gateStage(
   }
   // Admin gate is the LAST verdict so capability/data problems still surface
   // first — no point opening a gate just to immediately fail the stage.
-  if (stage.adminGate && !(session.gateUnlocks?.has(stage.id) ?? false)) {
+  if (stage.adminGate && !(session.gateUnlocks?.has(stage.index) ?? false)) {
     return { allowed: false, reason: 'gated' };
   }
   return { allowed: true };
@@ -104,10 +104,10 @@ export function nextPlayableStage(
   session: SessionGateInput,
   vars?: VarsLookup,
 ): NextStageResult | null {
-  const sorted = [...stages].sort((a, b) => a.id - b.id);
+  const sorted = [...stages].sort((a, b) => a.index - b.index);
   const skippedDisabled: SkippedStage[] = [];
   for (const stage of sorted) {
-    if (stage.id <= session.currentStage) continue;
+    if (stage.index <= session.currentStage) continue;
     const verdict = gateStage(stage, session, vars);
     if (verdict.allowed) return { kind: 'playable', next: stage, skippedDisabled };
     if (verdict.reason === 'gated') {

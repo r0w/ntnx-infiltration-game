@@ -40,8 +40,8 @@ export interface PackManifest {
   stagesDir: string;
   /**
    * Canonical stage ordering — names match `stagesDir/<name>.json`. The pack-loader
-   * assigns each stage a numeric `id` equal to its index here; reordering is a swap
-   * in this array, insertion is a new entry + file, deletion is a removal. No
+   * assigns each stage a numeric `index` equal to its position here; reordering is a
+   * swap in this array, insertion is a new entry + file, deletion is a removal. No
    * renumbering cascades through stage files or locale keys.
    */
   stages: string[];
@@ -84,16 +84,24 @@ export async function loadPack(packsDir: string, packId: string): Promise<Loaded
 
 async function loadStages(dir: string, order: string[]): Promise<StageDefinition[]> {
   const stages: StageDefinition[] = [];
+  const seenIds = new Set<string>();
   for (let i = 0; i < order.length; i++) {
     const name = order[i]!;
     const raw = await readFile(join(dir, `${name}.json`), 'utf8');
-    const parsed = JSON.parse(raw) as Omit<StageDefinition, 'id'> & { id?: number };
+    const parsed = JSON.parse(raw) as Omit<StageDefinition, 'index'> & { index?: number };
     if (parsed.name !== name) {
       throw new Error(
         `pack.json lists stage "${name}" at index ${i} but ${name}.json declares name="${parsed.name}"`,
       );
     }
-    parsed.id = i;
+    if (typeof parsed.id !== 'string' || parsed.id.length === 0) {
+      throw new Error(`stage "${name}" is missing its durable string "id"`);
+    }
+    if (seenIds.has(parsed.id)) {
+      throw new Error(`duplicate stage id "${parsed.id}" (stage "${name}")`);
+    }
+    seenIds.add(parsed.id);
+    parsed.index = i;
     stages.push(parsed as StageDefinition);
   }
   return stages;

@@ -108,9 +108,10 @@ function loadCatalog(locale: string): Record<string, string> {
 
 function loadStages(): Stage[] {
   const catalog = loadCatalog('en');
-  // Stage order lives in pack.json's `stages[]` (the JSON files carry no id).
-  // Derive each stage's id from its position there — producer/consumer
-  // ordering and orphan detection depend on it.
+  // Stage order lives in pack.json's `stages[]` (the JSON files' `id` is a
+  // durable identity string, not a position). Derive each stage's numeric
+  // position from the array — producer/consumer ordering and orphan
+  // detection depend on it.
   const pack = JSON.parse(readFileSync(join(PACK_DIR, 'pack.json'), 'utf8')) as {
     stages?: string[];
   };
@@ -329,7 +330,6 @@ function reorderStage(s: Record<string, unknown>): Record<string, unknown> {
     'prompt',
     'defaultColor',
     'messages',
-    'saveScore',
     'requiresOnOther',
     'typingSpeedMs',
     'silentOnSuccess',

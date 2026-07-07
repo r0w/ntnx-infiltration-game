@@ -1,4 +1,5 @@
 {
+  "id": "stage-033",
   "name": "create-ncm-playbook",
   "active": true,
   "prompt": "tank",
@@ -17,7 +18,6 @@
     "stage-033.line-11",
     "stage-033.line-12"
   ],
-  "saveScore": false,
   "check": {
     "fn": "CheckPlaybook"
   },

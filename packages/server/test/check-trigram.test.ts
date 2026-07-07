@@ -203,7 +203,7 @@ describe('SessionDirectory (integration via SessionService)', () => {
   // These tests exercise the real SQL path — JSON-encoded values in
   // session_variables, packId scoping, current-session exclusion.
   const stages: StageDefinition[] = [
-    { id: 1, name: 'login', active: true, messages: ['stage-001'], saveScore: false },
+    { index: 1, id: 'login', name: 'login', active: true, messages: ['stage-001'] },
   ];
   const bundle: LocaleBundle = makeBundle('en', { en: { 'stage-001': '' } });
 

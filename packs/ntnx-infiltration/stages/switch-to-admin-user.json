@@ -1,4 +1,5 @@
 {
+  "id": "stage-008",
   "name": "switch-to-admin-user",
   "active": true,
   "prompt": "tank",
@@ -7,7 +8,6 @@
     "stage-008.line-01",
     "stage-008.line-02"
   ],
-  "saveScore": false,
   "needs": [
     "Trigram"
   ]

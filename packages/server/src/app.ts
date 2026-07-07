@@ -88,8 +88,7 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
       clusterProfile: deps.clusterProfile,
       defaultLocale: deps.pack.manifest.defaultLocale,
       supportedLocales: deps.pack.manifest.supportedLocales,
-      // Stable string identifier — Phase 11 made `name` the canonical id.
-      // The frontend keys + displays stages by name; `s.id` is the engine's
+      // The frontend keys + displays stages by name; `s.index` is the engine's
       // ephemeral positional index and must never leak past this boundary.
       stages: deps.pack.stages.map((s) => ({
         name: s.name,

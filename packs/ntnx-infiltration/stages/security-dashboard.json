@@ -1,4 +1,5 @@
 {
+  "id": "stage-030",
   "name": "security-dashboard",
   "active": true,
   "prompt": "tank",
@@ -9,6 +10,5 @@
     "stage-030.line-03",
     "stage-030.line-04",
     "stage-030.line-05"
-  ],
-  "saveScore": false
+  ]
 }

@@ -1,4 +1,5 @@
 {
+  "id": "stage-011",
   "name": "add-ubuntu-image",
   "active": true,
   "prompt": "tank",
@@ -12,7 +13,6 @@
     "stage-011.line-06",
     "stage-011.line-07"
   ],
-  "saveScore": false,
   "check": {
     "fn": "CheckImage"
   },

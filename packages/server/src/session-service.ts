@@ -164,8 +164,8 @@ export class SessionService {
   /**
    * In-memory mirror of the gate_unlocks table for the current pack. Read at
    * boot, mutated by `setGateUnlock`. Passed to the runner on every advance
-   * so a stage with `adminGate: true` lets through iff its id is in the set.
-   * Stores numeric indices (stage.id) to match the engine's gating signature;
+   * so a stage with `adminGate: true` lets through iff its index is in the set.
+   * Stores numeric indices (stage.index) to match the engine's gating signature;
    * name ↔ index conversion happens at the DB boundary.
    */
   private unlockedGateIds: Set<number>;
@@ -591,7 +591,7 @@ export class SessionService {
     }
     const needed = new Set<string>();
     for (const s of stages) {
-      if (s.id <= currentIdx) continue;
+      if (s.index <= currentIdx) continue;
       for (const n of s.needs ?? []) {
         if (!ctx.vars.has(n)) needed.add(n);
       }
@@ -599,7 +599,7 @@ export class SessionService {
     for (const v of needed) {
       const producer = byCapture.get(v);
       if (!producer) continue;
-      if (producer.id > currentIdx) continue;
+      if (producer.index > currentIdx) continue;
       if (ctx.vars.has(v)) continue;
       try {
         const result = await this.runner.rehydrate(producer, ctx);
@@ -1096,8 +1096,8 @@ export class SessionService {
     const ctx = this.buildCheckContext(session);
     const skipped: string[] = [];
     for (const stage of this.runner.listStages()) {
-      if (stage.id <= currentIdx) continue;
-      if (stage.id > targetIdx) break;
+      if (stage.index <= currentIdx) continue;
+      if (stage.index > targetIdx) break;
       const start = Date.now();
       const result = await this.runner.rehydrate(stage, ctx);
       this.history.record(

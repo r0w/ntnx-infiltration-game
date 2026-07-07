@@ -133,9 +133,9 @@ describe('recovery-point action wiring', () => {
  */
 describe('recovery-point action — full session flow', () => {
   const stages: StageDefinition[] = [
-    { id: 0, name: 'welcome', active: true, messages: ['w.m1'], saveScore: false },
-    { id: 1, name: 'create-vm', active: true, messages: ['v.m1'], saveScore: false, check: { fn: 'captureVm' } },
-    { id: 2, name: 'verify-iso', active: true, messages: ['iso.m1'], saveScore: false },
+    { index: 0, id: 'welcome', name: 'welcome', active: true, messages: ['w.m1'] },
+    { index: 1, id: 'create-vm', name: 'create-vm', active: true, messages: ['v.m1'], check: { fn: 'captureVm' } },
+    { index: 2, id: 'verify-iso', name: 'verify-iso', active: true, messages: ['iso.m1'] },
   ];
   const bundle = makeBundle('en', {
     en: {
