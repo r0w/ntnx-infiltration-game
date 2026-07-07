@@ -17,7 +17,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 - Optional anonymous usage stats: set `NIG_CENTRAL_URL` to send session and
   stage-timing events to a NIG Central instance; unset means nothing is ever
-  sent, and an unreachable Central never affects the game.
+  sent, mock mode never emits, and an unreachable Central never affects the
+  game.
 - Per-stage wall-clock timing (time the player actually spent on each stage).
 
 ### Changed
