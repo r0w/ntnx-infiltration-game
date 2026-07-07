@@ -62,7 +62,7 @@ describe('Telemetry', () => {
       t.record({
         type: 'stage_passed',
         sessionId: 's1',
-        stageId: 'stage-006',
+        stageId: 'eg-006',
         stageName: 'create-admin-user',
         stageIndex: 5,
         wallMs: 1234,
@@ -79,7 +79,7 @@ describe('Telemetry', () => {
       expect(payload.deployment.packId).toBe('test-pack');
       expect(payload.deployment.mode).toBe('test');
       expect(payload.events.map((e) => e.type)).toEqual(['session_started', 'stage_passed']);
-      expect(payload.events[1]!.stageId).toBe('stage-006');
+      expect(payload.events[1]!.stageId).toBe('eg-006');
       expect(payload.events[0]!.ts).toBeGreaterThan(0);
     } finally {
       server.stop(true);
