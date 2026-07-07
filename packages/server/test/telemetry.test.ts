@@ -32,6 +32,14 @@ describe('Telemetry', () => {
     expect(outboxCount(db)).toBe(0);
   });
 
+  test('disabled in mock mode even with a url', () => {
+    const db = openDatabase({ path: ':memory:' });
+    const t = new Telemetry({ ...baseDeps, db, serverMode: 'mock', url: 'http://127.0.0.1:9' });
+    expect(t.enabled).toBe(false);
+    t.record({ type: 'session_started', sessionId: 's1' });
+    expect(outboxCount(db)).toBe(0);
+  });
+
   test('deploymentId is ip + first-boot date, stable across instances', () => {
     const db = openDatabase({ path: ':memory:' });
     const t1 = new Telemetry({ ...baseDeps, db, url: 'http://127.0.0.1:9' });
