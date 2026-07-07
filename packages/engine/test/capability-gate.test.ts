@@ -3,10 +3,9 @@ import { gateStage, nextPlayableStage } from '../src/capability-gate';
 import type { StageDefinition } from '../src/types';
 
 const baseStage = (overrides: Partial<StageDefinition> = {}): StageDefinition => ({
-  id: 1,
+  index: 1,
   active: true,
   messages: { en: [] },
-  saveScore: true,
   ...overrides,
 });
 
@@ -17,7 +16,7 @@ describe('gateStage', () => {
   });
 
   test('blocks already-passed', () => {
-    const s = baseStage({ id: 3 });
+    const s = baseStage({ index: 3 });
     expect(gateStage(s, { capabilities: new Set(), clusterProfile: 'hpoc', currentStage: 5 })).toEqual({ allowed: false, reason: 'already-passed' });
   });
 
@@ -114,7 +113,7 @@ describe('gateStage — adminGate', () => {
   });
 
   test('allows when adminGate is on and the stage id is in the unlocks set', () => {
-    const s = baseStage({ id: 6, adminGate: true });
+    const s = baseStage({ index: 6, adminGate: true });
     const v = gateStage(s, {
       capabilities: new Set(),
       clusterProfile: 'hpoc',
@@ -153,47 +152,47 @@ describe('gateStage — adminGate', () => {
 
 describe('nextPlayableStage', () => {
   test('picks next id > currentStage', () => {
-    const stages = [baseStage({ id: 1 }), baseStage({ id: 2 }), baseStage({ id: 3 })];
+    const stages = [baseStage({ index: 1 }), baseStage({ index: 2 }), baseStage({ index: 3 })];
     const r = nextPlayableStage(stages, { capabilities: new Set(), clusterProfile: 'hpoc', currentStage: 1 });
     expect(r?.kind).toBe('playable');
     if (r?.kind !== 'playable') throw new Error('expected playable');
-    expect(r.next.id).toBe(2);
+    expect(r.next.index).toBe(2);
     expect(r.skippedDisabled).toEqual([]);
   });
 
   test('skips hpoc-only on shared and records them', () => {
     const stages = [
-      baseStage({ id: 2, impact: 'hpoc-only' }),
-      baseStage({ id: 3 }),
+      baseStage({ index: 2, impact: 'hpoc-only' }),
+      baseStage({ index: 3 }),
     ];
     const r = nextPlayableStage(stages, { capabilities: new Set(), clusterProfile: 'other', currentStage: 1 });
     if (r?.kind !== 'playable') throw new Error('expected playable');
-    expect(r.next.id).toBe(3);
-    expect(r.skippedDisabled.map((s) => s.stage.id)).toEqual([2]);
+    expect(r.next.index).toBe(3);
+    expect(r.skippedDisabled.map((s) => s.stage.index)).toEqual([2]);
     expect(r.skippedDisabled[0].verdict.reason).toBe('destructive-on-other');
   });
 
   test('skips inactive silently (not in disabled list)', () => {
     const stages = [
-      baseStage({ id: 2, active: false }),
-      baseStage({ id: 3 }),
+      baseStage({ index: 2, active: false }),
+      baseStage({ index: 3 }),
     ];
     const r = nextPlayableStage(stages, { capabilities: new Set(), clusterProfile: 'hpoc', currentStage: 1 });
     if (r?.kind !== 'playable') throw new Error('expected playable');
-    expect(r.next.id).toBe(3);
+    expect(r.next.index).toBe(3);
     expect(r.skippedDisabled).toEqual([]);
   });
 
   test('returns null when nothing left', () => {
-    const stages = [baseStage({ id: 1 })];
+    const stages = [baseStage({ index: 1 })];
     const r = nextPlayableStage(stages, { capabilities: new Set(), clusterProfile: 'hpoc', currentStage: 5 });
     expect(r).toBeNull();
   });
 
   test('parks at a gated stage with kind=gated, does not peek past it', () => {
     const stages = [
-      baseStage({ id: 2, adminGate: true }),
-      baseStage({ id: 3 }),
+      baseStage({ index: 2, adminGate: true }),
+      baseStage({ index: 3 }),
     ];
     const r = nextPlayableStage(stages, {
       capabilities: new Set(),
@@ -202,15 +201,15 @@ describe('nextPlayableStage', () => {
       gateUnlocks: new Set(),
     });
     if (r?.kind !== 'gated') throw new Error('expected gated');
-    expect(r.stage.id).toBe(2);
+    expect(r.stage.index).toBe(2);
     // Stage 3 is NOT considered — once a gate is hit we stop scanning.
     expect(r.skippedDisabled).toEqual([]);
   });
 
   test('flips back to playable once the gate is in the unlocks set', () => {
     const stages = [
-      baseStage({ id: 2, adminGate: true }),
-      baseStage({ id: 3 }),
+      baseStage({ index: 2, adminGate: true }),
+      baseStage({ index: 3 }),
     ];
     const r = nextPlayableStage(stages, {
       capabilities: new Set(),
@@ -219,6 +218,6 @@ describe('nextPlayableStage', () => {
       gateUnlocks: new Set([2]),
     });
     if (r?.kind !== 'playable') throw new Error('expected playable');
-    expect(r.next.id).toBe(2);
+    expect(r.next.index).toBe(2);
   });
 });

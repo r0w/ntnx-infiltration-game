@@ -1,4 +1,5 @@
 {
+  "id": "stage-019",
   "name": "allow-ssh-in-microseg",
   "active": true,
   "prompt": "tank",
@@ -16,7 +17,6 @@
     "stage-019.line-10",
     "stage-019.line-11"
   ],
-  "saveScore": false,
   "check": {
     "fn": "CheckSecurityPolicy2"
   },

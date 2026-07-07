@@ -16,7 +16,7 @@ import { CheckRegistry } from './check-registry';
 
 export interface RenderedStage {
   /** Positional index of the rendered stage in the pack order. */
-  stageId: number;
+  stageIndex: number;
   /** Canonical stage name — what payloads to the frontend/DB carry. */
   stageName: string;
   units: MessageUnit[];
@@ -68,11 +68,7 @@ export class StageRunner {
     return nextPlayableStage(this.stages, session, vars);
   }
 
-  stageById(id: number): StageDefinition | undefined {
-    return this.stages.find((s) => s.id === id);
-  }
-
-  /** Canonical identity lookup — prefer this over stageById in new code. */
+  /** Canonical identity lookup. */
   stageByName(name: string): StageDefinition | undefined {
     return this.stages.find((s) => s.name === name);
   }
@@ -89,7 +85,7 @@ export class StageRunner {
     const defaultColor = stage.defaultColor ?? 'default';
     const resolveOpts: ResolveOptions = {
       onMissing: (key, loc) =>
-        this.logger?.warn('missing translation key', { key, locale: loc, stageId: stage.id }),
+        this.logger?.warn('missing translation key', { key, locale: loc, stage: stage.name }),
     };
 
     for (const key of stage.messages) {
@@ -118,7 +114,7 @@ export class StageRunner {
     }
 
     return {
-      stageId: stage.id,
+      stageIndex: stage.index,
       stageName: stage.name,
       units,
       actions,

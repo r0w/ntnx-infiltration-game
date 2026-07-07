@@ -1,4 +1,5 @@
 {
+  "id": "stage-010",
   "name": "create-subnet",
   "active": true,
   "prompt": "tank",
@@ -18,7 +19,6 @@
     "stage-010.line-12",
     "stage-010.line-13"
   ],
-  "saveScore": false,
   "check": {
     "fn": "CheckNetwork"
   },

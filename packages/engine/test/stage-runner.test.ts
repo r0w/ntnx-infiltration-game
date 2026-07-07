@@ -6,20 +6,18 @@ import { makeBundle } from '../src/locale-catalog';
 import type { StageDefinition, CheckContext, NutanixClient, ClusterCache, Logger } from '../src/types';
 
 const stages: StageDefinition[] = [
-  { id: 1, active: true, messages: ['s1.prompt'], saveScore: true },
+  { index: 1, active: true, messages: ['s1.prompt'] },
   {
-    id: 2,
+    index: 2,
     active: true,
     messages: ['s2.greet'],
-    saveScore: true,
     check: { fn: 'noop' },
   },
   {
-    id: 3,
+    index: 3,
     active: true,
     impact: 'hpoc-only',
     messages: ['s3.destructive'],
-    saveScore: true,
   },
 ];
 
@@ -66,7 +64,7 @@ describe('StageRunner', () => {
     const runner = new StageRunner(stages, registry);
     const r = runner.nextStage({ capabilities: new Set(), clusterProfile: 'hpoc', currentStage: 2 });
     if (r?.kind !== 'playable') throw new Error('expected playable');
-    expect(r.next.id).toBe(3);
+    expect(r.next.index).toBe(3);
   });
 
   test('render reports first await-input index', () => {
@@ -88,7 +86,7 @@ describe('StageRunner', () => {
 
   test('render does not double-newline when source already ends in \\n', () => {
     const runner = new StageRunner(
-      [{ id: 1, active: true, messages: ['preformatted'], saveScore: true }],
+      [{ index: 1, active: true, messages: ['preformatted'] }],
       new CheckRegistry(),
     );
     const local = makeBundle('en', { en: { preformatted: 'a line\n' } });
@@ -118,7 +116,7 @@ describe('StageRunner', () => {
     // other text-unit prop) flowing through.
     const runner = new StageRunner(
       [
-        { id: 1, active: true, prompt: 'tank', messages: ['s1.m'], saveScore: true },
+        { index: 1, active: true, prompt: 'tank', messages: ['s1.m'] },
       ],
       new CheckRegistry(),
     );
@@ -139,7 +137,7 @@ describe('StageRunner', () => {
     // on each side of the split.
     const runner = new StageRunner(
       [
-        { id: 1, active: true, prompt: 'tank', messages: ['s1.m'], saveScore: true },
+        { index: 1, active: true, prompt: 'tank', messages: ['s1.m'] },
       ],
       new CheckRegistry(),
     );
@@ -159,11 +157,10 @@ describe('StageRunner', () => {
     const runner = new StageRunner(
       [
         {
-          id: 1,
+          index: 1,
           active: true,
           prompt: 'tank',
           messages: ['s1.m1', 's1.m2'],
-          saveScore: true,
         },
       ],
       new CheckRegistry(),
@@ -185,7 +182,7 @@ describe('StageRunner', () => {
 
   test('render skips speaker injection when stage.prompt is empty', () => {
     const runner = new StageRunner(
-      [{ id: 1, active: true, messages: ['s1.m'], saveScore: true }],
+      [{ index: 1, active: true, messages: ['s1.m'] }],
       new CheckRegistry(),
     );
     const local = makeBundle('en', { en: { 's1.m': 'plain\n\ntext' } });
@@ -224,10 +221,9 @@ describe('StageRunner', () => {
     const runner = new StageRunner(
       [
         {
-          id: 1,
+          index: 1,
           active: true,
           messages: [],
-          saveScore: true,
           check: { fn: 'mainCheck', rehydrate: 'rehydrateCheck' },
         },
       ],

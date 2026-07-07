@@ -1,4 +1,5 @@
 {
+  "id": "stage-017",
   "name": "create-storage-policy",
   "active": true,
   "prompt": "tank",
@@ -12,7 +13,6 @@
     "stage-017.line-06",
     "stage-017.line-07"
   ],
-  "saveScore": false,
   "check": {
     "fn": "CheckStoragePolicy"
   },

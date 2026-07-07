@@ -34,34 +34,34 @@ const silentLogger = {
 
 // Stage names stay stable across the file; ids are 0-based to mirror what
 // pack-loader assigns in production (parsed.id = i). The session-service
-// compares `stage.id` against a 0-based positional index derived from
+// compares `stage.index` against a 0-based positional index derived from
 // `SessionRecord.currentStage`, so test fixtures need to be consistent.
 const stages: StageDefinition[] = [
-  { id: 0, name: 's1', active: true, messages: ['s1.m1'], saveScore: true },
-  { id: 1, name: 's2', active: true, messages: ['s2.m1'], saveScore: true },
+  { index: 0, id: 's1', name: 's1', active: true, messages: ['s1.m1'] },
+  { index: 1, id: 's2', name: 's2', active: true, messages: ['s2.m1'] },
   {
-    id: 2,
+    index: 2,
+    id: 's3',
     name: 's3',
     active: true,
     messages: ['s3.m1'],
-    saveScore: true,
     check: { fn: 'alwaysPass' },
   },
   {
-    id: 3,
+    index: 3,
+    id: 's4',
     name: 's4',
     active: true,
     impact: 'hpoc-only',
     messages: ['s4.m1'],
-    saveScore: true,
     check: { fn: 'alwaysPass' },
   },
   {
-    id: 4,
+    index: 4,
+    id: 's5',
     name: 's5',
     active: true,
     messages: ['s5.m1'],
-    saveScore: true,
     check: { fn: 'needsCapture' },
   },
 ];
@@ -357,9 +357,9 @@ describe('SessionService', () => {
     const checks = new CheckRegistry();
     checks.register('alwaysFail', async () => ({ pass: false, detail: 'nope' }));
     const failStages: StageDefinition[] = [
-      { id: 0, name: 's1', active: true, messages: ['s1.m1'], saveScore: true },
-      { id: 1, name: 's2', active: true, messages: ['s2.m1'], saveScore: true },
-      { id: 2, name: 's3', active: true, messages: ['s3.m1'], saveScore: true, check: { fn: 'alwaysFail' } },
+      { index: 0, id: 's1', name: 's1', active: true, messages: ['s1.m1'] },
+      { index: 1, id: 's2', name: 's2', active: true, messages: ['s2.m1'] },
+      { index: 2, id: 's3', name: 's3', active: true, messages: ['s3.m1'], check: { fn: 'alwaysFail' } },
     ];
     const runner = new StageRunner(failStages, checks);
     const bundleWithKo = makeBundle('en', {
@@ -396,7 +396,7 @@ describe('SessionService', () => {
     db.exec(SCHEMA);
     const checks = new CheckRegistry();
     const gatedStages: StageDefinition[] = [
-      { id: 0, name: 's1', active: true, messages: ['s1.m1'], waitForInputValue: 'Ok', saveScore: true },
+      { index: 0, id: 's1', name: 's1', active: true, messages: ['s1.m1'], waitForInputValue: 'Ok' },
     ];
     const runner = new StageRunner(gatedStages, checks);
     const bundleWithRetry = makeBundle('en', {
@@ -431,7 +431,7 @@ describe('SessionService', () => {
     db.exec(SCHEMA);
     const checks = new CheckRegistry();
     const gatedStages: StageDefinition[] = [
-      { id: 0, name: 's1', active: true, messages: ['s1.m1'], waitForInputValue: 'Ok', saveScore: true },
+      { index: 0, id: 's1', name: 's1', active: true, messages: ['s1.m1'], waitForInputValue: 'Ok' },
     ];
     const runner = new StageRunner(gatedStages, checks);
     const noRetryBundle = makeBundle('en', {
@@ -467,11 +467,11 @@ describe('SessionService', () => {
       fired.push(ctx.session.id);
     });
     const actionStage: StageDefinition = {
-      id: 0,
+      index: 0,
+      id: 's1',
       name: 's1',
       active: true,
       messages: ['s1.m1'],
-      saveScore: true,
     };
     const runner = new StageRunner([actionStage], checks);
     const withActionBundle = makeBundle('en', {
@@ -502,11 +502,11 @@ describe('SessionService', () => {
     const checks = new CheckRegistry();
     const actions = new ActionRegistry();
     const stage: StageDefinition = {
-      id: 0,
+      index: 0,
+      id: 's1',
       name: 's1',
       active: true,
       messages: ['s1.m1'],
-      saveScore: true,
     };
     const runner = new StageRunner([stage], checks);
     const b = makeBundle('en', { en: { 's1.m1': "hi <action name='nope'/>" } });
@@ -539,7 +539,7 @@ describe('SessionService', () => {
       ctx.mockOverlay.mark('vm', name, 'deleted');
     });
     const runner = new StageRunner(
-      [{ id: 0, name: 's1', active: true, messages: [], saveScore: true }],
+      [{ index: 0, id: 's1', name: 's1', active: true, messages: [] }],
       checks,
     );
     const service = new SessionService({
@@ -582,11 +582,11 @@ describe('SessionService', () => {
     }));
     const loginStages: StageDefinition[] = [
       {
-        id: 0,
+        index: 0,
+        id: 's1',
         name: 's1',
         active: true,
         messages: ['s1.trigram', 's1.pin'],
-        saveScore: false,
         check: { fn: 'failTrigram' },
       },
     ];
@@ -641,8 +641,8 @@ describe('SessionService', () => {
       return { pass: true, detail: 'ok' };
     });
     const stage: StageDefinition = {
-      id: 0, name: 's1', active: true, messages: ['s1.m1'],
-      saveScore: true, check: { fn: 'countingPass' },
+      index: 0, id: 's1', name: 's1', active: true, messages: ['s1.m1'],
+      check: { fn: 'countingPass' },
     };
     const runner = new StageRunner([stage], checks);
     const b = makeBundle('en', { en: { 's1.m1': "Press Enter: <input/>" } });
@@ -680,11 +680,11 @@ describe('SessionService', () => {
     checks.register('alwaysPass', async () => ({ pass: true }));
     const loginStages: StageDefinition[] = [
       {
-        id: 0,
+        index: 0,
+        id: 's1',
         name: 's1',
         active: true,
         messages: ['s1.trigram', 's1.pin'],
-        saveScore: false,
         check: { fn: 'alwaysPass' },
         computeGreeting: {
           inputVar: 'Trigram',
@@ -739,11 +739,11 @@ describe('SessionService', () => {
     }));
     const handoffStages: StageDefinition[] = [
       {
-        id: 0,
+        index: 0,
+        id: 's1',
         name: 's1',
         active: true,
         messages: ['s1.prompt'],
-        saveScore: false,
         check: { fn: 'handoff' },
       },
     ];
@@ -805,40 +805,40 @@ describe('SessionService', () => {
       captured: { ProjectUUID: 'abc-123' },
     }));
     const invalidatingStages: StageDefinition[] = [
-      { id: 0, name: 's1', active: true, messages: ['s1.m1'], saveScore: true },
-      { id: 1, name: 's2', active: true, messages: ['s2.m1'], saveScore: true },
+      { index: 0, id: 's1', name: 's1', active: true, messages: ['s1.m1'] },
+      { index: 1, id: 's2', name: 's2', active: true, messages: ['s2.m1'] },
       {
-        id: 2,
+        index: 2,
+        id: 's3',
         name: 's3',
         active: true,
         messages: ['s3.m1'],
-        saveScore: true,
         check: { fn: 'alwaysPass' },
       },
       {
-        id: 3,
+        index: 3,
+        id: 's4',
         name: 's4',
         active: true,
         impact: 'hpoc-only',
         messages: ['s4.m1'],
-        saveScore: true,
         check: { fn: 'alwaysPass' },
       },
       {
-        id: 4,
+        index: 4,
+        id: 's5',
         name: 's5',
         active: true,
         messages: ['s5.m1'],
-        saveScore: true,
         check: { fn: 'needsCapture' },
       },
       // Narrative stage that invalidates the capture from stage 5.
       {
-        id: 5,
+        index: 5,
+        id: 's6',
         name: 's6',
         active: true,
         messages: [],
-        saveScore: false,
         invalidates: ['ProjectUUID'],
       },
     ];
@@ -885,9 +885,9 @@ describe('SessionService — adminGate', () => {
     const db = new Database(':memory:');
     db.exec(SCHEMA);
     const gatedStages: StageDefinition[] = [
-      { id: 0, name: 'open', active: true, messages: ['s1.m1'], saveScore: true },
-      { id: 1, name: 'pause', active: true, adminGate: true, messages: ['s2.m1'], saveScore: true },
-      { id: 2, name: 'final', active: true, messages: ['s3.m1'], saveScore: true },
+      { index: 0, id: 'open', name: 'open', active: true, messages: ['s1.m1'] },
+      { index: 1, id: 'pause', name: 'pause', active: true, adminGate: true, messages: ['s2.m1'] },
+      { index: 2, id: 'final', name: 'final', active: true, messages: ['s3.m1'] },
     ];
     const localBundle: LocaleBundle = makeBundle('en', {
       en: { 's1.m1': 'one', 's2.m1': 'two', 's3.m1': 'three' },
@@ -972,9 +972,9 @@ describe('SessionService — applyEffectiveStages (pack overlay)', () => {
     const db = new Database(':memory:');
     db.exec(SCHEMA);
     const baseStages: StageDefinition[] = [
-      { id: 0, name: 'open', active: true, messages: ['s1.m1'], saveScore: true },
-      { id: 1, name: 'middle', active: true, adminGate: false, messages: ['s2.m1'], saveScore: true },
-      { id: 2, name: 'final', active: true, messages: ['s3.m1'], saveScore: true },
+      { index: 0, id: 'open', name: 'open', active: true, messages: ['s1.m1'] },
+      { index: 1, id: 'middle', name: 'middle', active: true, adminGate: false, messages: ['s2.m1'] },
+      { index: 2, id: 'final', name: 'final', active: true, messages: ['s3.m1'] },
     ];
     const localBundle: LocaleBundle = makeBundle('en', {
       en: { 's1.m1': 'one', 's2.m1': 'two', 's3.m1': 'three' },
