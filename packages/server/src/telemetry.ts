@@ -82,9 +82,7 @@ export class Telemetry {
     this.logger = deps.logger;
     this.url = (deps.url ?? '').trim().replace(/\/+$/, '');
     this.token = deps.token || undefined;
-    // Mock mode plays against fixtures — its "stats" are meaningless noise,
-    // so telemetry stays off no matter what the env says.
-    this.enabled = this.url.length > 0 && deps.serverMode !== 'mock';
+    this.enabled = this.url.length > 0;
     const ip = localIp();
     const firstBootDate = this.enabled ? this.firstBootDate() : '';
     this.deploymentId = `${ip}-${firstBootDate}`;
