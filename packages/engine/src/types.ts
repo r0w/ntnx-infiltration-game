@@ -73,8 +73,9 @@ export interface StageDefinition {
    */
   index: number;
   /**
-   * Durable identity — frozen forever, aligned on the stage's locale key
-   * prefix (`stage-012` ↔ `stage-012.line-01`). Survives renames and pack
+   * Durable identity — frozen forever. `eg-NNN`, the `eg-` marking lineage
+   * from the original escape-game; the number matches the stage's locale key
+   * prefix (`eg-012` ↔ `stage-012.line-01`). Survives renames and pack
    * restructuring; this is what telemetry emits to NIG Central. Never reuse
    * an id for a different stage.
    */

@@ -22,8 +22,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
-- Stages now carry a durable `id` (aligned on their locale key prefix) that
-  survives renames and pack restructuring.
+- Stages now carry a durable `id` (`eg-NNN`, from the original escape-game
+  lineage) that survives renames and pack restructuring.
 
 ### Fixed
 

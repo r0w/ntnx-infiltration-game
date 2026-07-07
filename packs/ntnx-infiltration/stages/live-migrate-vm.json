@@ -1,5 +1,5 @@
 {
-  "id": "stage-014",
+  "id": "eg-014",
   "name": "live-migrate-vm",
   "active": true,
   "requires": [
