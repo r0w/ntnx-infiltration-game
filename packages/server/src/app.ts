@@ -15,6 +15,7 @@ import { buildSshRoutes } from './routes/ssh';
 import { buildAdminRoutes } from './routes/admin';
 import { buildActRoutes } from './routes/act';
 import { getVersionInfo } from './version';
+import type { Telemetry } from './telemetry';
 
 export interface AppDeps {
   db: Database;
@@ -36,6 +37,8 @@ export interface AppDeps {
   initialVariables?: Record<string, unknown>;
   publicDir?: string;
   adminPassword: string;
+  /** NIG Central stats emitter — optional, absent in tests. */
+  telemetry?: Telemetry;
 }
 
 export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } {
@@ -50,6 +53,7 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
     bundle: deps.pack.bundle,
     globalTypingSpeedMs: deps.globalTypingSpeedMs,
     initialVariables: deps.initialVariables,
+    telemetry: deps.telemetry,
   });
 
   const app = new Hono();

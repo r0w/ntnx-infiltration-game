@@ -30,6 +30,7 @@ import {
   type SessionRecord,
 } from './db/queries';
 import { applyOverlay } from './pack-overlay';
+import type { Telemetry } from './telemetry';
 import {
   clusterCacheForSession,
   mockOverlayForSession,
@@ -75,6 +76,9 @@ export interface SessionServiceDeps {
   bundle: LocaleBundle;
   globalTypingSpeedMs?: number;
   initialVariables?: Record<string, unknown>;
+  /** NIG Central stats emitter. Optional and fire-and-forget — absent in
+   *  tests and when NIG_CENTRAL_URL is unset. */
+  telemetry?: Telemetry;
 }
 
 export interface AdvanceResult {
@@ -161,6 +165,7 @@ export class SessionService {
   private readonly globalTypingSpeedMs?: number;
   private readonly initialVariables: Record<string, unknown>;
   private readonly sessionDirectory: SessionDirectory;
+  private readonly telemetry?: Telemetry;
   /**
    * In-memory mirror of the gate_unlocks table for the current pack. Read at
    * boot, mutated by `setGateUnlock`. Passed to the runner on every advance
@@ -198,6 +203,7 @@ export class SessionService {
     this.bundle = deps.bundle;
     this.globalTypingSpeedMs = deps.globalTypingSpeedMs;
     this.initialVariables = deps.initialVariables ?? {};
+    this.telemetry = deps.telemetry;
     this.unlockedGateIds = this.rebuildUnlockedSet();
     this.globallyPausedAt = this.packPauses.get(this.packId)?.pausedAt ?? null;
     // Apply any persisted overlay at boot so a server restart preserves
@@ -371,6 +377,7 @@ export class SessionService {
         this.variables.upsert(id, name, value, 'session-init');
       }
     }
+    this.telemetry?.record({ type: 'session_started', sessionId: id, locale: record.locale });
     return record;
   }
 
@@ -770,6 +777,15 @@ export class SessionService {
       ctx.vars,
     );
     if (!next) {
+      // Only emit on the first finish — advance() keeps returning 'finished'
+      // on every poll after the last stage, and clearFinished/replays exist.
+      if (session.finishedAt === null) {
+        this.telemetry?.record({
+          type: 'session_finished',
+          sessionId: session.id,
+          totalMs: Date.now() - session.startedAt,
+        });
+      }
       this.sessions.markFinished(session.id);
       return {
         kind: 'finished',
@@ -1166,6 +1182,14 @@ export class SessionService {
       for (const name of stage.invalidates) ctx.vars.delete(name);
     }
     this.history.record(session.id, stage.name, 'passed', null, null);
+    this.telemetry?.record({
+      type: 'stage_passed',
+      sessionId: session.id,
+      stageId: stage.id,
+      stageName: stage.name,
+      stageIndex: stage.index,
+      wallMs: session.stageEnteredAt !== null ? Date.now() - session.stageEnteredAt : undefined,
+    });
     this.sessions.updateCurrentStage(session.id, stage.name);
     return { kind: 'units', stageName: stage.name, units, actions, disabledStages, typingSpeedMs };
   }
@@ -1217,6 +1241,18 @@ export class SessionService {
     }
     this.history.record(session.id, stage.name, r.pass ? 'passed' : 'failed', Date.now() - start, r.detail ?? null);
     this.attempts.record(session.id, stage.name, r.pass ? 'passed' : 'failed', Date.now() - start, r.detail ?? null);
+    this.telemetry?.record({
+      type: r.pass ? 'stage_passed' : 'stage_failed',
+      sessionId: session.id,
+      stageId: stage.id,
+      stageName: stage.name,
+      stageIndex: stage.index,
+      checkMs: Date.now() - start,
+      wallMs:
+        r.pass && session.stageEnteredAt !== null
+          ? Date.now() - session.stageEnteredAt
+          : undefined,
+    });
     if (r.pass) this.sessions.updateCurrentStage(session.id, stage.name);
     return { kind: 'units', stageName: stage.name, units, actions, check: checkResult, disabledStages, typingSpeedMs };
   }
