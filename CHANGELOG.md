@@ -18,6 +18,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 - Optional anonymous usage stats: set `NIG_CENTRAL_URL` to send session and
   stage-timing events to a NIG Central instance; unset means nothing is ever
   sent, and an unreachable Central never affects the game.
+- Blueprint deployments report those usage stats to the team's NIG Central
+  by default (endpoint baked into the blueprint, not an operator field).
 - Per-stage wall-clock timing (time the player actually spent on each stage).
 
 ### Changed

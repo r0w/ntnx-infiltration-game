@@ -247,6 +247,13 @@ The blueprint exposes 2 day-2 actions in **Self-Service > Apps**:
   `secondary`, flips it to advanced-networking, and creates
   `TestNetwork` (`192.168.1.0/25`). Pre-creating these is fine
   (idempotent skip), but not required.
+- **No telemetry setup**. Deployments report anonymous usage stats
+  (session counts, per-stage timings) to the team's NIG Central
+  dashboard. Nothing personal is sent - no trigrams, no player names,
+  no cluster credentials - and the send path is fire-and-forget: an
+  unreachable Central never affects the game. The endpoint is baked
+  into the blueprint; there is nothing to configure (or break) at
+  launch.
 
 ## Troubleshooting
 
