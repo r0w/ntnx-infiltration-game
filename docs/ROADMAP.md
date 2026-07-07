@@ -4,7 +4,9 @@ Short status-only view. For deeper architecture context see [ARCHITECTURE.md](./
 
 ## Status
 
-The game is **playable end-to-end**: 39 stages, 25 live check functions hitting Nutanix v4, deployable zero-touch via the Calm blueprint at [`tooling/blueprint/`](../tooling/blueprint/). Validated against PC 7.5 - install runbook SUCCESS, auto-play 39/39 stages SUCCESS. Re-validated on a fresh HPoC on 2026-06-07 (full deploy + auto-play + a manual player run through the resource-creation stages), then merged develop into main. UI-uploadable on any PC 7.5. Test suite green (237 tests across engine + server + nutanix + frontend).
+The game is **playable end-to-end**: 39 stages, 25 live check functions hitting Nutanix v4, deployable zero-touch via the Calm blueprint at [`tooling/blueprint/`](../tooling/blueprint/). Validated against PC 7.5 - install runbook SUCCESS, auto-play 39/39 stages SUCCESS. Re-validated on a fresh HPoC on 2026-06-07 (full deploy + auto-play + a manual player run through the resource-creation stages), then merged develop into main. UI-uploadable on any PC 7.5. Test suite green (274 tests across engine + server + nutanix + frontend).
+
+Deployments emit anonymous adoption stats (sessions, per-stage timings) to **NIG Central**, a separate private service; the emitter is opt-in via `NIG_CENTRAL_URL` (baked into the blueprint), and the pipeline was validated live end-to-end on 2026-07-07, including recovery from a Central outage.
 
 ## Open paths
 
