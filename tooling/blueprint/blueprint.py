@@ -553,6 +553,18 @@ class DefaultProfile(Profile):
     GAME_FRONTEND_HOST = CalmVariable.Simple(
         "", is_mandatory=False, runtime=False, is_hidden=True,
     )
+    # Anonymous usage stats endpoint (NIG Central). Hidden + non-runtime: set
+    # in code here, not on the operator's launch screen. central.ntnx.ch is
+    # only the current default, not a permanent home — to move it, edit this
+    # line and recompile the blueprint (or edit .env on a live VM). Blank the
+    # default to disable telemetry fleet-wide.
+    NIG_CENTRAL_URL = CalmVariable.Simple(
+        "https://central.ntnx.ch",
+        is_mandatory=False, runtime=False, is_hidden=True,
+    )
+    NIG_CENTRAL_TOKEN = CalmVariable.Simple(
+        "", is_mandatory=False, runtime=False, is_hidden=True,
+    )
 
     # Day-2 actions (Phase 2.7)
     @action
