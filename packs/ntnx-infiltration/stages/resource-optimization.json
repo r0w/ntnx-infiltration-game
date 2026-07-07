@@ -1,6 +1,10 @@
 {
+  "id": "stage-032",
   "name": "resource-optimization",
   "active": true,
+  "requires": [
+    "PlannerCluster"
+  ],
   "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
@@ -8,7 +12,5 @@
     "stage-032.line-02",
     "stage-032.line-03",
     "stage-032.line-04"
-  ],
-  "saveScore": false,
-  "requires": ["PlannerCluster"]
+  ]
 }

@@ -15,7 +15,15 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- Optional anonymous usage stats: set `NIG_CENTRAL_URL` to send session and
+  stage-timing events to a NIG Central instance; unset means nothing is ever
+  sent, and an unreachable Central never affects the game.
+- Per-stage wall-clock timing (time the player actually spent on each stage).
+
 ### Changed
+
+- Stages now carry a durable `id` (aligned on their locale key prefix) that
+  survives renames and pack restructuring.
 
 ### Fixed
 

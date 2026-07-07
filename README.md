@@ -83,9 +83,10 @@ docs/
 1. Add a JSON file in `packs/<pack>/stages/`, e.g. `my-stage.json`:
    ```json
    {
+     "id": "my-stage",
+     "name": "my-stage",
      "active": true,
      "messages": ["my-stage.ask", "my-stage.confirm"],
-     "saveScore": true,
      "check": { "fn": "checkVMExists", "args": { "name": "demo-vm" } },
      "captures": ["VMUUID"]
    }

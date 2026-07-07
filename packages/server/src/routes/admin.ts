@@ -400,7 +400,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     const entries: AdminGateEntry[] = effective
       .filter((s) => s.adminGate)
       .map((s) => {
-        const gateIdx = s.id;
+        const gateIdx = s.index;
         const arrived = active.filter((sess) => positionOf(sess.currentStage) >= gateIdx - 1);
         const arrivedTrigrams = arrived
           .map((sess) => sess.trigram ?? sess.username ?? `?${sess.sessionId.slice(0, 4)}`)

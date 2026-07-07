@@ -1,4 +1,5 @@
 {
+  "id": "stage-037",
   "name": "modify-blueprint",
   "active": true,
   "prompt": "tank",
@@ -13,7 +14,6 @@
     "stage-037.line-08",
     "stage-037.line-09"
   ],
-  "saveScore": false,
   "check": {
     "fn": "CheckUpdateBP"
   }

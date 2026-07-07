@@ -1,4 +1,5 @@
 {
+  "id": "stage-036",
   "name": "schedule-day2-action",
   "active": true,
   "prompt": "tank",
@@ -11,8 +12,9 @@
     "stage-036.line-05",
     "stage-036.line-06"
   ],
-  "saveScore": false,
-  "requiresOnOther": ["ApprovalPolicy"],
+  "requiresOnOther": [
+    "ApprovalPolicy"
+  ],
   "check": {
     "fn": "CheckSchedDay2"
   },

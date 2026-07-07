@@ -1,4 +1,5 @@
 {
+  "id": "stage-022",
   "name": "verify-protection-secure",
   "active": true,
   "prompt": "tank",
@@ -6,6 +7,5 @@
   "messages": [
     "stage-022.line-01",
     "stage-022.line-02"
-  ],
-  "saveScore": false
+  ]
 }

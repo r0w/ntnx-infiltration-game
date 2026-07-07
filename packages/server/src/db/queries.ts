@@ -26,6 +26,7 @@ export interface SessionRow {
   pending_check_stage: string | null;
   pending_check_retry_variable: string | null;
   pending_check_retry_offset: number | null;
+  stage_entered_at: number | null;
 }
 
 export interface SessionRecord {
@@ -46,6 +47,9 @@ export interface SessionRecord {
   /** Deferred check awaiting /resolve-check: stage owing it + the input to
    *  rewind to on failure. `null` = nothing pending. */
   pendingCheck: { stageName: string; retryVariable: string; retryOffset: number } | null;
+  /** When the session entered its current stage segment (ms epoch). Reset on
+   *  every current_stage transition; backs per-stage wall-time telemetry. */
+  stageEnteredAt: number | null;
 }
 
 function rowToSession(row: SessionRow): SessionRecord {
@@ -78,6 +82,7 @@ function rowToSession(row: SessionRow): SessionRecord {
             retryOffset: row.pending_check_retry_offset ?? 0,
           }
         : null,
+    stageEnteredAt: row.stage_entered_at,
   };
 }
 
@@ -102,8 +107,8 @@ export class SessionQueries {
     // `-1` sentinel.
     this.db
       .prepare(
-        `INSERT INTO sessions (id, trigram, pin_hash, username, pack_id, current_stage, started_at, locale, cluster_endpoint, cluster_profile, capabilities_json)
-         VALUES ($id, $trigram, $pinHash, $username, $packId, NULL, $startedAt, $locale, $clusterEndpoint, $clusterProfile, $capsJson)`,
+        `INSERT INTO sessions (id, trigram, pin_hash, username, pack_id, current_stage, started_at, locale, cluster_endpoint, cluster_profile, capabilities_json, stage_entered_at)
+         VALUES ($id, $trigram, $pinHash, $username, $packId, NULL, $startedAt, $locale, $clusterEndpoint, $clusterProfile, $capsJson, $startedAt)`,
       )
       .run({
         $id: input.id,
@@ -135,9 +140,13 @@ export class SessionQueries {
   }
 
   updateCurrentStage(id: string, stageName: string | null): void {
+    // Every transition re-stamps stage_entered_at: the delta between two
+    // transitions is the wall-clock time the player spent on the stage.
     this.db
-      .prepare('UPDATE sessions SET current_stage = $stage WHERE id = $id')
-      .run({ $id: id, $stage: stageName });
+      .prepare(
+        'UPDATE sessions SET current_stage = $stage, stage_entered_at = $ts WHERE id = $id',
+      )
+      .run({ $id: id, $stage: stageName, $ts: Date.now() });
   }
 
   setAwaiting(

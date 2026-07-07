@@ -1,4 +1,5 @@
 {
+  "id": "stage-020",
   "name": "create-protection-policy",
   "active": true,
   "prompt": "tank",
@@ -17,7 +18,6 @@
     "stage-020.line-11",
     "stage-020.line-12"
   ],
-  "saveScore": false,
   "check": {
     "fn": "CheckProtectionPolicy"
   },

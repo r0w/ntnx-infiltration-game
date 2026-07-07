@@ -90,6 +90,8 @@ export function migrate(db: Database): void {
     addColumnIfMissing(db, 'sessions', 'pending_check_stage', 'TEXT');
     addColumnIfMissing(db, 'sessions', 'pending_check_retry_variable', 'TEXT');
     addColumnIfMissing(db, 'sessions', 'pending_check_retry_offset', 'INTEGER');
+    // 2026-07-07: per-stage wall-clock timing (NIG Central telemetry).
+    addColumnIfMissing(db, 'sessions', 'stage_entered_at', 'INTEGER');
   }
 
   // 2026-04-27: cluster_profile values renamed for clarity.

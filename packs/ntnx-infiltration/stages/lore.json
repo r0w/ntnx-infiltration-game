@@ -1,4 +1,5 @@
 {
+  "id": "stage-000",
   "name": "lore",
   "active": true,
   "prompt": "system",
@@ -8,6 +9,5 @@
     "stage-000.lore-connecting",
     "stage-000.lore-endpoint",
     "stage-000.lore-connected"
-  ],
-  "saveScore": false
+  ]
 }
