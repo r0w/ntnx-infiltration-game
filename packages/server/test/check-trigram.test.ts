@@ -28,7 +28,14 @@ const silentLogger = {
   debug: () => {}, info: () => {}, warn: () => {}, error: () => {},
 };
 
+// Trigram claiming is mode-sensitive: only live play keeps a finished
+// trigram claimed, so the collision tests below run against a live client.
 const noopNutanix: NutanixClient = {
+  mode: 'live',
+  async request() { throw new Error('noop'); },
+};
+
+const mockNutanix: NutanixClient = {
   mode: 'mock',
   async request() { throw new Error('noop'); },
 };
@@ -188,13 +195,107 @@ describe('CheckTrigram — collision check (new)', () => {
     expect(r.retryFromVariable).toBe('Trigram');
   });
 
-  test('passes when the other session is finished (no collision risk)', async () => {
+  test('a finished session still claims its trigram: wrong PIN is refused', async () => {
+    // Cluster resources named after the trigram outlive the session, so
+    // reuse would let the newcomer coast through the early checks.
     const ctx = makeCtx({
-      sessionDirectory: mockDirectory([{ sessionId: 'sess-done', finishedAt: 9999 }]),
+      sessionDirectory: mockDirectory(
+        [{ sessionId: 'sess-done', finishedAt: 9999 }],
+        { 'sess-done': { PIN: '1234' } },
+      ),
+    });
+    ctx.vars.set('Trigram', 'rbo', 1);
+    ctx.vars.set('PIN', '9999', 1);
+    const r = await checks.CheckTrigram(ctx);
+    expect(r.pass).toBe(false);
+    expect(r.retryFromVariable).toBe('PIN');
+    expect(r.detail).toMatch(/already claimed/i);
+  });
+
+  test('finished session + PIN match → switchTo it (player sees their ending)', async () => {
+    const ctx = makeCtx({
+      sessionDirectory: mockDirectory(
+        [{ sessionId: 'sess-done', finishedAt: 9999 }],
+        { 'sess-done': { PIN: '1234' } },
+      ),
     });
     ctx.vars.set('Trigram', 'rbo', 1);
     ctx.vars.set('PIN', '1234', 1);
     const r = await checks.CheckTrigram(ctx);
+    expect(r.pass).toBe(false);
+    expect(r.switchTo).toBe('sess-done');
+  });
+
+  test('an unfinished session wins over a finished one with the same trigram', async () => {
+    // Legacy data: the old code let a finished trigram be re-claimed, so a
+    // pack can hold both. The live session's PIN opens the live session.
+    const ctx = makeCtx({
+      sessionDirectory: mockDirectory(
+        [
+          { sessionId: 'sess-done', finishedAt: 9999 },
+          { sessionId: 'sess-live', finishedAt: null },
+        ],
+        { 'sess-done': { PIN: '1111' }, 'sess-live': { PIN: '1234' } },
+      ),
+    });
+    ctx.vars.set('Trigram', 'rbo', 1);
+    ctx.vars.set('PIN', '1234', 1);
+    const r = await checks.CheckTrigram(ctx);
+    expect(r.switchTo).toBe('sess-live');
+  });
+
+  test('the PIN picks the session, not recency: finished owner still gets in', async () => {
+    // Same legacy mix, but the player holds the FINISHED session's PIN. The
+    // live namesake must not shadow it into a wrong-PIN refusal.
+    const ctx = makeCtx({
+      sessionDirectory: mockDirectory(
+        [
+          { sessionId: 'sess-done', finishedAt: 9999 },
+          { sessionId: 'sess-live', finishedAt: null },
+        ],
+        { 'sess-done': { PIN: '1111' }, 'sess-live': { PIN: '1234' } },
+      ),
+    });
+    ctx.vars.set('Trigram', 'rbo', 1);
+    ctx.vars.set('PIN', '1111', 1);
+    const r = await checks.CheckTrigram(ctx);
+    expect(r.switchTo).toBe('sess-done');
+  });
+
+  test('each sibling PIN is read at most once', async () => {
+    const reads: string[] = [];
+    const dir = mockDirectory(
+      [
+        { sessionId: 'sess-done', finishedAt: 9999 },
+        { sessionId: 'sess-live', finishedAt: null },
+      ],
+      { 'sess-done': { PIN: '1111' }, 'sess-live': { PIN: '1234' } },
+    );
+    const counting: SessionDirectory = {
+      ...dir,
+      getVariable: (sid, name) => { reads.push(`${sid}:${name}`); return dir.getVariable(sid, name); },
+    };
+    const ctx = makeCtx({ sessionDirectory: counting });
+    ctx.vars.set('Trigram', 'rbo', 1);
+    ctx.vars.set('PIN', '9999', 1); // worst case: no match, both siblings probed
+    await checks.CheckTrigram(ctx);
+    expect(reads).toEqual(['sess-done:PIN', 'sess-live:PIN']);
+  });
+
+  test('mock ignores finished siblings so a replay is never swallowed', async () => {
+    // Every mock session pre-seeds Trigram=dev/PIN=0000 (MOCK_IDENTITY), and
+    // mock has no cluster resources to protect.
+    const ctx = makeCtx({
+      nutanix: mockNutanix,
+      sessionDirectory: mockDirectory(
+        [{ sessionId: 'sess-done', finishedAt: 9999 }],
+        { 'sess-done': { PIN: '0000' } },
+      ),
+    });
+    ctx.vars.set('Trigram', 'dev', 1);
+    ctx.vars.set('PIN', '0000', 1);
+    const r = await checks.CheckTrigram(ctx);
+    expect(r.switchTo).toBeUndefined();
     expect(r.pass).toBe(true);
   });
 });
@@ -265,6 +366,17 @@ describe('SessionDirectory (integration via SessionService)', () => {
     const rows = dir.findOtherSessionsWithVariable(me.id, 'Trigram', 'rbo');
     expect(rows).toHaveLength(1);
     expect(rows[0].finishedAt).toBe(4000);
+  });
+
+  test('probe is case-insensitive: "RBO" finds the stored "rbo"', async () => {
+    // The player types whatever case they like; CheckTrigram lowercases on
+    // capture, but computeGreeting probes with the raw input.
+    const { db, svc } = makeSvc();
+    const me = await svc.create({ clusterEndpoint: '', clusterProfile: 'other', capabilities: [] });
+    seedCaptured(db, 'sess-other', 'ntnx-infiltration', 'rbo');
+    const dir = (svc as unknown as { sessionDirectory: SessionDirectory }).sessionDirectory;
+    expect(dir.findOtherSessionsWithVariable(me.id, 'Trigram', 'RBO')).toHaveLength(1);
+    expect(dir.findOtherSessionsWithVariable(me.id, 'Trigram', 'rBo')).toHaveLength(1);
   });
 
   test('JSON-encoded value in session_variables matches probe exact value', async () => {

@@ -888,12 +888,12 @@ export class SessionService {
 
     // Resolve the stage's `computeGreeting` branch (if declared) BEFORE
     // re-rendering, so the next slice — typically the PIN prompt — already
-    // has `{Greeting}` substituted. Returning = at least one unfinished
-    // sibling session in the same pack captured the same `inputVar` value.
+    // has `{Greeting}` substituted. Returning = any sibling session captured
+    // the same `inputVar` value, finished included: a finished trigram is
+    // still claimed, so the greeting must agree with the coming verdict.
     if (stage.computeGreeting && variable === stage.computeGreeting.inputVar) {
       const others = this.sessionDirectory
-        .findOtherSessionsWithVariable(session.id, variable, value)
-        .filter((s) => s.finishedAt === null);
+        .findOtherSessionsWithVariable(session.id, variable, value);
       const key = others.length > 0
         ? stage.computeGreeting.returningKey
         : stage.computeGreeting.newKey;
@@ -1307,6 +1307,11 @@ function makeSessionDirectory(db: Database, packId: string): SessionDirectory {
   // so string values live on disk as `"abc"`, not `abc`. JSON.stringify the
   // probe value once here so the query stays a cheap equality match on the
   // (session_id, name) primary key + inline pack/finish filters.
+  //
+  // COLLATE NOCASE: identity values are stored lowercased by their check but
+  // probed with whatever the player typed, so `RBO` must find `rbo`. ASCII
+  // only, and it applies to every probed variable — fine while `Trigram` is
+  // the only one, revisit if a case-sensitive var ever routes through here.
   const stmt = db.prepare(
     `SELECT s.id AS session_id, s.current_stage AS current_stage, s.finished_at AS finished_at, s.started_at AS started_at
      FROM sessions s
@@ -1314,7 +1319,7 @@ function makeSessionDirectory(db: Database, packId: string): SessionDirectory {
      WHERE s.pack_id = $packId
        AND s.id != $currentId
        AND v.name = $varName
-       AND v.value = $varValue
+       AND v.value = $varValue COLLATE NOCASE
      ORDER BY s.started_at DESC`,
   );
   const getVarStmt = db.prepare(
