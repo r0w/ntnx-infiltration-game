@@ -300,9 +300,10 @@ export interface ClusterConfig {
 export interface SessionDirectory {
   /**
    * Find other sessions (in the same pack, same session-service instance)
-   * that captured `variableName` with `value`. Excludes the current
-   * session. Returns most recent activity first. Consumers typically
-   * filter by `finishedAt === null` to scope to active collisions.
+   * that captured `variableName` with `value`, case-insensitively. Excludes
+   * the current session. Returns most recent activity first, finished
+   * sessions included: a finished trigram is still claimed, so consumers
+   * read `finishedAt` to pick a target, not to filter the list.
    */
   findOtherSessionsWithVariable(
     currentSessionId: string,
