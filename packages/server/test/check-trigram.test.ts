@@ -306,6 +306,17 @@ describe('SessionDirectory (integration via SessionService)', () => {
     expect(rows[0].finishedAt).toBe(4000);
   });
 
+  test('probe is case-insensitive — "RBO" finds the stored "rbo"', async () => {
+    // The player types whatever case they like; CheckTrigram lowercases on
+    // capture, but computeGreeting probes with the raw input.
+    const { db, svc } = makeSvc();
+    const me = await svc.create({ clusterEndpoint: '', clusterProfile: 'other', capabilities: [] });
+    seedCaptured(db, 'sess-other', 'ntnx-infiltration', 'rbo');
+    const dir = (svc as unknown as { sessionDirectory: SessionDirectory }).sessionDirectory;
+    expect(dir.findOtherSessionsWithVariable(me.id, 'Trigram', 'RBO')).toHaveLength(1);
+    expect(dir.findOtherSessionsWithVariable(me.id, 'Trigram', 'rBo')).toHaveLength(1);
+  });
+
   test('JSON-encoded value in session_variables matches probe exact value', async () => {
     // Guards against a regression where the query would compare raw strings
     // with JSON-quoted storage (mismatch → zero results silently).

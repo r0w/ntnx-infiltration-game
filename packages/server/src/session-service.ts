@@ -1308,6 +1308,11 @@ function makeSessionDirectory(db: Database, packId: string): SessionDirectory {
   // so string values live on disk as `"abc"`, not `abc`. JSON.stringify the
   // probe value once here so the query stays a cheap equality match on the
   // (session_id, name) primary key + inline pack/finish filters.
+  //
+  // COLLATE NOCASE: identity variables are case-insensitive (a trigram is
+  // stored lowercased by its check, but callers probe with whatever the
+  // player typed). Matching case-sensitively here would make `RBO` look
+  // like a free agent code right up until the check refused it.
   const stmt = db.prepare(
     `SELECT s.id AS session_id, s.current_stage AS current_stage, s.finished_at AS finished_at, s.started_at AS started_at
      FROM sessions s
@@ -1315,7 +1320,7 @@ function makeSessionDirectory(db: Database, packId: string): SessionDirectory {
      WHERE s.pack_id = $packId
        AND s.id != $currentId
        AND v.name = $varName
-       AND v.value = $varValue
+       AND v.value = $varValue COLLATE NOCASE
      ORDER BY s.started_at DESC`,
   );
   const getVarStmt = db.prepare(
