@@ -262,6 +262,26 @@ describe('CheckTrigram — collision check (new)', () => {
     expect(r.switchTo).toBe('sess-done');
   });
 
+  test('each sibling PIN is read at most once', async () => {
+    const reads: string[] = [];
+    const dir = mockDirectory(
+      [
+        { sessionId: 'sess-done', finishedAt: 9999 },
+        { sessionId: 'sess-live', finishedAt: null },
+      ],
+      { 'sess-done': { PIN: '1111' }, 'sess-live': { PIN: '1234' } },
+    );
+    const counting: SessionDirectory = {
+      ...dir,
+      getVariable: (sid, name) => { reads.push(`${sid}:${name}`); return dir.getVariable(sid, name); },
+    };
+    const ctx = makeCtx({ sessionDirectory: counting });
+    ctx.vars.set('Trigram', 'rbo', 1);
+    ctx.vars.set('PIN', '9999', 1); // worst case: no match, both siblings probed
+    await checks.CheckTrigram(ctx);
+    expect(reads).toEqual(['sess-done:PIN', 'sess-live:PIN']);
+  });
+
   test('mock ignores finished siblings so a replay is never swallowed', async () => {
     // Every mock session pre-seeds Trigram=dev/PIN=0000 (MOCK_IDENTITY), and
     // mock has no cluster resources to protect.

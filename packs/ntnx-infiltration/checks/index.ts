@@ -87,15 +87,13 @@ async function CheckTrigram(ctx: CheckContext): Promise<CheckResult> {
     : siblings;
   if (others.length > 0) {
     const submittedPin = ctx.vars.get('PIN');
-    const pinOf = (s: { sessionId: string }) =>
-      ctx.sessionDirectory?.getVariable(s.sessionId, 'PIN');
     // Match on the PIN, not on recency: a trigram can carry several sessions
     // and the player owns whichever one their PIN opens. Prefer one still in
     // play so a live game wins over a finished namesake.
-    const target = typeof submittedPin === 'string'
-      ? others.find((s) => s.finishedAt === null && pinOf(s) === submittedPin)
-        ?? others.find((s) => pinOf(s) === submittedPin)
-      : undefined;
+    const opened = typeof submittedPin === 'string'
+      ? others.filter((s) => ctx.sessionDirectory?.getVariable(s.sessionId, 'PIN') === submittedPin)
+      : [];
+    const target = opened.find((s) => s.finishedAt === null) ?? opened[0];
     if (target) {
       ctx.logger.info('trigram+pin match → swap to existing session', {
         trigram,
