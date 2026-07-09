@@ -215,6 +215,15 @@ delete their session. Cluster resources they created (VM, project
 membership, etc.) stay but they can re-run the stages with the same
 trigram (idempotent acts re-create or skip).
 
+**A new player gets "Agent code is already claimed"** - that code
+belongs to an existing session, finished or not, because the cluster
+resources named after it (`rbo-vm`, `rbo-proj`…) outlive the game.
+Easiest is to pick another code. To hand the code to someone else,
+delete the old session in `/admin > Users` first: `/cleanup-all/:trigram`
+wipes the cluster resources but leaves the session row, so on its own it
+does not free the code. A player returning to their own session just
+types the same code and PIN.
+
 **The HPoC expires mid-session** - sorry, no migration story today.
 Players' captured variables live in the game container's SQLite DB on
 the deployed VM; if the VM survives, sessions resume. If the cluster

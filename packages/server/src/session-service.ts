@@ -888,10 +888,9 @@ export class SessionService {
 
     // Resolve the stage's `computeGreeting` branch (if declared) BEFORE
     // re-rendering, so the next slice — typically the PIN prompt — already
-    // has `{Greeting}` substituted. Returning = at least one sibling session
-    // in the same pack captured the same `inputVar` value, finished or not:
-    // CheckTrigram treats a finished trigram as still claimed, so the
-    // greeting has to agree with the verdict the player is about to get.
+    // has `{Greeting}` substituted. Returning = any sibling session captured
+    // the same `inputVar` value, finished included: a finished trigram is
+    // still claimed, so the greeting must agree with the coming verdict.
     if (stage.computeGreeting && variable === stage.computeGreeting.inputVar) {
       const others = this.sessionDirectory
         .findOtherSessionsWithVariable(session.id, variable, value);
@@ -1309,10 +1308,10 @@ function makeSessionDirectory(db: Database, packId: string): SessionDirectory {
   // probe value once here so the query stays a cheap equality match on the
   // (session_id, name) primary key + inline pack/finish filters.
   //
-  // COLLATE NOCASE: identity variables are case-insensitive (a trigram is
-  // stored lowercased by its check, but callers probe with whatever the
-  // player typed). Matching case-sensitively here would make `RBO` look
-  // like a free agent code right up until the check refused it.
+  // COLLATE NOCASE: identity values are stored lowercased by their check but
+  // probed with whatever the player typed, so `RBO` must find `rbo`. ASCII
+  // only, and it applies to every probed variable — fine while `Trigram` is
+  // the only one, revisit if a case-sensitive var ever routes through here.
   const stmt = db.prepare(
     `SELECT s.id AS session_id, s.current_stage AS current_stage, s.finished_at AS finished_at, s.started_at AS started_at
      FROM sessions s

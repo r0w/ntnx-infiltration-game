@@ -76,24 +76,27 @@ async function CheckTrigram(ctx: CheckContext): Promise<CheckResult> {
       retryFromVariable: 'PIN',
     };
   }
-  // Finished sessions still own their trigram: the cluster resources named
-  // after it (`rbo-vm`, `rbo-proj`, `rbo-adm`…) outlive the session, so a
-  // reused trigram hands the next player someone else's leftovers and the
-  // early checks pass for free. Operator frees a trigram by deleting the
-  // session in /admin.
-  const others = ctx.sessionDirectory
+  const siblings = ctx.sessionDirectory
     ?.findOtherSessionsWithVariable(ctx.session.id, 'Trigram', trigram) ?? [];
+  // A finished session keeps its trigram because the cluster resources named
+  // after it (`rbo-vm`, `rbo-proj`…) outlive the session. Mock has no cluster,
+  // and every mock session pre-seeds the same `dev` identity, so a finished
+  // mock run must not swallow the next one.
+  const others = ctx.nutanix.mode === 'mock'
+    ? siblings.filter((s) => s.finishedAt === null)
+    : siblings;
   if (others.length > 0) {
     const submittedPin = ctx.vars.get('PIN');
-    // Prefer a session still in play; otherwise the most recent one (the
-    // directory sorts by started_at DESC).
-    const target = others.find((s) => s.finishedAt === null) ?? others[0];
-    const storedPin = ctx.sessionDirectory?.getVariable(target.sessionId, 'PIN');
-    if (
-      typeof submittedPin === 'string' &&
-      typeof storedPin === 'string' &&
-      submittedPin === storedPin
-    ) {
+    const pinOf = (s: { sessionId: string }) =>
+      ctx.sessionDirectory?.getVariable(s.sessionId, 'PIN');
+    // Match on the PIN, not on recency: a trigram can carry several sessions
+    // and the player owns whichever one their PIN opens. Prefer one still in
+    // play so a live game wins over a finished namesake.
+    const target = typeof submittedPin === 'string'
+      ? others.find((s) => s.finishedAt === null && pinOf(s) === submittedPin)
+        ?? others.find((s) => pinOf(s) === submittedPin)
+      : undefined;
+    if (target) {
       ctx.logger.info('trigram+pin match → swap to existing session', {
         trigram,
         target: target.sessionId,
