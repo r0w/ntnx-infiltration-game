@@ -188,14 +188,53 @@ describe('CheckTrigram — collision check (new)', () => {
     expect(r.retryFromVariable).toBe('Trigram');
   });
 
-  test('passes when the other session is finished (no collision risk)', async () => {
+  test('a finished session still claims its trigram — wrong PIN is refused', async () => {
+    // Cluster resources named after the trigram outlive the session, so
+    // reuse would let the newcomer coast through the early checks.
     const ctx = makeCtx({
-      sessionDirectory: mockDirectory([{ sessionId: 'sess-done', finishedAt: 9999 }]),
+      sessionDirectory: mockDirectory(
+        [{ sessionId: 'sess-done', finishedAt: 9999 }],
+        { 'sess-done': { PIN: '1234' } },
+      ),
+    });
+    ctx.vars.set('Trigram', 'rbo', 1);
+    ctx.vars.set('PIN', '9999', 1);
+    const r = await checks.CheckTrigram(ctx);
+    expect(r.pass).toBe(false);
+    expect(r.retryFromVariable).toBe('PIN');
+    expect(r.detail).toMatch(/already claimed/i);
+  });
+
+  test('finished session + PIN match → switchTo it (player sees their ending)', async () => {
+    const ctx = makeCtx({
+      sessionDirectory: mockDirectory(
+        [{ sessionId: 'sess-done', finishedAt: 9999 }],
+        { 'sess-done': { PIN: '1234' } },
+      ),
     });
     ctx.vars.set('Trigram', 'rbo', 1);
     ctx.vars.set('PIN', '1234', 1);
     const r = await checks.CheckTrigram(ctx);
-    expect(r.pass).toBe(true);
+    expect(r.pass).toBe(false);
+    expect(r.switchTo).toBe('sess-done');
+  });
+
+  test('an unfinished session wins over a finished one with the same trigram', async () => {
+    // Legacy data: the old code let a finished trigram be re-claimed, so a
+    // pack can hold both. PIN must be matched against the live session.
+    const ctx = makeCtx({
+      sessionDirectory: mockDirectory(
+        [
+          { sessionId: 'sess-done', finishedAt: 9999 },
+          { sessionId: 'sess-live', finishedAt: null },
+        ],
+        { 'sess-done': { PIN: '1111' }, 'sess-live': { PIN: '1234' } },
+      ),
+    });
+    ctx.vars.set('Trigram', 'rbo', 1);
+    ctx.vars.set('PIN', '1234', 1);
+    const r = await checks.CheckTrigram(ctx);
+    expect(r.switchTo).toBe('sess-live');
   });
 });
 

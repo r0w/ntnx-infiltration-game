@@ -888,12 +888,13 @@ export class SessionService {
 
     // Resolve the stage's `computeGreeting` branch (if declared) BEFORE
     // re-rendering, so the next slice — typically the PIN prompt — already
-    // has `{Greeting}` substituted. Returning = at least one unfinished
-    // sibling session in the same pack captured the same `inputVar` value.
+    // has `{Greeting}` substituted. Returning = at least one sibling session
+    // in the same pack captured the same `inputVar` value, finished or not:
+    // CheckTrigram treats a finished trigram as still claimed, so the
+    // greeting has to agree with the verdict the player is about to get.
     if (stage.computeGreeting && variable === stage.computeGreeting.inputVar) {
       const others = this.sessionDirectory
-        .findOtherSessionsWithVariable(session.id, variable, value)
-        .filter((s) => s.finishedAt === null);
+        .findOtherSessionsWithVariable(session.id, variable, value);
       const key = others.length > 0
         ? stage.computeGreeting.returningKey
         : stage.computeGreeting.newKey;

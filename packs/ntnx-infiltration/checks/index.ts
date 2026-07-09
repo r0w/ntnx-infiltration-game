@@ -76,15 +76,18 @@ async function CheckTrigram(ctx: CheckContext): Promise<CheckResult> {
       retryFromVariable: 'PIN',
     };
   }
+  // Finished sessions still own their trigram: the cluster resources named
+  // after it (`rbo-vm`, `rbo-proj`, `rbo-adm`…) outlive the session, so a
+  // reused trigram hands the next player someone else's leftovers and the
+  // early checks pass for free. Operator frees a trigram by deleting the
+  // session in /admin.
   const others = ctx.sessionDirectory
-    ?.findOtherSessionsWithVariable(ctx.session.id, 'Trigram', trigram)
-    .filter((s) => s.finishedAt === null) ?? [];
+    ?.findOtherSessionsWithVariable(ctx.session.id, 'Trigram', trigram) ?? [];
   if (others.length > 0) {
     const submittedPin = ctx.vars.get('PIN');
-    // Most-recent-first (directory already sorts by started_at DESC) — if
-    // the player had multiple active sessions with the same trigram (edge
-    // case), take the latest.
-    const target = others[0];
+    // Prefer a session still in play; otherwise the most recent one (the
+    // directory sorts by started_at DESC).
+    const target = others.find((s) => s.finishedAt === null) ?? others[0];
     const storedPin = ctx.sessionDirectory?.getVariable(target.sessionId, 'PIN');
     if (
       typeof submittedPin === 'string' &&
