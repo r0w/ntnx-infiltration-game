@@ -1002,13 +1002,17 @@ describe('email participant routes', () => {
   const JSON_AUTH = { ...AUTH, 'Content-Type': 'application/json' };
 
   /** Router with a stubbed Mailtrap call recording every send. */
-  function emailRouter(db: Database, sendResult: { ok: boolean; error?: string } = { ok: true }) {
+  function emailRouter(
+    db: Database,
+    sendResult: { ok: boolean; error?: string } = { ok: true },
+    pcPassword = '',
+  ) {
     const calls: Array<{ to: string; subject: string; html: string }> = [];
     const pack = fakePack();
     const service = makeService(db, pack);
     const r = buildAdminRoutes({
       db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix,
-      clusterProfile: 'hpoc', pcEndpoint: '',
+      clusterProfile: 'hpoc', pcEndpoint: '', pcPassword,
       sendEmail: async (args) => {
         calls.push({ to: args.to, subject: args.subject, html: args.html });
         return sendResult;
@@ -1043,12 +1047,18 @@ describe('email participant routes', () => {
       ...over,
     });
 
+  test('config surfaces the deploy PC password so the composer can seed {PASSWORD}', async () => {
+    const { r } = emailRouter(freshDb(), { ok: true }, 'nx2Tech403!');
+    const res = await r.request('/email-config', { headers: AUTH });
+    expect((await res.json()).pcPassword).toBe('nx2Tech403!');
+  });
+
   test('config: empty by default, PUT persists, empty string clears', async () => {
     const { r } = emailRouter(freshDb());
     let res = await r.request('/email-config', { headers: AUTH });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      mailtrapToken: '', fromEmail: '', fromName: '', vars: {}, clusterName: '',
+      mailtrapToken: '', fromEmail: '', fromName: '', vars: {}, clusterName: '', pcPassword: '',
     });
 
     res = await r.request('/email-config', {

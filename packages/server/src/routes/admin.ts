@@ -51,6 +51,9 @@ export interface AdminRoutesDeps {
    *  `/cluster-status` to build the Prism UI deep-link to the IOps
    *  activation page. May be empty in mock mode. */
   pcEndpoint: string;
+  /** PC admin password from the deploy env. Seeds the invitation's
+   *  {PASSWORD}: the VDI accounts use it too. Empty outside a deploy. */
+  pcPassword?: string;
   /** Test seam for /email-send — defaults to the real Mailtrap call. */
   sendEmail?: typeof sendMailtrapEmail;
 }
@@ -87,9 +90,12 @@ export interface AdminEmailConfigPayload {
   /** Last-used template variable values ({CLUSTER}, {PASSWORD}, …), persisted per deployment. */
   vars: Record<string, string>;
   /** PE cluster name probed from the live PC (e.g. `DM3-POC004`) — seeds
-   *  {CLUSTER} and, per the HPoC VDI convention, {PASSWORD}. '' when
-   *  unknown (mock mode / probe failed). */
+   *  {CLUSTER}. '' when unknown (mock mode / probe failed). */
   clusterName: string;
+  /** The PC admin password the operator typed at blueprint launch — the
+   *  VDI accounts share it, so it seeds {PASSWORD}. '' outside a
+   *  blueprint deploy (dev, mock). */
+  pcPassword: string;
 }
 
 export interface AdminEmailTemplatePayload {
@@ -808,6 +814,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       fromName: cfg.get<string>('email_from_name') ?? '',
       vars: cfg.get<Record<string, string>>('email_vars') ?? {},
       clusterName: cfg.get<string>('cluster_name') ?? '',
+      pcPassword: deps.pcPassword ?? '',
     };
   };
 

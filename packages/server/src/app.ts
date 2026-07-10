@@ -37,6 +37,8 @@ export interface AppDeps {
   initialVariables?: Record<string, unknown>;
   publicDir?: string;
   adminPassword: string;
+  /** PC admin password (deploy env) — seeds the invitation email's {PASSWORD}. */
+  pcPassword?: string;
   /** NIG Central stats emitter — optional, absent in tests. */
   telemetry?: Telemetry;
 }
@@ -167,6 +169,7 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
       clusterProfile: deps.clusterProfile,
       capabilities: deps.capabilities,
       pcEndpoint: deps.clusterEndpoint,
+      pcPassword: deps.pcPassword,
     }),
   );
   app.route(
