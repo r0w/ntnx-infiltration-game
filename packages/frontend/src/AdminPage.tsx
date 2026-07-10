@@ -1950,6 +1950,7 @@ function EmailsTab({ password }: { password: string }) {
   const [templates, setTemplates] = useState<AdminEmailTemplate[] | null>(null);
   const [savedVars, setSavedVars] = useState<Record<string, string>>({});
   const [clusterName, setClusterName] = useState('');
+  const [pcPassword, setPcPassword] = useState('');
   const [selKey, setSelKey] = useState('');
   const [subject, setSubject] = useState('');
   const [html, setHtml] = useState('');
@@ -2018,6 +2019,7 @@ function EmailsTab({ password }: { password: string }) {
       setSavedCfg({ token: cfg.mailtrapToken, fromEmail: cfg.fromEmail, fromName: cfg.fromName });
       setSavedVars(cfg.vars);
       setClusterName(cfg.clusterName);
+      setPcPassword(cfg.pcPassword);
       setTemplates(tpl.templates);
       setRoster(ros.entries);
       if (cfg.mailtrapToken) void loadDomains();
@@ -2055,7 +2057,13 @@ function EmailsTab({ password }: { password: string }) {
   };
 
   const applyTemplate = useCallback(
-    (key: string, tplList: AdminEmailTemplate[], saved: Record<string, string>, cluster: string) => {
+    (
+      key: string,
+      tplList: AdminEmailTemplate[],
+      saved: Record<string, string>,
+      cluster: string,
+      pcPass: string,
+    ) => {
       setSelKey(key);
       const t = tplList.find((t) => `${t.id}.${t.locale}` === key);
       if (!t) return;
@@ -2064,20 +2072,19 @@ function EmailsTab({ password }: { password: string }) {
       loadedDraftRef.current = { subject: t.subject, html: t.html };
       // Priority: last-used value for this deployment, then the template
       // default, then the derived ones — GAME_URL = this deployment's own
-      // origin, CLUSTER = the probed PE cluster name, PASSWORD = same as
-      // CLUSTER (the HPoC VDI accounts use the cluster name as password).
+      // origin, CLUSTER = the probed PE cluster name, PASSWORD = the PC
+      // admin password from the blueprint (the VDI accounts share it).
+      const derived: Record<string, string> = {
+        GAME_URL: window.location.origin,
+        CLUSTER: cluster,
+        PASSWORD: pcPass,
+      };
       const resolved = Object.fromEntries(
         Object.keys(t.variables).map((k) => [
           k,
-          saved[k]?.trim()
-            ? saved[k]
-            : t.variables[k] ||
-              (k === 'GAME_URL' ? window.location.origin : k === 'CLUSTER' ? cluster : ''),
+          saved[k]?.trim() ? saved[k] : t.variables[k] || derived[k] || '',
         ]),
       );
-      if ('PASSWORD' in resolved && !resolved.PASSWORD.trim()) {
-        resolved.PASSWORD = resolved.CLUSTER ?? '';
-      }
       setVars(resolved);
       setStudioNonce((n) => n + 1);
       setSendReport(null);
@@ -2133,7 +2140,7 @@ function EmailsTab({ password }: { password: string }) {
       setPendingSwitch({ key, thenSend });
       return;
     }
-    applyTemplate(key, templates ?? [], savedVars, clusterName);
+    applyTemplate(key, templates ?? [], savedVars, clusterName, pcPassword);
     if (thenSend) setConfirmSend(true);
   };
 
@@ -2262,7 +2269,7 @@ function EmailsTab({ password }: { password: string }) {
       await api.adminEmailTemplateReset(password, selTemplate.id, selTemplate.locale);
       const tpl = await api.adminEmailTemplates(password);
       setTemplates(tpl.templates);
-      applyTemplate(selKey, tpl.templates, savedVars, clusterName);
+      applyTemplate(selKey, tpl.templates, savedVars, clusterName, pcPassword);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -2718,7 +2725,7 @@ function EmailsTab({ password }: { password: string }) {
           onConfirm={() => {
             const p = pendingSwitch;
             setPendingSwitch(null);
-            applyTemplate(p.key, templates ?? [], savedVars, clusterName);
+            applyTemplate(p.key, templates ?? [], savedVars, clusterName, pcPassword);
             if (p.thenSend) setConfirmSend(true);
           }}
           onCancel={() => setPendingSwitch(null)}

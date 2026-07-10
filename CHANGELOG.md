@@ -31,6 +31,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 - An agent code that has already completed the game can no longer be reused by
   another player; retyping it with the right PIN reopens the finished session.
+- The invitation email's password field now defaults to the Prism Central admin
+  password instead of the cluster name.
 
 ## [0.3.1] - 2026-07-05
 
