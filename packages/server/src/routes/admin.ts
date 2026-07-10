@@ -818,6 +818,19 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     };
   };
 
+  // Deployments that composed an invitation before the {PASSWORD} fix saved
+  // the cluster name as the password. Drop that row so the composer falls
+  // back to the PC admin password instead of re-sending the wrong one.
+  const dropStalePasswordVar = () => {
+    const cfg = deps.service.clusterConfig;
+    const clusterName = cfg.get<string>('cluster_name');
+    const vars = cfg.get<Record<string, string>>('email_vars');
+    if (!deps.pcPassword || !clusterName || vars?.PASSWORD !== clusterName) return;
+    const { PASSWORD: _stale, ...rest } = vars;
+    cfg.set('email_vars', rest, 'admin');
+    consoleLogger.info('dropped stale email {PASSWORD} var (held the cluster name)');
+  };
+
   // Probe the PE cluster name once per boot and cache it in cluster_config
   // (setIfAbsent, so an operator edit — if we ever add one — stays sticky).
   // The boot-scoped flag also memoizes a null verdict: without it, a PC
@@ -830,6 +843,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       const name = await probeClusterName({ nutanix: deps.nutanix, logger: consoleLogger });
       if (name) cfg.setIfAbsent('cluster_name', name);
     }
+    dropStalePasswordVar();
     return c.json(emailConfigPayload());
   });
 

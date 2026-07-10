@@ -1053,6 +1053,26 @@ describe('email participant routes', () => {
     expect((await res.json()).pcPassword).toBe('nx2Tech403!');
   });
 
+  test('a saved {PASSWORD} equal to the cluster name is dropped (pre-fix deployments)', async () => {
+    const db = freshDb();
+    const { r, service } = emailRouter(db, { ok: true }, 'nx2Tech403!');
+    service.clusterConfig.set('cluster_name', 'DM3-POC004', 'probe');
+    service.clusterConfig.set('email_vars', { CLUSTER: 'DM3-POC004', PASSWORD: 'DM3-POC004' }, 'admin');
+    const res = await r.request('/email-config', { headers: AUTH });
+    expect((await res.json()).vars).toEqual({ CLUSTER: 'DM3-POC004' });
+    // Persisted, not just masked on read.
+    expect(service.clusterConfig.get('email_vars')).toEqual({ CLUSTER: 'DM3-POC004' });
+  });
+
+  test('a real {PASSWORD} is left alone', async () => {
+    const db = freshDb();
+    const { r, service } = emailRouter(db, { ok: true }, 'nx2Tech403!');
+    service.clusterConfig.set('cluster_name', 'DM3-POC004', 'probe');
+    service.clusterConfig.set('email_vars', { PASSWORD: 'something-else' }, 'admin');
+    const res = await r.request('/email-config', { headers: AUTH });
+    expect((await res.json()).vars).toEqual({ PASSWORD: 'something-else' });
+  });
+
   test('config: empty by default, PUT persists, empty string clears', async () => {
     const { r } = emailRouter(freshDb());
     let res = await r.request('/email-config', { headers: AUTH });
