@@ -164,6 +164,7 @@ async function main() {
     initialVariables,
     publicDir: cfg.publicDir,
     adminPassword: cfg.adminPassword,
+    pcPassword: cfg.pcPassword,
     telemetry,
   });
 

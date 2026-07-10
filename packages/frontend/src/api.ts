@@ -584,8 +584,10 @@ export interface AdminEmailConfigPayload {
   fromEmail: string;
   fromName: string;
   vars: Record<string, string>;
-  /** PE cluster name probed live ('' when unknown) — default for {CLUSTER}/{PASSWORD}. */
+  /** PE cluster name probed live ('' when unknown) — default for {CLUSTER}. */
   clusterName: string;
+  /** PC admin password from the deploy env ('' when unknown) — default for {PASSWORD}. */
+  pcPassword: string;
 }
 
 export interface AdminEmailTemplate {
