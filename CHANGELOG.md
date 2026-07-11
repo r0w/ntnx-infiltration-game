@@ -19,6 +19,10 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Stage 29 no longer rejects a correct update count while an LCM inventory is
+  running: the count is left unverified for those few minutes instead of
+  compared against a list LCM is still rebuilding.
+
 ## [0.4.1] - 2026-07-11
 
 ### Changed
