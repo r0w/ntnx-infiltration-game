@@ -521,12 +521,13 @@ export const api = {
       headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }).then((res) => handle<AdminEmailConfigPayload>(res)),
-  adminEmailDomains: (password: string) =>
-    adminGet<{
+  /** Probes `token` when given (a draft the operator hasn't saved), else the stored one. */
+  adminEmailDomains: (password: string, token?: string) =>
+    adminPost<{
       domains: Array<{ domain: string; verified: boolean }>;
       unauthorized?: boolean;
       error?: string;
-    }>('/admin/email-domains', password),
+    }>('/admin/email-domains', password, token ? { token } : {}),
   adminEmailTemplates: (password: string) =>
     adminGet<{ templates: AdminEmailTemplate[] }>('/admin/email-templates', password),
   adminEmailTemplateSave: (

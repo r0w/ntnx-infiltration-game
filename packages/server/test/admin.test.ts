@@ -1328,7 +1328,40 @@ describe('email participant routes', () => {
     expect((await r.request('/email-roster')).status).toBe(401);
     expect((await r.request('/email-roster', { method: 'POST' })).status).toBe(401);
     expect((await r.request('/email-send', { method: 'POST' })).status).toBe(401);
-    expect((await r.request('/email-domains')).status).toBe(401);
+    expect((await r.request('/email-domains', { method: 'POST' })).status).toBe(401);
+  });
+
+  test('email-domains: 400 with no token anywhere, probes the draft over the stored one', async () => {
+    const { r, service } = emailRouter(freshDb());
+    const probed: string[] = [];
+    // listMailtrapDomains dials Mailtrap over the network; capture the token
+    // it would use instead by stubbing global fetch for this test.
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      probed.push(new Headers(init?.headers).get('Api-Token') ?? '');
+      return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as typeof fetch;
+    try {
+      // Nothing stored, nothing sent → 400 rather than a pointless Mailtrap call.
+      let res = await r.request('/email-domains', { method: 'POST', headers: JSON_AUTH, body: '{}' });
+      expect(res.status).toBe(400);
+      expect(probed).toEqual([]);
+
+      // A draft token is probed even though it was never saved.
+      res = await r.request('/email-domains', {
+        method: 'POST', headers: JSON_AUTH, body: JSON.stringify({ token: 'draft-tok' }),
+      });
+      expect(res.status).toBe(200);
+      expect(probed).toEqual(['draft-tok']);
+
+      // No draft → falls back to the stored token.
+      service.clusterConfig.set('mailtrap_token', 'stored-tok', 'admin');
+      res = await r.request('/email-domains', { method: 'POST', headers: JSON_AUTH, body: '{}' });
+      expect(res.status).toBe(200);
+      expect(probed).toEqual(['draft-tok', 'stored-tok']);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });
 

@@ -1989,18 +1989,22 @@ function EmailsTab({ password }: { password: string }) {
     setHtml(v);
   }, []);
 
-  const loadDomains = useCallback(async () => {
-    setTokenStatus('checking');
-    try {
-      const d = await api.adminEmailDomains(password);
-      setDomains(d.domains);
-      setDomainsError(d.error ?? null);
-      setTokenStatus(d.unauthorized ? 'invalid' : d.error ? 'error' : 'valid');
-    } catch (err) {
-      setDomainsError(err instanceof Error ? err.message : String(err));
-      setTokenStatus('error');
-    }
-  }, [password]);
+  /** `draftToken` probes a token the operator just typed; omit it for the stored one. */
+  const loadDomains = useCallback(
+    async (draftToken?: string) => {
+      setTokenStatus('checking');
+      try {
+        const d = await api.adminEmailDomains(password, draftToken);
+        setDomains(d.domains);
+        setDomainsError(d.error ?? null);
+        setTokenStatus(d.unauthorized ? 'invalid' : d.error ? 'error' : 'valid');
+      } catch (err) {
+        setDomainsError(err instanceof Error ? err.message : String(err));
+        setTokenStatus('error');
+      }
+    },
+    [password],
+  );
 
   const load = useCallback(async () => {
     setBusy('load');
@@ -2037,6 +2041,16 @@ function EmailsTab({ password }: { password: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Probe a freshly typed token right away, so the channel verdict and the
+  // from-address suggestions are on screen *before* the operator saves —
+  // otherwise wiring the sender is a save, then a re-read, then a 2nd save.
+  useEffect(() => {
+    const draft = token.trim();
+    if (!draft) return;
+    const id = setTimeout(() => void loadDomains(draft), 600);
+    return () => clearTimeout(id);
+  }, [token, loadDomains]);
 
   const saveCfg = async ({ forgetToken = false } = {}) => {
     setBusy('save');
@@ -2359,20 +2373,12 @@ function EmailsTab({ password }: { password: string }) {
           <input
             type="password"
             className="admin-cluster-input admin-planner-input"
-            placeholder={
-              savedCfg?.tokenSet
-                ? '•••••••••••••• stored · type a new one to replace'
-                : 'paste the Send API token'
-            }
             value={token}
             onChange={(e) => setToken(e.target.value)}
             disabled={busy !== null}
             spellCheck={false}
             autoComplete="new-password"
           />
-          <span className="admin-emails-domains">
-            write-only: a stored token is never sent back to this page.
-          </span>
         </div>
         <div className="admin-cluster-section">
           <label className="admin-cluster-label">From address</label>

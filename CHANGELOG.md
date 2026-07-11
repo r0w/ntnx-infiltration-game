@@ -17,6 +17,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- Wiring the Mailtrap sender takes a single save, and a stored token can no
+  longer be revealed from the page.
+
 ### Fixed
 
 ## [0.4.0] - 2026-07-11
