@@ -1372,11 +1372,15 @@ async function CheckUpdates(ctx: CheckContext): Promise<CheckResult> {
         detail: `${submitted} update(s) recorded (LCM endpoint unreachable, format-only validation).`,
       };
     }
-    // An inventory is rebuilding the list (any player can fire one from the
-    // LCM page, and everyone shares the cluster). For ~3.5 minutes the live
-    // count is noise — 0, then a ramp past the true value — so never fail the
-    // player on it: they'd be judged against a number nobody could have read.
+    // An inventory is rebuilding the list, so the live count is noise for a few
+    // minutes: never fail the player on a number nobody could have read. The
+    // last settled count can still confirm a right answer — an inventory
+    // re-derives the same list, it doesn't change what's available.
     if (!reading.settled) {
+      const lastSettled = ctx.clusterConfig?.lcmAvailableUpdates;
+      if (lastSettled === submitted) {
+        return { pass: true, detail: `${submitted} update(s) — matches the last settled LCM inventory.` };
+      }
       return {
         pass: true,
         detail: `${submitted} update(s) recorded — an LCM inventory is running, count not verifiable.`,

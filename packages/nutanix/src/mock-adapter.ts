@@ -204,13 +204,14 @@ export function withVariableInterpolation(
     method: string,
     path: string,
     body?: unknown,
+    headers?: Record<string, string>,
   ): Promise<T> => {
     // Reverse-interpolate the path so static fixture keys like
     // `/.../policies/mseg-{Trigram}` keep matching after the list response
     // hands the substituted extId (`mseg-CUR`) back to the caller.
     const vars = getVars();
     const lookupPath = deinterpolatePath(path, vars);
-    const raw = await client.request<unknown>(method, lookupPath, body);
+    const raw = await client.request<unknown>(method, lookupPath, body, headers);
     return interpolate(raw, vars) as T;
   };
   return {
@@ -301,8 +302,9 @@ export function withMockOverlay(
     method: string,
     path: string,
     body?: unknown,
+    headers?: Record<string, string>,
   ): Promise<T> => {
-    const raw = await client.request<unknown>(method, path, body);
+    const raw = await client.request<unknown>(method, path, body, headers);
     if (method.toUpperCase() !== 'GET') return raw as T;
     const endpoint = OVERLAY_ENDPOINTS.find((e) => path.startsWith(e.pathPrefix));
     if (!endpoint) return raw as T;

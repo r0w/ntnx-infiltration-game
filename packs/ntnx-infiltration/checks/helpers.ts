@@ -341,48 +341,56 @@ export interface LcmUpdatesReading {
 }
 
 /**
- * Pack-local copy of the engine's `readLcmUpdates` (same body, same semantics —
- * see the note on `discoverableNodeSerials` above for why the pack carries its
- * own copy). Counts the "Prism Element Clusters" LCM updates the player sees:
- * paginate all entities, keep only PE clusters (`clusterType === 'AOS'` per
- * lcm-summaries — the PCVM is itself an AOS-software cluster so locationType
- * can't tell the tabs apart), dedup per-node rows by (cluster, type, model).
+ * Pack-local copy of the engine's `readLcmUpdates` (see the note on
+ * `discoverableNodeSerials` above for why the pack carries its own copy).
+ * Counts the "Prism Element Clusters" LCM updates the player sees: paginate all
+ * entities, keep only PE clusters (`clusterType === 'AOS'` per lcm-summaries —
+ * the PCVM is itself an AOS-software cluster so locationType can't tell the tabs
+ * apart), dedup per-node rows by (cluster, type, model).
  *
- * `settled` is false while an inventory is rebuilding the entity data, during
- * which the count is noise: a "Perform Inventory" wipes `availableVersions` on
- * the cluster's entities and repopulates them module by module, so the count
- * reads 0 for over two minutes, then ramps past the true value before landing
- * on it (issue #60). Detected from the per-cluster LCM status (which only
- * answers for the right cluster when passed `X-Cluster-Id`) and from LCM's own
- * `hasAvailableUpgrades` flag contradicting our count.
- *
- * Returns null when LCM is unreachable so the caller falls back to format-only
- * validation. Keep in sync with `packages/engine/src/lcm-updates.ts`.
+ * `settled` is false while an inventory is rebuilding the data, when the count
+ * is noise (issue #60); see `clusterSettled`. Returns null when LCM can't be
+ * read, so the caller falls back to format-only validation. Keep in sync with
+ * `packages/engine/src/lcm-updates.ts`.
  */
 export async function readLcmUpdates(
   nutanix: NutanixClient,
   logger?: Pick<Logger, 'debug' | 'warn'>,
 ): Promise<LcmUpdatesReading | null> {
-  const entities = await fetchLcmEntities(nutanix, logger);
-  if (entities === null) return null;
   const pe = await fetchPeClusters(nutanix, logger);
   if (pe === null) return null;
+  // No PE cluster at all is not "nothing to update" — it's LCM answering with
+  // something we don't understand. Treat it like unreachable, or a degraded
+  // lcm-summaries would hand every player a confident zero.
+  if (pe.clusters.length === 0) {
+    logger?.warn?.('LCM reports no PE cluster, treating the update count as unreadable');
+    return null;
+  }
+  const entities = await fetchLcmEntities(nutanix, logger);
+  if (entities === null) return null;
 
   const count = dedupedUpdateCount(entities, new Set(pe.clusters.map((c) => c.extId)));
-  // Settledness is judged per cluster: a PC can register several PEs, and
-  // aggregating would let a healthy neighbour mask a rebuilding one.
-  const settled = (
-    await Promise.all(
-      pe.clusters.map(async (c) => {
-        const busy = await clusterBusy(nutanix, pe.version, c.extId, logger);
-        if (busy === true) return false;
-        return flagAgreesWithCount(
-          c.hasAvailableUpgrades,
-          dedupedUpdateCount(entities, new Set([c.extId])),
-        );
-      }),
-    )
-  ).every(Boolean);
+  // Judged per cluster, never on the aggregate: a healthy PE would otherwise
+  // mask a neighbour that is still rebuilding.
+  const readings = await Promise.all(
+    pe.clusters.map(async (cluster) => ({
+      cluster,
+      count: dedupedUpdateCount(entities, new Set([cluster.extId])),
+      busy: await clusterBusy(nutanix, pe.version, cluster.extId, logger),
+    })),
+  );
+  const settled = readings.every(clusterSettled);
+  if (!settled) {
+    const detail = { clusters: readings.map((r) => ({ extId: r.cluster.extId, count: r.count, busy: r.busy })) };
+    // A running inventory is expected and passes; anything else means our count
+    // and LCM disagree with no operation to explain it — if that sticks, the
+    // stage silently stops validating, so the operator needs to see it.
+    if (readings.some((r) => r.busy === true)) {
+      logger?.debug?.('LCM inventory running, update count not trustworthy', detail);
+    } else {
+      logger?.warn?.('LCM update count contradicts LCM itself, not verifying it', detail);
+    }
+  }
   return { count, settled };
 }
 
@@ -400,24 +408,36 @@ function dedupedUpdateCount(entities: LcmEntity[], peClusters: Set<string>): num
   return seen.size;
 }
 
-/**
- * A cluster whose `hasAvailableUpgrades` disagrees with what we counted on it is
- * mid-rebuild: LCM flips that flag to false the moment it wipes the entity rows
- * and only restores it once they're all back. An undefined flag (older PC, mock
- * fixtures) tells us nothing, so it never condemns the reading.
- */
-function flagAgreesWithCount(flag: boolean | undefined, count: number): boolean {
-  if (typeof flag !== 'boolean') return true;
-  if (count === 0 && flag) return false; // LCM has updates here, we counted none
-  if (count > 0 && !flag) return false; // we counted updates LCM doesn't have
+/** Is this cluster's slice of the count trustworthy? Mirrors the engine's `clusterSettled`. */
+function clusterSettled({
+  cluster,
+  count,
+  busy,
+}: {
+  cluster: PeCluster;
+  count: number;
+  busy: boolean | null;
+}): boolean {
+  if (busy === true) return false;
+  const flag = cluster.hasAvailableUpgrades;
+  // LCM's own flag disagreeing with what we counted only happens mid-rebuild.
+  // Undefined (older PC, mock fixtures) tells us nothing, so it never triggers.
+  if (typeof flag === 'boolean') {
+    if (count === 0 && flag) return false;
+    if (count > 0 && !flag) return false;
+  }
+  // Status unavailable and we counted nothing: LCM drops the flag during the
+  // wipe too, so neither signal can tell a wiped cluster from an up-to-date
+  // one. Don't gamble the player's answer on it.
+  if (busy === null && count === 0) return false;
   return true;
 }
 
 /**
  * Is LCM running an operation (inventory, upgrade) on this cluster? `status` is
- * per-cluster and scoped by header: without `X-Cluster-Id` PC answers for the
- * PCVM cluster only and reports idle all through a PE inventory. `null` when the
- * call fails: unknown, so it doesn't by itself condemn the reading.
+ * scoped by header: without `X-Cluster-Id` PC answers for the PCVM cluster only
+ * and reports idle all through a PE inventory. `null` = the call failed, i.e.
+ * unknown, which `clusterSettled` treats as a reason for caution, not as idle.
  */
 async function clusterBusy(
   nutanix: NutanixClient,
@@ -434,7 +454,7 @@ async function clusterBusy(
     const op = res?.data?.inProgressOperation?.operationType;
     return typeof op === 'string' && op.length > 0;
   } catch (err) {
-    logger?.debug?.('LCM status fetch failed, treating cluster as idle', {
+    logger?.debug?.('LCM status fetch failed, cluster state unknown', {
       clusterExtId,
       err: err instanceof Error ? err.message : String(err),
     });
