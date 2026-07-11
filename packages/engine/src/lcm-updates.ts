@@ -119,28 +119,25 @@ export interface PeClusterReading {
 /**
  * Does the reading reflect a finished inventory? Pure half of the settled logic
  * (the busy flags come from the live status calls), exported for unit tests.
- *
  * Judged per cluster, never on the aggregate: a healthy PE would otherwise mask
  * a neighbour that is still rebuilding.
  */
 export function isReadingSettled(readings: PeClusterReading[]): boolean {
-  return readings.length > 0 && readings.every(clusterSettled);
-}
-
-function clusterSettled({ cluster, count, busy }: PeClusterReading): boolean {
-  if (busy === true) return false;
-  const flag = cluster.hasAvailableUpgrades;
-  // LCM's own flag disagreeing with what we counted only happens mid-rebuild.
-  // Undefined (older PC, mock fixtures) tells us nothing, so it never triggers.
-  if (typeof flag === 'boolean') {
-    if (count === 0 && flag) return false;
-    if (count > 0 && !flag) return false;
-  }
-  // Status unavailable and we counted nothing: LCM drops the flag during the
-  // wipe too, so neither signal can tell a wiped cluster from an up-to-date
-  // one. Don't gamble the player's answer on it.
-  if (busy === null && count === 0) return false;
-  return true;
+  return (
+    readings.length > 0 &&
+    readings.every(({ cluster, count, busy }) => {
+      if (busy === true) return false;
+      // LCM's own flag disagreeing with what we counted only happens
+      // mid-rebuild. Undefined (older PC, mock fixtures) tells us nothing.
+      const flag = cluster.hasAvailableUpgrades;
+      if (flag === true && count === 0) return false;
+      if (flag === false && count > 0) return false;
+      // Status unavailable and nothing counted: LCM drops the flag during the
+      // wipe too, so neither signal separates a wiped cluster from an
+      // up-to-date one. Don't gamble the player's answer on it.
+      return !(busy === null && count === 0);
+    })
+  );
 }
 
 async function isSettled(
@@ -157,25 +154,13 @@ async function isSettled(
       busy: await clusterBusy(nutanix, version, cluster.extId, logger),
     })),
   );
-  const settled = isReadingSettled(readings);
-  if (settled) return true;
-
-  const detail = {
-    clusters: readings.map((r) => ({
-      extId: r.cluster.extId,
-      count: r.count,
-      busy: r.busy,
-      hasAvailableUpgrades: r.cluster.hasAvailableUpgrades,
-    })),
-  };
-  // A running inventory is expected and passes; anything else means our count
-  // and LCM disagree with no operation to explain it — if that sticks, the
-  // stage silently stops validating, so the operator needs to see it.
-  if (readings.some((r) => r.busy === true)) {
-    logger?.debug?.('LCM inventory running, update count not trustworthy', detail);
-  } else {
-    logger?.warn?.('LCM update count contradicts LCM itself, not verifying it', detail);
-  }
+  if (isReadingSettled(readings)) return true;
+  // A running inventory explains itself; anything else means our count and LCM
+  // disagree with no operation behind it, and the stage then quietly stops
+  // validating — the operator needs to see that one.
+  const msg = 'LCM update count is not trustworthy';
+  if (readings.some((r) => r.busy === true)) logger?.debug?.(msg, { clusters: readings });
+  else logger?.warn?.(msg, { clusters: readings });
   return false;
 }
 
