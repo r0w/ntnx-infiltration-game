@@ -51,6 +51,9 @@ export interface AdminRoutesDeps {
    *  `/cluster-status` to build the Prism UI deep-link to the IOps
    *  activation page. May be empty in mock mode. */
   pcEndpoint: string;
+  /** PC admin password from the deploy env. Seeds the invitation's
+   *  {PASSWORD}: the VDI accounts use it too. Empty outside a deploy. */
+  pcPassword?: string;
   /** Test seam for /email-send — defaults to the real Mailtrap call. */
   sendEmail?: typeof sendMailtrapEmail;
 }
@@ -81,15 +84,20 @@ function applyStringField(cfg: ClusterConfigQueries, incoming: unknown, key: str
 export type AdminClusterVersionsPayload = SoftwareVersionsProbeResult;
 
 export interface AdminEmailConfigPayload {
-  mailtrapToken: string;
+  /** Whether a token is stored. The token itself is write-only: it never
+   *  leaves the server, so an operator screen-sharing /admin can't leak it. */
+  mailtrapTokenSet: boolean;
   fromEmail: string;
   fromName: string;
   /** Last-used template variable values ({CLUSTER}, {PASSWORD}, …), persisted per deployment. */
   vars: Record<string, string>;
   /** PE cluster name probed from the live PC (e.g. `DM3-POC004`) — seeds
-   *  {CLUSTER} and, per the HPoC VDI convention, {PASSWORD}. '' when
-   *  unknown (mock mode / probe failed). */
+   *  {CLUSTER}. '' when unknown (mock mode / probe failed). */
   clusterName: string;
+  /** The PC admin password the operator typed at blueprint launch — the
+   *  VDI accounts share it, so it seeds {PASSWORD}. '' outside a
+   *  blueprint deploy (dev, mock). */
+  pcPassword: string;
 }
 
 export interface AdminEmailTemplatePayload {
@@ -400,7 +408,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     const entries: AdminGateEntry[] = effective
       .filter((s) => s.adminGate)
       .map((s) => {
-        const gateIdx = s.id;
+        const gateIdx = s.index;
         const arrived = active.filter((sess) => positionOf(sess.currentStage) >= gateIdx - 1);
         const arrivedTrigrams = arrived
           .map((sess) => sess.trigram ?? sess.username ?? `?${sess.sessionId.slice(0, 4)}`)
@@ -803,12 +811,26 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   const emailConfigPayload = (): AdminEmailConfigPayload => {
     const cfg = deps.service.clusterConfig;
     return {
-      mailtrapToken: cfg.get<string>('mailtrap_token') ?? '',
+      mailtrapTokenSet: (cfg.get<string>('mailtrap_token') ?? '') !== '',
       fromEmail: cfg.get<string>('email_from') ?? '',
       fromName: cfg.get<string>('email_from_name') ?? '',
       vars: cfg.get<Record<string, string>>('email_vars') ?? {},
       clusterName: cfg.get<string>('cluster_name') ?? '',
+      pcPassword: deps.pcPassword ?? '',
     };
+  };
+
+  // Deployments that composed an invitation before the {PASSWORD} fix saved
+  // the cluster name as the password. Drop that row so the composer falls
+  // back to the PC admin password instead of re-sending the wrong one.
+  const dropStalePasswordVar = () => {
+    const cfg = deps.service.clusterConfig;
+    const clusterName = cfg.get<string>('cluster_name');
+    const vars = cfg.get<Record<string, string>>('email_vars');
+    if (!deps.pcPassword || !clusterName || vars?.PASSWORD !== clusterName) return;
+    const { PASSWORD: _stale, ...rest } = vars;
+    cfg.set('email_vars', rest, 'admin');
+    consoleLogger.info('dropped stale email {PASSWORD} var (held the cluster name)');
   };
 
   // Probe the PE cluster name once per boot and cache it in cluster_config
@@ -823,6 +845,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       const name = await probeClusterName({ nutanix: deps.nutanix, logger: consoleLogger });
       if (name) cfg.setIfAbsent('cluster_name', name);
     }
+    dropStalePasswordVar();
     return c.json(emailConfigPayload());
   });
 
@@ -847,6 +870,8 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     ) {
       throw new HttpError(400, 'vars must be an object of strings');
     }
+    // Token is write-only: the composer omits it unless the operator typed a
+    // new one (omitted = keep the stored one, null = forget it).
     applyStringField(cfg, body.mailtrapToken, 'mailtrap_token');
     applyStringField(cfg, body.fromEmail, 'email_from');
     applyStringField(cfg, body.fromName, 'email_from_name');

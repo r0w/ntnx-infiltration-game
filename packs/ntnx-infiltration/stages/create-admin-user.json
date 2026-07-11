@@ -1,4 +1,5 @@
 {
+  "id": "eg-006",
   "name": "create-admin-user",
   "active": true,
   "prompt": "tank",
@@ -15,7 +16,6 @@
     "stage-006.line-09",
     "stage-006.line-10"
   ],
-  "saveScore": false,
   "check": {
     "fn": "CheckUser"
   },

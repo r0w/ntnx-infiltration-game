@@ -76,21 +76,25 @@ async function CheckTrigram(ctx: CheckContext): Promise<CheckResult> {
       retryFromVariable: 'PIN',
     };
   }
-  const others = ctx.sessionDirectory
-    ?.findOtherSessionsWithVariable(ctx.session.id, 'Trigram', trigram)
-    .filter((s) => s.finishedAt === null) ?? [];
+  const siblings = ctx.sessionDirectory
+    ?.findOtherSessionsWithVariable(ctx.session.id, 'Trigram', trigram) ?? [];
+  // A finished session keeps its trigram because the cluster resources named
+  // after it (`rbo-vm`, `rbo-proj`…) outlive the session. Mock has no cluster,
+  // and every mock session pre-seeds the same `dev` identity, so a finished
+  // mock run must not swallow the next one.
+  const others = ctx.nutanix.mode === 'mock'
+    ? siblings.filter((s) => s.finishedAt === null)
+    : siblings;
   if (others.length > 0) {
     const submittedPin = ctx.vars.get('PIN');
-    // Most-recent-first (directory already sorts by started_at DESC) — if
-    // the player had multiple active sessions with the same trigram (edge
-    // case), take the latest.
-    const target = others[0];
-    const storedPin = ctx.sessionDirectory?.getVariable(target.sessionId, 'PIN');
-    if (
-      typeof submittedPin === 'string' &&
-      typeof storedPin === 'string' &&
-      submittedPin === storedPin
-    ) {
+    // Match on the PIN, not on recency: a trigram can carry several sessions
+    // and the player owns whichever one their PIN opens. Prefer one still in
+    // play so a live game wins over a finished namesake.
+    const opened = typeof submittedPin === 'string'
+      ? others.filter((s) => ctx.sessionDirectory?.getVariable(s.sessionId, 'PIN') === submittedPin)
+      : [];
+    const target = opened.find((s) => s.finishedAt === null) ?? opened[0];
+    if (target) {
       ctx.logger.info('trigram+pin match → swap to existing session', {
         trigram,
         target: target.sessionId,

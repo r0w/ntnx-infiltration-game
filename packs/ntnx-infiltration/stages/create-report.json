@@ -1,4 +1,5 @@
 {
+  "id": "eg-027",
   "name": "create-report",
   "active": true,
   "prompt": "tank",
@@ -12,7 +13,6 @@
     "stage-027.line-06",
     "stage-027.line-07"
   ],
-  "saveScore": false,
   "check": {
     "fn": "CheckReport"
   },

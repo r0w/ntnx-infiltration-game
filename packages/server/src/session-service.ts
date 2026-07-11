@@ -30,6 +30,7 @@ import {
   type SessionRecord,
 } from './db/queries';
 import { applyOverlay } from './pack-overlay';
+import type { Telemetry } from './telemetry';
 import {
   clusterCacheForSession,
   mockOverlayForSession,
@@ -75,6 +76,9 @@ export interface SessionServiceDeps {
   bundle: LocaleBundle;
   globalTypingSpeedMs?: number;
   initialVariables?: Record<string, unknown>;
+  /** NIG Central stats emitter. Optional and fire-and-forget — absent in
+   *  tests and when NIG_CENTRAL_URL is unset. */
+  telemetry?: Telemetry;
 }
 
 export interface AdvanceResult {
@@ -161,11 +165,12 @@ export class SessionService {
   private readonly globalTypingSpeedMs?: number;
   private readonly initialVariables: Record<string, unknown>;
   private readonly sessionDirectory: SessionDirectory;
+  private readonly telemetry?: Telemetry;
   /**
    * In-memory mirror of the gate_unlocks table for the current pack. Read at
    * boot, mutated by `setGateUnlock`. Passed to the runner on every advance
-   * so a stage with `adminGate: true` lets through iff its id is in the set.
-   * Stores numeric indices (stage.id) to match the engine's gating signature;
+   * so a stage with `adminGate: true` lets through iff its index is in the set.
+   * Stores numeric indices (stage.index) to match the engine's gating signature;
    * name ↔ index conversion happens at the DB boundary.
    */
   private unlockedGateIds: Set<number>;
@@ -198,6 +203,7 @@ export class SessionService {
     this.bundle = deps.bundle;
     this.globalTypingSpeedMs = deps.globalTypingSpeedMs;
     this.initialVariables = deps.initialVariables ?? {};
+    this.telemetry = deps.telemetry;
     this.unlockedGateIds = this.rebuildUnlockedSet();
     this.globallyPausedAt = this.packPauses.get(this.packId)?.pausedAt ?? null;
     // Apply any persisted overlay at boot so a server restart preserves
@@ -371,6 +377,7 @@ export class SessionService {
         this.variables.upsert(id, name, value, 'session-init');
       }
     }
+    this.telemetry?.record({ type: 'session_started', sessionId: id, locale: record.locale });
     return record;
   }
 
@@ -591,7 +598,7 @@ export class SessionService {
     }
     const needed = new Set<string>();
     for (const s of stages) {
-      if (s.id <= currentIdx) continue;
+      if (s.index <= currentIdx) continue;
       for (const n of s.needs ?? []) {
         if (!ctx.vars.has(n)) needed.add(n);
       }
@@ -599,7 +606,7 @@ export class SessionService {
     for (const v of needed) {
       const producer = byCapture.get(v);
       if (!producer) continue;
-      if (producer.id > currentIdx) continue;
+      if (producer.index > currentIdx) continue;
       if (ctx.vars.has(v)) continue;
       try {
         const result = await this.runner.rehydrate(producer, ctx);
@@ -770,6 +777,15 @@ export class SessionService {
       ctx.vars,
     );
     if (!next) {
+      // Only emit on the first finish — advance() keeps returning 'finished'
+      // on every poll after the last stage, and clearFinished/replays exist.
+      if (session.finishedAt === null) {
+        this.telemetry?.record({
+          type: 'session_finished',
+          sessionId: session.id,
+          totalMs: Date.now() - session.startedAt,
+        });
+      }
       this.sessions.markFinished(session.id);
       return {
         kind: 'finished',
@@ -872,12 +888,12 @@ export class SessionService {
 
     // Resolve the stage's `computeGreeting` branch (if declared) BEFORE
     // re-rendering, so the next slice — typically the PIN prompt — already
-    // has `{Greeting}` substituted. Returning = at least one unfinished
-    // sibling session in the same pack captured the same `inputVar` value.
+    // has `{Greeting}` substituted. Returning = any sibling session captured
+    // the same `inputVar` value, finished included: a finished trigram is
+    // still claimed, so the greeting must agree with the coming verdict.
     if (stage.computeGreeting && variable === stage.computeGreeting.inputVar) {
       const others = this.sessionDirectory
-        .findOtherSessionsWithVariable(session.id, variable, value)
-        .filter((s) => s.finishedAt === null);
+        .findOtherSessionsWithVariable(session.id, variable, value);
       const key = others.length > 0
         ? stage.computeGreeting.returningKey
         : stage.computeGreeting.newKey;
@@ -1096,8 +1112,8 @@ export class SessionService {
     const ctx = this.buildCheckContext(session);
     const skipped: string[] = [];
     for (const stage of this.runner.listStages()) {
-      if (stage.id <= currentIdx) continue;
-      if (stage.id > targetIdx) break;
+      if (stage.index <= currentIdx) continue;
+      if (stage.index > targetIdx) break;
       const start = Date.now();
       const result = await this.runner.rehydrate(stage, ctx);
       this.history.record(
@@ -1166,6 +1182,14 @@ export class SessionService {
       for (const name of stage.invalidates) ctx.vars.delete(name);
     }
     this.history.record(session.id, stage.name, 'passed', null, null);
+    this.telemetry?.record({
+      type: 'stage_passed',
+      sessionId: session.id,
+      stageId: stage.id,
+      stageName: stage.name,
+      stageIndex: stage.index,
+      wallMs: session.stageEnteredAt !== null ? Date.now() - session.stageEnteredAt : undefined,
+    });
     this.sessions.updateCurrentStage(session.id, stage.name);
     return { kind: 'units', stageName: stage.name, units, actions, disabledStages, typingSpeedMs };
   }
@@ -1217,6 +1241,18 @@ export class SessionService {
     }
     this.history.record(session.id, stage.name, r.pass ? 'passed' : 'failed', Date.now() - start, r.detail ?? null);
     this.attempts.record(session.id, stage.name, r.pass ? 'passed' : 'failed', Date.now() - start, r.detail ?? null);
+    this.telemetry?.record({
+      type: r.pass ? 'stage_passed' : 'stage_failed',
+      sessionId: session.id,
+      stageId: stage.id,
+      stageName: stage.name,
+      stageIndex: stage.index,
+      checkMs: Date.now() - start,
+      wallMs:
+        r.pass && session.stageEnteredAt !== null
+          ? Date.now() - session.stageEnteredAt
+          : undefined,
+    });
     if (r.pass) this.sessions.updateCurrentStage(session.id, stage.name);
     return { kind: 'units', stageName: stage.name, units, actions, check: checkResult, disabledStages, typingSpeedMs };
   }
@@ -1271,6 +1307,11 @@ function makeSessionDirectory(db: Database, packId: string): SessionDirectory {
   // so string values live on disk as `"abc"`, not `abc`. JSON.stringify the
   // probe value once here so the query stays a cheap equality match on the
   // (session_id, name) primary key + inline pack/finish filters.
+  //
+  // COLLATE NOCASE: identity values are stored lowercased by their check but
+  // probed with whatever the player typed, so `RBO` must find `rbo`. ASCII
+  // only, and it applies to every probed variable — fine while `Trigram` is
+  // the only one, revisit if a case-sensitive var ever routes through here.
   const stmt = db.prepare(
     `SELECT s.id AS session_id, s.current_stage AS current_stage, s.finished_at AS finished_at, s.started_at AS started_at
      FROM sessions s
@@ -1278,7 +1319,7 @@ function makeSessionDirectory(db: Database, packId: string): SessionDirectory {
      WHERE s.pack_id = $packId
        AND s.id != $currentId
        AND v.name = $varName
-       AND v.value = $varValue
+       AND v.value = $varValue COLLATE NOCASE
      ORDER BY s.started_at DESC`,
   );
   const getVarStmt = db.prepare(

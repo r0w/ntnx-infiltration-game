@@ -22,10 +22,10 @@ const SCHEMA = readFileSync(
 const PACK_ID = 'test-pack';
 
 const stages: StageDefinition[] = [
-  { id: 1, name: 'login', active: true, messages: ['s1'], saveScore: false },
-  { id: 2, name: 'recovery-gate', active: true, messages: ['s2'], saveScore: false },
-  { id: 3, name: 'intro-tank-greet', active: true, messages: ['s3'], saveScore: false },
-  { id: 4, name: 'outro', active: true, messages: ['s4'], saveScore: false },
+  { index: 1, id: 'login', name: 'login', active: true, messages: ['s1'] },
+  { index: 2, id: 'recovery-gate', name: 'recovery-gate', active: true, messages: ['s2'] },
+  { index: 3, id: 'intro-tank-greet', name: 'intro-tank-greet', active: true, messages: ['s3'] },
+  { index: 4, id: 'outro', name: 'outro', active: true, messages: ['s4'] },
 ];
 
 const bundle: LocaleBundle = makeBundle('en', {

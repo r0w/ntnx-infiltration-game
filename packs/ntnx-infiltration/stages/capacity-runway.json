@@ -1,6 +1,10 @@
 {
+  "id": "eg-031",
   "name": "capacity-runway",
   "active": true,
+  "requires": [
+    "PlannerCluster"
+  ],
   "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
@@ -16,12 +20,10 @@
     "stage-031.line-10",
     "stage-031.line-11"
   ],
-  "saveScore": false,
   "check": {
     "fn": "CheckRunway"
   },
   "captures": [
     "Runway"
-  ],
-  "requires": ["PlannerCluster"]
+  ]
 }

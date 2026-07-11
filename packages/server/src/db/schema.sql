@@ -33,7 +33,11 @@ CREATE TABLE IF NOT EXISTS sessions (
   -- validation against a real cluster and for pre-event warm-up — the game
   -- code path is identical, the advance() loop just skips the wait for
   -- player input and calls the stage's seed handler first when present.
-  session_mode TEXT NOT NULL DEFAULT 'manual'
+  session_mode TEXT NOT NULL DEFAULT 'manual',
+  -- When the session entered its current stage segment (ms epoch). Reset on
+  -- every current_stage transition; wall-clock per-stage time = the delta
+  -- between transitions (stage_history.duration_ms only times the check).
+  stage_entered_at INTEGER
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_trigram_pack ON sessions(trigram, pack_id);
@@ -172,6 +176,16 @@ CREATE TABLE IF NOT EXISTS email_roster (
   seat INTEGER NOT NULL UNIQUE,
   email TEXT NOT NULL UNIQUE COLLATE NOCASE,
   added_at INTEGER NOT NULL
+);
+
+-- Outbox for NIG Central telemetry events. Events are appended locally and
+-- flushed fire-and-forget in batches; rows are deleted on acknowledged send.
+-- When NIG_CENTRAL_URL is unset nothing is ever written here. Unsendable
+-- backlog is pruned oldest-first so the table can't grow unbounded.
+CREATE TABLE IF NOT EXISTS telemetry_outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at INTEGER NOT NULL,
+  event_json TEXT NOT NULL
 );
 
 -- One row per (participant, template type) successful delivery. Sending

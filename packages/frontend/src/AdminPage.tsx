@@ -1924,16 +1924,16 @@ function PlannerConfigEditor({ password }: { password: string }) {
  * views. Drafts and vars persist server-side per deployment on send.
  */
 function EmailsTab({ password }: { password: string }) {
-  // Sender config (mirrors PlannerConfigEditor).
+  // Sender config. The token is write-only: the server only tells us whether
+  // one is stored, so `token` is a draft — empty means "keep the stored one".
   const [token, setToken] = useState('');
   const [fromEmail, setFromEmail] = useState('');
   const [fromName, setFromName] = useState('');
   const [savedCfg, setSavedCfg] = useState<{
-    token: string;
+    tokenSet: boolean;
     fromEmail: string;
     fromName: string;
   } | null>(null);
-  const [showToken, setShowToken] = useState(false);
   const [cfgSavedAt, setCfgSavedAt] = useState<number | null>(null);
   const [domains, setDomains] = useState<Array<{ domain: string; verified: boolean }> | null>(
     null,
@@ -1950,6 +1950,7 @@ function EmailsTab({ password }: { password: string }) {
   const [templates, setTemplates] = useState<AdminEmailTemplate[] | null>(null);
   const [savedVars, setSavedVars] = useState<Record<string, string>>({});
   const [clusterName, setClusterName] = useState('');
+  const [pcPassword, setPcPassword] = useState('');
   const [selKey, setSelKey] = useState('');
   const [subject, setSubject] = useState('');
   const [html, setHtml] = useState('');
@@ -2010,17 +2011,22 @@ function EmailsTab({ password }: { password: string }) {
         api.adminEmailTemplates(password),
         api.adminEmailRoster(password),
       ]);
-      setToken(cfg.mailtrapToken);
+      setToken('');
       setFromEmail(cfg.fromEmail);
       // RP default: prefill the display name until the operator stores
       // their own (shows as unsaved, one `save` click away).
       setFromName(cfg.fromName || 'Tank The Operator');
-      setSavedCfg({ token: cfg.mailtrapToken, fromEmail: cfg.fromEmail, fromName: cfg.fromName });
+      setSavedCfg({
+        tokenSet: cfg.mailtrapTokenSet,
+        fromEmail: cfg.fromEmail,
+        fromName: cfg.fromName,
+      });
       setSavedVars(cfg.vars);
       setClusterName(cfg.clusterName);
+      setPcPassword(cfg.pcPassword);
       setTemplates(tpl.templates);
       setRoster(ros.entries);
-      if (cfg.mailtrapToken) void loadDomains();
+      if (cfg.mailtrapTokenSet) void loadDomains();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -2032,21 +2038,33 @@ function EmailsTab({ password }: { password: string }) {
     void load();
   }, [load]);
 
-  const saveCfg = async () => {
+  const saveCfg = async ({ forgetToken = false } = {}) => {
     setBusy('save');
     setError(null);
     try {
       const p = await api.adminEmailConfigSave(password, {
-        mailtrapToken: token.trim() || null,
+        // Empty draft = the operator didn't retype the token: omit the field
+        // so the server keeps the stored one.
+        mailtrapToken: forgetToken ? null : token.trim() || undefined,
         fromEmail: fromEmail.trim() || null,
         fromName: fromName.trim() || null,
       });
-      setToken(p.mailtrapToken);
+      setToken('');
       setFromEmail(p.fromEmail);
       setFromName(p.fromName);
-      setSavedCfg({ token: p.mailtrapToken, fromEmail: p.fromEmail, fromName: p.fromName });
+      setSavedCfg({
+        tokenSet: p.mailtrapTokenSet,
+        fromEmail: p.fromEmail,
+        fromName: p.fromName,
+      });
       setCfgSavedAt(Date.now());
-      if (p.mailtrapToken) void loadDomains();
+      if (p.mailtrapTokenSet) {
+        void loadDomains();
+      } else {
+        setDomains(null);
+        setDomainsError(null);
+        setTokenStatus('unknown');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -2055,7 +2073,13 @@ function EmailsTab({ password }: { password: string }) {
   };
 
   const applyTemplate = useCallback(
-    (key: string, tplList: AdminEmailTemplate[], saved: Record<string, string>, cluster: string) => {
+    (
+      key: string,
+      tplList: AdminEmailTemplate[],
+      saved: Record<string, string>,
+      cluster: string,
+      pcPass: string,
+    ) => {
       setSelKey(key);
       const t = tplList.find((t) => `${t.id}.${t.locale}` === key);
       if (!t) return;
@@ -2064,20 +2088,19 @@ function EmailsTab({ password }: { password: string }) {
       loadedDraftRef.current = { subject: t.subject, html: t.html };
       // Priority: last-used value for this deployment, then the template
       // default, then the derived ones — GAME_URL = this deployment's own
-      // origin, CLUSTER = the probed PE cluster name, PASSWORD = same as
-      // CLUSTER (the HPoC VDI accounts use the cluster name as password).
+      // origin, CLUSTER = the probed PE cluster name, PASSWORD = the PC
+      // admin password from the blueprint (the VDI accounts share it).
+      const derived: Record<string, string> = {
+        GAME_URL: window.location.origin,
+        CLUSTER: cluster,
+        PASSWORD: pcPass,
+      };
       const resolved = Object.fromEntries(
         Object.keys(t.variables).map((k) => [
           k,
-          saved[k]?.trim()
-            ? saved[k]
-            : t.variables[k] ||
-              (k === 'GAME_URL' ? window.location.origin : k === 'CLUSTER' ? cluster : ''),
+          saved[k]?.trim() ? saved[k] : t.variables[k] || derived[k] || '',
         ]),
       );
-      if ('PASSWORD' in resolved && !resolved.PASSWORD.trim()) {
-        resolved.PASSWORD = resolved.CLUSTER ?? '';
-      }
       setVars(resolved);
       setStudioNonce((n) => n + 1);
       setSendReport(null);
@@ -2089,7 +2112,7 @@ function EmailsTab({ password }: { password: string }) {
     (k) => !vars[k].trim() && html.includes(`{${k}}`),
   );
 
-  const wired = savedCfg !== null && savedCfg.token !== '' && savedCfg.fromEmail !== '';
+  const wired = savedCfg !== null && savedCfg.tokenSet && savedCfg.fromEmail !== '';
   // Hard-block sending only when Mailtrap explicitly rejected the token;
   // a transient probe failure ('error') warns without blocking.
   const canSend = wired && tokenStatus !== 'invalid';
@@ -2101,7 +2124,7 @@ function EmailsTab({ password }: { password: string }) {
     (domains ?? []).every((d) => !d.verified || d.domain.toLowerCase() !== fromDomain);
   const cfgDirty =
     savedCfg !== null &&
-    (token.trim() !== savedCfg.token ||
+    (token.trim() !== '' ||
       fromEmail.trim() !== savedCfg.fromEmail ||
       fromName.trim() !== savedCfg.fromName);
   const draftReady = selTemplate !== null && subject.trim() !== '' && html.trim() !== '';
@@ -2133,7 +2156,7 @@ function EmailsTab({ password }: { password: string }) {
       setPendingSwitch({ key, thenSend });
       return;
     }
-    applyTemplate(key, templates ?? [], savedVars, clusterName);
+    applyTemplate(key, templates ?? [], savedVars, clusterName, pcPassword);
     if (thenSend) setConfirmSend(true);
   };
 
@@ -2262,7 +2285,7 @@ function EmailsTab({ password }: { password: string }) {
       await api.adminEmailTemplateReset(password, selTemplate.id, selTemplate.locale);
       const tpl = await api.adminEmailTemplates(password);
       setTemplates(tpl.templates);
-      applyTemplate(selKey, tpl.templates, savedVars, clusterName);
+      applyTemplate(selKey, tpl.templates, savedVars, clusterName, pcPassword);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -2321,24 +2344,35 @@ function EmailsTab({ password }: { password: string }) {
         <div className="admin-cluster-section">
           <label className="admin-cluster-label">
             Mailtrap API token
-            <button
-              type="button"
-              className="admin-planner-reveal"
-              onClick={() => setShowToken((s) => !s)}
-              title={showToken ? 'hide' : 'show'}
-            >
-              {showToken ? 'hide' : 'show'}
-            </button>
+            {savedCfg?.tokenSet && (
+              <button
+                type="button"
+                className="admin-planner-reveal"
+                disabled={busy !== null}
+                onClick={() => void saveCfg({ forgetToken: true })}
+                title="delete the stored token"
+              >
+                forget
+              </button>
+            )}
           </label>
           <input
-            type={showToken ? 'text' : 'password'}
+            type="password"
             className="admin-cluster-input admin-planner-input"
+            placeholder={
+              savedCfg?.tokenSet
+                ? '•••••••••••••• stored · type a new one to replace'
+                : 'paste the Send API token'
+            }
             value={token}
             onChange={(e) => setToken(e.target.value)}
             disabled={busy !== null}
             spellCheck={false}
             autoComplete="new-password"
           />
+          <span className="admin-emails-domains">
+            write-only: a stored token is never sent back to this page.
+          </span>
         </div>
         <div className="admin-cluster-section">
           <label className="admin-cluster-label">From address</label>
@@ -2718,7 +2752,7 @@ function EmailsTab({ password }: { password: string }) {
           onConfirm={() => {
             const p = pendingSwitch;
             setPendingSwitch(null);
-            applyTemplate(p.key, templates ?? [], savedVars, clusterName);
+            applyTemplate(p.key, templates ?? [], savedVars, clusterName, pcPassword);
             if (p.thenSend) setConfirmSend(true);
           }}
           onCancel={() => setPendingSwitch(null)}

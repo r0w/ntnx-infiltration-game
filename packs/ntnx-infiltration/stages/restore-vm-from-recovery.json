@@ -1,4 +1,5 @@
 {
+  "id": "eg-026",
   "name": "restore-vm-from-recovery",
   "active": true,
   "prompt": "tank",
@@ -13,7 +14,6 @@
     "stage-026.line-07",
     "stage-026.line-08"
   ],
-  "saveScore": false,
   "check": {
     "fn": "CheckRestoreVM"
   },

@@ -41,11 +41,11 @@ const ADMIN_PW = 'test-pw';
 
 // Ids are 0-based to mirror what pack-loader assigns in production
 // (parsed.id = i). Several admin route paths key arrival/positional math off
-// `stage.id` directly, so the fixtures need to be consistent with that.
+// `stage.index` directly, so the fixtures need to be consistent with that.
 const stages: StageDefinition[] = [
-  { id: 0, name: 'login', active: true, messages: ['s1'], saveScore: false },
-  { id: 1, name: 'intro', active: true, messages: ['s2'], saveScore: false },
-  { id: 2, name: 'outro', active: true, messages: ['s3'], saveScore: false },
+  { index: 0, id: 'login', name: 'login', active: true, messages: ['s1'] },
+  { index: 1, id: 'intro', name: 'intro', active: true, messages: ['s2'] },
+  { index: 2, id: 'outro', name: 'outro', active: true, messages: ['s3'] },
 ];
 
 const bundle: LocaleBundle = makeBundle('en', {
@@ -408,9 +408,9 @@ describe('GET /api/admin/gates', () => {
   // (player has currentStage = null or 'login' after lore). 0-based ids
   // mirror pack-loader.
   const gatedStages: StageDefinition[] = [
-    { id: 0, name: 'login', active: true, messages: ['s1'], saveScore: false },
-    { id: 1, name: 'first-task', active: true, adminGate: true, messages: ['s2'], saveScore: false },
-    { id: 2, name: 'incident', active: true, adminGate: true, messages: ['s3'], saveScore: false },
+    { index: 0, id: 'login', name: 'login', active: true, messages: ['s1'] },
+    { index: 1, id: 'first-task', name: 'first-task', active: true, adminGate: true, messages: ['s2'] },
+    { index: 2, id: 'incident', name: 'incident', active: true, adminGate: true, messages: ['s3'] },
   ];
 
   test('lists only stages with adminGate=true; both unlocked=false initially with empty arrival data', async () => {
@@ -507,14 +507,14 @@ describe('GET /api/admin/gates', () => {
     const db = freshDb();
     // 0-based ids to mirror pack-loader. Gates at positions 1, 3, 5, 7.
     const fourGates: StageDefinition[] = [
-      { id: 0, name: 'login', active: true, messages: ['s1'], saveScore: false },
-      { id: 1, name: 'pre',   active: true, adminGate: true, messages: ['s2'], saveScore: false },
-      { id: 2, name: 'mid-A', active: true, messages: ['s3a'], saveScore: false },
-      { id: 3, name: 'all',   active: true, adminGate: true, messages: ['s4'], saveScore: false },
-      { id: 4, name: 'mid-B', active: true, messages: ['s5b'], saveScore: false },
-      { id: 5, name: 'some',  active: true, adminGate: true, messages: ['s6'], saveScore: false },
-      { id: 6, name: 'mid-C', active: true, messages: ['s7c'], saveScore: false },
-      { id: 7, name: 'none',  active: true, adminGate: true, messages: ['s8'], saveScore: false },
+      { index: 0, id: 'login', name: 'login', active: true, messages: ['s1'] },
+      { index: 1, id: 'pre', name: 'pre',   active: true, adminGate: true, messages: ['s2'] },
+      { index: 2, id: 'mid-A', name: 'mid-A', active: true, messages: ['s3a'] },
+      { index: 3, id: 'all', name: 'all',   active: true, adminGate: true, messages: ['s4'] },
+      { index: 4, id: 'mid-B', name: 'mid-B', active: true, messages: ['s5b'] },
+      { index: 5, id: 'some', name: 'some',  active: true, adminGate: true, messages: ['s6'] },
+      { index: 6, id: 'mid-C', name: 'mid-C', active: true, messages: ['s7c'] },
+      { index: 7, id: 'none', name: 'none',  active: true, adminGate: true, messages: ['s8'] },
     ];
     // 2 sessions: A advanced further than B.
     // positionOf(currentStage) must be >= gateIdx - 1.
@@ -546,8 +546,8 @@ describe('GET /api/admin/gates', () => {
     const db = freshDb();
     // Pack with NO gate in JSON; we'll add one via overlay.
     const noGateStages: StageDefinition[] = [
-      { id: 0, name: 'one', active: true, messages: ['s1'], saveScore: false },
-      { id: 1, name: 'two', active: true, messages: ['s2'], saveScore: false },
+      { index: 0, id: 'one', name: 'one', active: true, messages: ['s1'] },
+      { index: 1, id: 'two', name: 'two', active: true, messages: ['s2'] },
     ];
     const pack = fakePack(noGateStages);
     const service = makeService(db, pack);
@@ -575,7 +575,7 @@ describe('GET /api/admin/gates', () => {
     // Conversely: if a JSON-tagged gate is overridden to adminGate=false,
     // it should disappear from the gates listing.
     const jsonGatedPack = fakePack([
-      { id: 0, name: 'one', active: true, adminGate: true, messages: ['s1'], saveScore: false },
+      { index: 0, id: 'one', name: 'one', active: true, adminGate: true, messages: ['s1'] },
     ]);
     const db2 = freshDb();
     const service2 = makeService(db2, jsonGatedPack);
@@ -594,9 +594,9 @@ describe('GET /api/admin/pack', () => {
   // Pack with: stage 1 captures ProjectUUID, stage 2 needs it, stage 3
   // standalone. Lets us exercise the broken-cascade path when we disable 1.
   const packStages: StageDefinition[] = [
-    { id: 0, name: 'mk-project', active: true, messages: ['s1'], saveScore: false, captures: ['ProjectUUID'] },
-    { id: 1, name: 'use-project', active: true, messages: ['s2'], saveScore: false, needs: ['ProjectUUID'] },
-    { id: 2, name: 'standalone', active: true, messages: ['s3'], saveScore: false },
+    { index: 0, id: 'mk-project', name: 'mk-project', active: true, messages: ['s1'], captures: ['ProjectUUID'] },
+    { index: 1, id: 'use-project', name: 'use-project', active: true, messages: ['s2'], needs: ['ProjectUUID'] },
+    { index: 2, id: 'standalone', name: 'standalone', active: true, messages: ['s3'] },
   ];
 
   test('lists every stage with effective active/adminGate, no broken when nothing is off', async () => {
@@ -1002,13 +1002,17 @@ describe('email participant routes', () => {
   const JSON_AUTH = { ...AUTH, 'Content-Type': 'application/json' };
 
   /** Router with a stubbed Mailtrap call recording every send. */
-  function emailRouter(db: Database, sendResult: { ok: boolean; error?: string } = { ok: true }) {
+  function emailRouter(
+    db: Database,
+    sendResult: { ok: boolean; error?: string } = { ok: true },
+    pcPassword = '',
+  ) {
     const calls: Array<{ to: string; subject: string; html: string }> = [];
     const pack = fakePack();
     const service = makeService(db, pack);
     const r = buildAdminRoutes({
       db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix,
-      clusterProfile: 'hpoc', pcEndpoint: '',
+      clusterProfile: 'hpoc', pcEndpoint: '', pcPassword,
       sendEmail: async (args) => {
         calls.push({ to: args.to, subject: args.subject, html: args.html });
         return sendResult;
@@ -1043,12 +1047,38 @@ describe('email participant routes', () => {
       ...over,
     });
 
+  test('config surfaces the deploy PC password so the composer can seed {PASSWORD}', async () => {
+    const { r } = emailRouter(freshDb(), { ok: true }, 'nx2Tech403!');
+    const res = await r.request('/email-config', { headers: AUTH });
+    expect((await res.json()).pcPassword).toBe('nx2Tech403!');
+  });
+
+  test('a saved {PASSWORD} equal to the cluster name is dropped (pre-fix deployments)', async () => {
+    const db = freshDb();
+    const { r, service } = emailRouter(db, { ok: true }, 'nx2Tech403!');
+    service.clusterConfig.set('cluster_name', 'DM3-POC004', 'probe');
+    service.clusterConfig.set('email_vars', { CLUSTER: 'DM3-POC004', PASSWORD: 'DM3-POC004' }, 'admin');
+    const res = await r.request('/email-config', { headers: AUTH });
+    expect((await res.json()).vars).toEqual({ CLUSTER: 'DM3-POC004' });
+    // Persisted, not just masked on read.
+    expect(service.clusterConfig.get('email_vars')).toEqual({ CLUSTER: 'DM3-POC004' });
+  });
+
+  test('a real {PASSWORD} is left alone', async () => {
+    const db = freshDb();
+    const { r, service } = emailRouter(db, { ok: true }, 'nx2Tech403!');
+    service.clusterConfig.set('cluster_name', 'DM3-POC004', 'probe');
+    service.clusterConfig.set('email_vars', { PASSWORD: 'something-else' }, 'admin');
+    const res = await r.request('/email-config', { headers: AUTH });
+    expect((await res.json()).vars).toEqual({ PASSWORD: 'something-else' });
+  });
+
   test('config: empty by default, PUT persists, empty string clears', async () => {
     const { r } = emailRouter(freshDb());
     let res = await r.request('/email-config', { headers: AUTH });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      mailtrapToken: '', fromEmail: '', fromName: '', vars: {}, clusterName: '',
+      mailtrapTokenSet: false, fromEmail: '', fromName: '', vars: {}, clusterName: '', pcPassword: '',
     });
 
     res = await r.request('/email-config', {
@@ -1059,8 +1089,8 @@ describe('email participant routes', () => {
       }),
     });
     expect(res.status).toBe(200);
-    const saved = (await res.json()) as { mailtrapToken: string; vars: Record<string, string> };
-    expect(saved.mailtrapToken).toBe('tok');
+    const saved = (await res.json()) as { mailtrapTokenSet: boolean; vars: Record<string, string> };
+    expect(saved.mailtrapTokenSet).toBe(true);
     expect(saved.vars).toEqual({ CLUSTER: 'X' });
 
     // Empty string clears, missing key leaves untouched (planner-config semantics).
@@ -1069,9 +1099,44 @@ describe('email participant routes', () => {
       headers: JSON_AUTH,
       body: JSON.stringify({ fromName: '' }),
     });
-    const after = (await res.json()) as { mailtrapToken: string; fromName: string };
-    expect(after.mailtrapToken).toBe('tok');
+    const after = (await res.json()) as { mailtrapTokenSet: boolean; fromName: string };
+    expect(after.mailtrapTokenSet).toBe(true);
     expect(after.fromName).toBe('');
+  });
+
+  test('the stored token is write-only: never echoed back, kept when omitted, dropped on null', async () => {
+    const { r, service } = emailRouter(freshDb());
+    await r.request('/email-config', {
+      method: 'PUT',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ mailtrapToken: 'secret-tok', fromEmail: 'a@b.co' }),
+    });
+
+    // No response of this route may carry the raw token.
+    let res = await r.request('/email-config', { headers: AUTH });
+    let body = await res.text();
+    expect(body).not.toContain('secret-tok');
+    expect(JSON.parse(body).mailtrapTokenSet).toBe(true);
+
+    // Saving the rest of the form (token field left empty → key omitted) keeps it.
+    res = await r.request('/email-config', {
+      method: 'PUT',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ fromName: 'Tank' }),
+    });
+    body = await res.text();
+    expect(body).not.toContain('secret-tok');
+    expect(JSON.parse(body).mailtrapTokenSet).toBe(true);
+    expect(service.clusterConfig.get('mailtrap_token')).toBe('secret-tok');
+
+    // Explicit null = the operator hit "forget".
+    res = await r.request('/email-config', {
+      method: 'PUT',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ mailtrapToken: null }),
+    });
+    expect((await res.json()).mailtrapTokenSet).toBe(false);
+    expect(service.clusterConfig.get('mailtrap_token')).toBeUndefined();
   });
 
   test('templates: 2 ids x 3 locales, defaults not overridden', async () => {

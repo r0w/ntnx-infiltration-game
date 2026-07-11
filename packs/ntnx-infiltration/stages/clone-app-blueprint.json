@@ -1,4 +1,5 @@
 {
+  "id": "eg-035",
   "name": "clone-app-blueprint",
   "active": true,
   "prompt": "tank",
@@ -20,7 +21,6 @@
     "stage-035.line-16",
     "stage-035.line-17"
   ],
-  "saveScore": false,
   "check": {
     "fn": "CheckCloneApp"
   },

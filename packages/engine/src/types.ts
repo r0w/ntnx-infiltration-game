@@ -67,11 +67,19 @@ export type StageStatus = 'passed' | 'skipped' | 'failed' | 'disabled';
 export interface StageDefinition {
   /**
    * Ephemeral positional index assigned by the pack-loader from `pack.json.stages[]`.
-   * Not persisted and not part of identity — for that, use `name`. Drives ordering
-   * comparisons inside the engine (gating, rehydrate, "already passed" checks) and
-   * is never shipped to the player UI; the frontend shows `name`.
+   * Not persisted and not part of identity. Drives ordering comparisons inside
+   * the engine (gating, rehydrate, "already passed" checks) and is never
+   * shipped to the player UI; the frontend shows `name`.
    */
-  id: number;
+  index: number;
+  /**
+   * Durable identity — frozen forever. `eg-NNN`, the `eg-` marking lineage
+   * from the original escape-game; the number matches the stage's locale key
+   * prefix (`eg-012` ↔ `stage-012.line-01`). Survives renames and pack
+   * restructuring; this is what telemetry emits to NIG Central. Never reuse
+   * an id for a different stage.
+   */
+  id: string;
   /**
    * Canonical identifier — kebab-case, must equal the stage's filename
    * (`name.json`) and its entry in `pack.json.stages[]`. Used for persistence
@@ -93,7 +101,6 @@ export interface StageDefinition {
   prompt?: string;
   messages: string[];
   defaultColor?: string;
-  saveScore: boolean;
   typingSpeedMs?: number;
   check?: {
     fn: string;
@@ -293,9 +300,10 @@ export interface ClusterConfig {
 export interface SessionDirectory {
   /**
    * Find other sessions (in the same pack, same session-service instance)
-   * that captured `variableName` with `value`. Excludes the current
-   * session. Returns most recent activity first. Consumers typically
-   * filter by `finishedAt === null` to scope to active collisions.
+   * that captured `variableName` with `value`, case-insensitively. Excludes
+   * the current session. Returns most recent activity first, finished
+   * sessions included: a finished trigram is still claimed, so consumers
+   * read `finishedAt` to pick a target, not to filter the list.
    */
   findOtherSessionsWithVariable(
     currentSessionId: string,

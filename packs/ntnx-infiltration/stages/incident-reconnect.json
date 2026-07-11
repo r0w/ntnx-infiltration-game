@@ -1,4 +1,5 @@
 {
+  "id": "eg-024",
   "name": "incident-reconnect",
   "active": true,
   "prompt": "system",
@@ -9,6 +10,5 @@
     "stage-024.line-03",
     "stage-024.line-04",
     "stage-024.line-05"
-  ],
-  "saveScore": false
+  ]
 }
