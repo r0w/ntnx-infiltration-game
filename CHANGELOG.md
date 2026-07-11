@@ -19,6 +19,13 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+## [0.4.1] - 2026-07-11
+
+### Changed
+
+- Wiring the Mailtrap sender takes a single save, and a stored token can no
+  longer be revealed from the page.
+
 ## [0.4.0] - 2026-07-11
 
 ### Added
@@ -119,7 +126,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 Baseline release. See the git history for changes up to this point.
 
-[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.2.1...v0.3.0

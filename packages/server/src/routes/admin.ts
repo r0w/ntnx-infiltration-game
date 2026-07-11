@@ -879,10 +879,16 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     return c.json(emailConfigPayload());
   });
 
-  // Verified sending domains of the configured token — powers the
-  // "tank@<domain>" from-address suggestion in the UI.
-  router.get('/email-domains', async (c) => {
-    const token = deps.service.clusterConfig.get<string>('mailtrap_token') ?? '';
+  // Verified sending domains — powers the "tank@<domain>" from-address
+  // suggestion in the UI. POST, not GET, so the composer can probe a token
+  // the operator just typed but hasn't saved yet: the draft travels
+  // browser → server only, which keeps the token write-only. No body (or an
+  // empty one) probes the stored token instead.
+  router.post('/email-domains', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { token?: unknown };
+    assertStringField(body.token, 'token');
+    const draft = typeof body.token === 'string' ? body.token.trim() : '';
+    const token = draft || (deps.service.clusterConfig.get<string>('mailtrap_token') ?? '');
     if (!token) throw new HttpError(400, 'Mailtrap token not configured');
     const r = await listMailtrapDomains(token);
     return c.json(r);
