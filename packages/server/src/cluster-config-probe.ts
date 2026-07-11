@@ -52,8 +52,9 @@ export async function probeClusterConfig(deps: ClusterConfigProbeDeps): Promise<
 
   // ─── LCM available updates count ────────────────────────────────────
   // "Prism Element Clusters" tab, grouped by component (see
-  // countLcmAvailableUpdates). null = LCM unreachable → leave the key unset
-  // so check-time falls back to a live query.
+  // countLcmAvailableUpdates). null = unreadable or mid-inventory → leave the
+  // key unset rather than cache noise: setIfAbsent writes it once and forever,
+  // and boot lands right after the install runbook's own inventory.
   try {
     const count = await countLcmAvailableUpdates(nutanix, logger);
     if (count !== null) {
