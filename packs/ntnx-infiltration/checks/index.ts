@@ -14,9 +14,8 @@ import {
   lookupProtectionPolicyUuid,
   lookupSubnetUuid,
   lookupUserUuid,
-  justFinishedInventory,
+  lcmInventoryDisturbedTheCount,
   nutanixErrorDetail,
-  readLcmUpdates,
 } from './helpers';
 
 /**
@@ -1358,83 +1357,56 @@ async function CheckUpdates(ctx: CheckContext): Promise<CheckResult> {
       detail: `${submitted} update(s) recorded (mock mode, format-only validation).`,
     };
   }
-  // Always query live — operators want this stage to validate against the
-  // current LCM inventory (new updates may have landed since boot). Count
-  // matches the "Prism Element Clusters" LCM tab, grouped by component.
-  //
-  // The catch (issue #60): while an inventory runs, LCM wipes its update list
-  // and rebuilds it, so for ~3.5 minutes the live count is noise (0, then a
-  // ramp past the true value) — and the player's LCM *page* shows that same
-  // noise. Anyone can start one from that page, on a cluster everyone shares.
-  // So we judge against `lastSettled`, the count read while LCM was last quiet:
-  // an inventory re-derives the same list, it doesn't change what's available.
+  // Validate against the cached count, not a live query (issue #60). The cache
+  // is probed at boot, and the operator can refresh or correct it in /admin —
+  // they looked at the LCM page, we didn't. Reading LCM here instead WAS the
+  // bug: an inventory wipes the update list and rebuilds it, so for ~3.5
+  // minutes a live count is noise (0, then a ramp past the true value) and
+  // players got judged against it. A cached count doesn't move.
+  const expected = ctx.clusterConfig?.lcmAvailableUpdates;
+  if (expected === undefined) {
+    // No cached count (the probe never caught LCM at rest, or the operator
+    // cleared it) — don't block the stage on our own missing data.
+    return {
+      pass: true,
+      detail: `${submitted} update(s) recorded (no cached LCM count, format-only validation).`,
+    };
+  }
+  if (expected === submitted) {
+    return { pass: true, detail: `${submitted} update(s) — matches the LCM count.` };
+  }
+  // Wrong — unless the cluster lied to them. The player counts what the LCM
+  // page shows, and that page shows the rebuild too: anyone can start an
+  // inventory from it, on a cluster everyone shares. So before failing them,
+  // ask LCM whether one is in flight (or landed moments ago, i.e. was still
+  // rebuilding while they counted). If so we can't tell a stale read from a
+  // wrong answer: re-prompt, and score nothing.
   try {
-    const reading = await readLcmUpdates(ctx.nutanix, ctx.logger);
-    if (reading === null) {
-      // LCM endpoint not reachable on this PC — fall back to format-only
-      // validation so the stage doesn't block when LCM isn't reachable.
-      return {
-        pass: true,
-        detail: `${submitted} update(s) recorded (LCM endpoint unreachable, format-only validation).`,
-      };
-    }
-    // What counts as right, in order: the operator's /admin value if they set
-    // one (they looked at the LCM page — that beats anything we compute, and
-    // it's the escape hatch for the day our count stops matching the screen),
-    // then the live count, then the last settled one while an inventory runs.
-    const cfg = ctx.clusterConfig;
-    const operatorSet =
-      cfg?.lcmAvailableUpdatesSource === 'admin' ? cfg.lcmAvailableUpdates : undefined;
-    const lastSettled = cfg?.lcmAvailableUpdates;
-    const expected = operatorSet ?? (reading.settled ? reading.count : lastSettled);
-    if (expected === submitted) {
-      return {
-        pass: true,
-        detail:
-          operatorSet !== undefined
-            ? `${submitted} update(s) — matches the operator-set count.`
-            : reading.settled
-              ? `${submitted} update(s) — matches LCM inventory.`
-              : `${submitted} update(s) — matches the last settled LCM inventory (one is running now).`,
-      };
-    }
-    // Any other number, while the list is (or just was) being rebuilt, is
-    // unjudgeable: the page they counted from was showing LCM's own noise, and
-    // that noise moves every few seconds, so we can't even tell a stale read
-    // from a wrong answer. Re-prompt and score NOTHING — no free pass either,
-    // they still have to come back with the right number once it settles.
-    if (!reading.settled || justFinishedInventory(reading.lastInventoryAt)) {
+    if (await lcmInventoryDisturbedTheCount(ctx.nutanix, ctx.logger)) {
       return {
         pass: false,
         neutral: true,
-        detail: `Inventory ${reading.settled ? 'just finished' : 'in flight'} (live=${reading.count}, last settled=${lastSettled ?? 'none'}), player typed ${submitted} — not judged.`,
-        hint: reading.settled
-          ? localizedHint(ctx, {
-              en: 'An LCM inventory just finished, so the list you counted was still being rebuilt. Refresh the LCM page and count again.',
-              fr: "Un inventaire LCM vient de se terminer : la liste que tu as comptée était encore en cours de reconstruction. Rafraîchis la page LCM et recompte.",
-              de: 'Eine LCM-Inventur ist gerade fertig geworden: Die Liste, die du gezählt hast, wurde noch neu aufgebaut. Aktualisiere die LCM-Seite und zähle erneut.',
-            })
-          : localizedHint(ctx, {
-              en: 'An LCM inventory is running: the update list on screen is still being rebuilt. Wait for it to finish, refresh the page, and count again.',
-              fr: "Un inventaire LCM est en cours : la liste des mises à jour à l'écran est encore en cours de reconstruction. Attends la fin, rafraîchis la page et recompte.",
-              de: 'Eine LCM-Inventur läuft: Die Update-Liste auf dem Bildschirm wird noch neu aufgebaut. Warte, bis sie fertig ist, aktualisiere die Seite und zähle erneut.',
-            }),
+        detail: `LCM inventory in flight; cached count is ${expected}, player typed ${submitted} — not judged.`,
+        hint: localizedHint(ctx, {
+          en: 'An LCM inventory is running (or just finished), so the update list you counted was still being rebuilt. Wait for it to finish, refresh the page, and count again.',
+          fr: "Un inventaire LCM est en cours (ou vient de se terminer) : la liste que tu as comptée était encore en cours de reconstruction. Attends la fin, rafraîchis la page et recompte.",
+          de: 'Eine LCM-Inventur läuft (oder ist gerade fertig geworden): Die Liste, die du gezählt hast, wurde noch neu aufgebaut. Warte, aktualisiere die Seite und zähle erneut.',
+        }),
         retryFromVariable: 'NumberUpdates',
       };
     }
-    return {
-      pass: false,
-      detail:
-        operatorSet !== undefined
-          ? `Operator-set count is ${expected}, you typed ${submitted}.`
-          : `LCM reports ${expected} updates, you typed ${submitted}.`,
-      retryFromVariable: 'NumberUpdates',
-    };
   } catch (err) {
-    return { pass: false, detail: `LCM query failed: ${nutanixErrorDetail(err)}` };
+    // Couldn't ask — judge on the cache alone rather than swallow the answer.
+    ctx.logger.debug('LCM inventory probe failed, judging on the cached count', {
+      err: err instanceof Error ? err.message : String(err),
+    });
   }
+  return {
+    pass: false,
+    detail: `LCM reports ${expected} updates, you typed ${submitted}.`,
+    retryFromVariable: 'NumberUpdates',
+  };
 }
-
 
 /**
  * Stage 31 `capacity-runway` (CheckRunway). Player reads the runway

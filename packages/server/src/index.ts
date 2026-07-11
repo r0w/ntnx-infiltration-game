@@ -8,9 +8,6 @@ import { loadPack } from './pack-loader';
 import { resolveClusterProfile } from './cluster-profile';
 import { buildApp } from './app';
 
-/** How often we re-read the settled LCM update count (stage 29's reference). */
-const LCM_REFRESH_MS = 5 * 60 * 1000;
-
 async function main() {
   const cfg = loadConfig();
   mkdirSync(cfg.dataDir, { recursive: true });
@@ -94,15 +91,12 @@ async function main() {
   if (transportMode === 'live' && !probe.unreachable) {
     try {
       const { ClusterConfigQueries } = await import('./db/queries');
-      const { probeClusterConfig, refreshLcmCount } = await import('./cluster-config-probe');
-      const cfg = new ClusterConfigQueries(db);
-      await probeClusterConfig({ nutanix, cfg, logger: consoleLogger });
-      // Stage 29 judges against the last settled LCM count while an inventory
-      // rebuilds the live one, so that value must not rot: re-read it whenever
-      // LCM is quiet. Cheap (a few GETs) and only writes when it changed.
-      setInterval(() => {
-        void refreshLcmCount({ nutanix, cfg, logger: consoleLogger });
-      }, LCM_REFRESH_MS);
+      const { probeClusterConfig } = await import('./cluster-config-probe');
+      await probeClusterConfig({
+        nutanix,
+        cfg: new ClusterConfigQueries(db),
+        logger: consoleLogger,
+      });
     } catch (err) {
       consoleLogger.warn('cluster-config probe failed', {
         err: err instanceof Error ? err.message : String(err),

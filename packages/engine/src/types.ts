@@ -293,19 +293,13 @@ export interface ClusterConfig {
    */
   discoverableNodeSerials?: string[];
   /**
-   * The LCM update count `lcm-check-updates` judges against: either the last
-   * one read while no inventory was running (`source: 'probe'`, refreshed
-   * whenever LCM is quiet), or a number the operator typed in /admin.
+   * The LCM update count `lcm-check-updates` validates against — probed at boot
+   * and refreshable/editable by the operator in /admin. The check never queries
+   * LCM for it: a live count is noise while an inventory rebuilds the list, and
+   * judging players against that noise was issue #60. Whoever set this row last
+   * (probe or operator) is what the game expects.
    */
   lcmAvailableUpdates?: number;
-  /**
-   * Where `lcmAvailableUpdates` came from. `'admin'` means an operator looked
-   * at the LCM page and told us what it says — that wins over anything we
-   * compute, in every path. It's the escape hatch for the day our count stops
-   * matching the screen (LCM regroups its rows, a new entity class appears…),
-   * so a drifting count is an /admin edit, not a redeploy.
-   */
-  lcmAvailableUpdatesSource?: 'probe' | 'admin';
 }
 
 export interface SessionDirectory {

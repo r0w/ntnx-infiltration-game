@@ -4,7 +4,7 @@ import { HttpError } from '../session-service';
 import type { LoadedPack } from '../pack-loader';
 import { NutanixTransportError } from '@ntnx-game/nutanix';
 import type { SubmitInputRequest } from '@ntnx-game/shared';
-import { discoverableNodeSerials, readLcmUpdates } from '@ntnx-game/engine';
+import { discoverableNodeSerials } from '@ntnx-game/engine';
 
 export interface StageRoutesDeps {
   service: SessionService;
@@ -195,27 +195,11 @@ async function lookupNodeSerial(ctx: import('@ntnx-game/engine').CheckContext): 
   }
 }
 
-/** Live lookup for stage 29 — count "Prism Element Clusters" LCM updates the
- *  same way CheckUpdates does, so auto-fill ↔ validation stay aligned. */
+/** Stage 29 auto-fill — the cached count, i.e. exactly what CheckUpdates
+ *  validates against. No live LCM read: the check doesn't do one either. */
 async function lookupNumberUpdates(ctx: import('@ntnx-game/engine').CheckContext): Promise<string | null> {
-  // Same order of truth as CheckUpdates, or auto-play would submit a number its
-  // own check rejects: the operator's value first, then live, then last settled.
-  const cfg = ctx.clusterConfig;
-  if (cfg?.lcmAvailableUpdatesSource === 'admin' && typeof cfg.lcmAvailableUpdates === 'number') {
-    return String(cfg.lcmAvailableUpdates);
-  }
-  const reading = await readLcmUpdates(ctx.nutanix, ctx.logger);
-  if (reading === null) return null;
-  if (reading.settled) return String(reading.count);
-  // Mid-inventory the live count is noise (and CheckUpdates won't judge it):
-  // answer with the last settled count, which the check accepts. With no
-  // settled count yet — a fresh deploy, the install runbook's own inventory
-  // still running — filling in the noise would just get the check deferred,
-  // and auto-play would resubmit it on a loop until the inventory lands. Fail
-  // loudly instead: auto-play disarms and the operator retries in a minute.
-  const lastSettled = ctx.clusterConfig?.lcmAvailableUpdates;
-  if (typeof lastSettled === 'number') return String(lastSettled);
-  throw new Error('an LCM inventory is running and no settled count exists yet — retry in a few minutes');
+  const cached = ctx.clusterConfig?.lcmAvailableUpdates;
+  return typeof cached === 'number' ? String(cached) : null;
 }
 
 /** Live lookup for stage 31 — query OldPC's v3/groups runway endpoint. */
