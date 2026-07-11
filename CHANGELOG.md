@@ -17,6 +17,12 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+### Fixed
+
+## [0.4.3] - 2026-07-12
+
+### Changed
+
 - Stage 29 validates against the cached update count that /admin shows, which an
   operator can refresh or correct, instead of querying LCM on every attempt.
 - Stage 29 tells players to read the LCM list without running an inventory, and
@@ -138,7 +144,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 Baseline release. See the git history for changes up to this point.
 
-[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.3.1...v0.4.0
