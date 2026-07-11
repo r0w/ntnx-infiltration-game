@@ -219,7 +219,12 @@ export interface NutanixClient {
    * `sdk.*` (typed SDK calls, v4 domains) or `rest.request()` (explicit
    * REST, for v3 or uncovered paths) in new code.
    */
-  request<T = unknown>(method: string, path: string, body?: unknown): Promise<T>;
+  request<T = unknown>(
+    method: string,
+    path: string,
+    body?: unknown,
+    headers?: Record<string, string>,
+  ): Promise<T>;
   /**
    * Domain-organized SDK surface. In live mode, backed by
    * `@nutanix-api/*-js-client` packages; in mock mode, fake objects that
@@ -232,9 +237,18 @@ export interface NutanixClient {
    * REST escape hatch. Used for v3 endpoints (X-Play action_rules, Calm
    * apps/blueprints/scheduler, projects) that aren't covered by any SDK,
    * and for any other path outside the SDK surface.
+   *
+   * `headers` are merged over the defaults — needed for endpoints that take
+   * their scope from a header rather than the path, e.g. LCM's per-cluster
+   * `X-Cluster-Id`. Ignored in mock mode.
    */
   readonly rest: {
-    request<T = unknown>(method: string, path: string, body?: unknown): Promise<T>;
+    request<T = unknown>(
+      method: string,
+      path: string,
+      body?: unknown,
+      headers?: Record<string, string>,
+    ): Promise<T>;
   };
 }
 

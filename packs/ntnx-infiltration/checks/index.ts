@@ -1,7 +1,6 @@
 import type { CheckContext, CheckResult } from '@ntnx-game/engine';
 import {
   cacheEntity,
-  countLcmAvailableUpdates,
   discoverableNodeSerials,
   getTrigram,
   listAll,
@@ -16,6 +15,7 @@ import {
   lookupSubnetUuid,
   lookupUserUuid,
   nutanixErrorDetail,
+  readLcmUpdates,
 } from './helpers';
 
 /**
@@ -1363,8 +1363,8 @@ async function CheckUpdates(ctx: CheckContext): Promise<CheckResult> {
   // pay the LCM round-trip per attempt instead. Count matches the
   // "Prism Element Clusters" LCM tab, grouped by component.
   try {
-    const actual = await countLcmAvailableUpdates(ctx.nutanix, ctx.logger);
-    if (actual === null) {
+    const reading = await readLcmUpdates(ctx.nutanix, ctx.logger);
+    if (reading === null) {
       // LCM endpoint not reachable on this PC — fall back to format-only
       // validation so the stage doesn't block when LCM isn't reachable.
       return {
@@ -1372,10 +1372,20 @@ async function CheckUpdates(ctx: CheckContext): Promise<CheckResult> {
         detail: `${submitted} update(s) recorded (LCM endpoint unreachable, format-only validation).`,
       };
     }
-    if (actual !== submitted) {
+    // An inventory is rebuilding the list (any player can fire one from the
+    // LCM page, and everyone shares the cluster). For ~3.5 minutes the live
+    // count is noise — 0, then a ramp past the true value — so never fail the
+    // player on it: they'd be judged against a number nobody could have read.
+    if (!reading.settled) {
+      return {
+        pass: true,
+        detail: `${submitted} update(s) recorded — an LCM inventory is running, count not verifiable.`,
+      };
+    }
+    if (reading.count !== submitted) {
       return {
         pass: false,
-        detail: `LCM reports ${actual} updates, you typed ${submitted}.`,
+        detail: `LCM reports ${reading.count} updates, you typed ${submitted}. If an inventory was running when you looked, refresh the LCM page and count again.`,
         retryFromVariable: 'NumberUpdates',
       };
     }
