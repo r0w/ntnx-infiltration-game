@@ -17,7 +17,14 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- Stage 29 tells players to read the LCM list without running an inventory, and
+  a check it cannot judge (an inventory is rebuilding the list) now says so and
+  asks for the number again, instead of counting as a failure.
+
 ### Fixed
+
+- Stage 29 no longer credits a wrong update count while an LCM inventory runs,
+  and a correct one is accepted straight away even mid-inventory.
 
 ## [0.4.2] - 2026-07-11
 

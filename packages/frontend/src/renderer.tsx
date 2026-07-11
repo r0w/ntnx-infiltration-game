@@ -76,8 +76,12 @@ export const TerminalItem = memo(function TerminalItem({
     );
   }
   if (item.kind === 'check-result') {
-    const cls = item.pass ? 'check-pass' : 'check-fail';
-    const prefix = item.pass ? '[✓]' : '[✗]';
+    // Neutral = the check couldn't judge (the cluster was mid-rebuild, not the
+    // player's doing). Nothing is scored, so it must not read as a failure —
+    // its own colour, and the hint IS the message (there's no cheer).
+    const neutral = !item.pass && item.neutral === true;
+    const cls = neutral ? 'check-wait' : item.pass ? 'check-pass' : 'check-fail';
+    const prefix = neutral ? '[…]' : item.pass ? '[✓]' : '[✗]';
     // Two-tier surfacing: the locale-aware `cheer` + an optional `hint`
     // for fails. `hint` says WHICH category broke ("VM is missing a NIC")
     // without revealing the expected value (anti-spoiler). The raw `detail`
@@ -85,12 +89,12 @@ export const TerminalItem = memo(function TerminalItem({
     // stays in the API response + server logs for dev/admin debugging,
     // never on the player's screen.
     const fallback = item.pass ? 'Stage validated.' : 'Check failed. Have another look.';
-    const text = item.cheer ?? fallback;
-    const hint = !item.pass && item.hint ? item.hint : null;
+    const text = neutral ? (item.hint ?? 'Hold on — try again in a moment.') : (item.cheer ?? fallback);
+    const hint = !item.pass && !neutral && item.hint ? item.hint : null;
     // Dwell longer when a hint accompanies the fail so the player has time
     // to read both lines before the next stage scrolls in. skip-pauses
     // drops the dwell too.
-    const dwellMs = skipPauses ? 0 : hint ? 2400 : 1800;
+    const dwellMs = skipPauses ? 0 : hint || neutral ? 2400 : 1800;
     return (
       <DwellBlock className={cls} dwellMs={dwellMs} isActive={isActive} onDone={onDone}>
         {prefix} {text}

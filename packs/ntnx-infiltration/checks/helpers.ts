@@ -332,12 +332,20 @@ interface LcmEntity {
 interface PeCluster {
   extId: string;
   hasAvailableUpgrades?: boolean;
+  /** Epoch ms of its last completed inventory, or null if LCM doesn't say. */
+  lastInventoryAt: number | null;
 }
 
 /** A count, plus whether the inventory data behind it can be trusted. */
 export interface LcmUpdatesReading {
   count: number;
   settled: boolean;
+  /**
+   * When the most recent inventory finished (epoch ms), or null if LCM doesn't
+   * say. A number the player read just before that moment came off a rebuilding
+   * list, so a mismatch right after one isn't necessarily a wrong answer.
+   */
+  lastInventoryAt: number | null;
 }
 
 /**
@@ -388,7 +396,8 @@ export async function readLcmUpdates(
     if (readings.some((r) => r.busy === true)) logger?.debug?.(msg, { clusters: readings });
     else logger?.warn?.(msg, { clusters: readings });
   }
-  return { count, settled };
+  const times = pe.clusters.map((c) => c.lastInventoryAt).filter((t): t is number => t !== null);
+  return { count, settled, lastInventoryAt: times.length > 0 ? Math.max(...times) : null };
 }
 
 /** Updates on `peClusters`, deduped the way the LCM tab groups them: one row per
@@ -492,6 +501,7 @@ async function fetchPeClusters(
           clusterExtId?: string;
           clusterType?: string;
           hasAvailableUpgrades?: boolean;
+          lastInventoryTime?: string;
         }>;
       }>('GET', `/api/lifecycle/${v}/resources/lcm-summaries`);
       const data = res?.data;
@@ -499,7 +509,12 @@ async function fetchPeClusters(
       const clusters: PeCluster[] = [];
       for (const s of data) {
         if (s.clusterType === 'AOS' && s.clusterExtId) {
-          clusters.push({ extId: s.clusterExtId, hasAvailableUpgrades: s.hasAvailableUpgrades });
+          const t = s.lastInventoryTime ? Date.parse(s.lastInventoryTime) : NaN;
+          clusters.push({
+            extId: s.clusterExtId,
+            hasAvailableUpgrades: s.hasAvailableUpgrades,
+            lastInventoryAt: Number.isFinite(t) ? t : null,
+          });
         }
       }
       return { version: v, clusters };

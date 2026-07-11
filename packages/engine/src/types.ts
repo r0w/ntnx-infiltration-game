@@ -325,6 +325,16 @@ export interface SessionDirectory {
 
 export interface CheckResult {
   pass: boolean;
+  /**
+   * "Can't judge this right now" — the player is re-prompted, and NOTHING is
+   * recorded: no failed attempt, no history row, no telemetry. For when the
+   * cluster, not the player, is at fault: stage 29 hits this while an LCM
+   * inventory is rebuilding the update list the player was told to count, so a
+   * number read off that screen is neither right nor wrong. Set it with
+   * `pass: false` + a `hint` telling them what to wait for. Never use it to
+   * paper over a real failure — a player who is simply wrong must be told.
+   */
+  neutral?: boolean;
   detail?: string;
   /**
    * Player-facing one-liner shown below the fail cheer, surfacing **which

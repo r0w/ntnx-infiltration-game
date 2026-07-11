@@ -107,6 +107,8 @@ export interface AdvanceResult {
   checkPending?: boolean;
   check?: {
     pass: boolean;
+    /** Mirrors `CheckResult.neutral`: not judged, nothing scored, re-prompt. */
+    neutral?: boolean;
     detail?: string;
     /** Player-facing one-liner for fail cases (anti-spoiler category hint). */
     hint?: string;
@@ -1224,12 +1226,19 @@ export class SessionService {
     // silentOnSuccess omits the verdict row on pass — narrative already says
     // its piece. Failures always surface so the player knows why they're stuck.
     if (!(r.pass && stage.silentOnSuccess)) {
-      const cheer = pickSentence(
-        this.bundle,
-        session.locale,
-        r.pass ? 'sentences.ok-' : 'sentences.ko-',
-      );
-      checkResult = { pass: r.pass, detail: r.detail, hint: r.hint, cheer, retryFromVariable: r.retryFromVariable };
+      // A neutral verdict ("the cluster was mid-rebuild, come back") is neither
+      // a win nor a loss, so it gets no cheer — its `hint` carries the message.
+      const cheer = r.neutral
+        ? undefined
+        : pickSentence(this.bundle, session.locale, r.pass ? 'sentences.ok-' : 'sentences.ko-');
+      checkResult = {
+        pass: r.pass,
+        neutral: r.neutral,
+        detail: r.detail,
+        hint: r.hint,
+        cheer,
+        retryFromVariable: r.retryFromVariable,
+      };
     }
     if (r.captured) {
       for (const [name, value] of Object.entries(r.captured)) ctx.vars.set(name, value, stage.name);
@@ -1238,6 +1247,12 @@ export class SessionService {
     // hasn't destroyed anything.
     if (r.pass && stage.invalidates) {
       for (const name of stage.invalidates) ctx.vars.delete(name);
+    }
+    // Neutral = the check couldn't judge, so there is nothing to score: no
+    // failed attempt on the scoreboard, no history row, no telemetry. The
+    // player just gets re-prompted (the caller re-parks the input on !pass).
+    if (r.neutral) {
+      return { kind: 'units', stageName: stage.name, units, actions, check: checkResult, disabledStages, typingSpeedMs };
     }
     this.history.record(session.id, stage.name, r.pass ? 'passed' : 'failed', Date.now() - start, r.detail ?? null);
     this.attempts.record(session.id, stage.name, r.pass ? 'passed' : 'failed', Date.now() - start, r.detail ?? null);

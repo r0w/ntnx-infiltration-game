@@ -306,6 +306,54 @@ describe('SessionService', () => {
     expect(r.kind).toBe('finished');
   });
 
+  // A neutral verdict means "the cluster was mid-rebuild, I can't judge this"
+  // (stage 29 while an LCM inventory runs). The player is re-prompted and
+  // NOTHING is scored — a fail row here would put a red line on the scoreboard
+  // in front of the room for something the player didn't do wrong.
+  test('a neutral check scores nothing: no history row, no attempt, no advance', async () => {
+    const db = new Database(':memory:');
+    db.exec(SCHEMA);
+    const checks = new CheckRegistry();
+    checks.register('alwaysPass', async () => ({ pass: true, detail: 'ok' }));
+    checks.register('cantJudge', async () => ({
+      pass: false,
+      neutral: true,
+      detail: 'inventory in flight — not judged',
+      hint: 'An LCM inventory is running. Wait for it and count again.',
+    }));
+    const neutralStages: StageDefinition[] = [
+      { index: 0, id: 'n1', name: 'n1', active: true, messages: ['s1.m1'], check: { fn: 'cantJudge' } },
+    ];
+    const runner = new StageRunner(neutralStages, checks);
+    const service = new SessionService({
+      db,
+      runner,
+      nutanix: noopNutanix,
+      logger: silentLogger,
+      packId: 'test-pack',
+      bundle,
+    });
+    const session = await service.create({
+      locale: 'en',
+      clusterEndpoint: '10.1.2.3',
+      clusterProfile: 'hpoc',
+      capabilities: [],
+    });
+
+    const r = await advanceResolved(service, session.id);
+    expect(r.check?.pass).toBe(false);
+    expect(r.check?.neutral).toBe(true);
+    expect(r.check?.hint).toContain('inventory');
+    // Neither a win nor a loss, so no cheer to pick from either sentence set.
+    expect(r.check?.cheer).toBeUndefined();
+
+    expect(service.history.listForSession(session.id)).toEqual([]);
+    const attempts = db.prepare('SELECT COUNT(*) AS n FROM check_attempts').get() as { n: number };
+    expect(attempts.n).toBe(0);
+    // Still parked on the stage — a neutral verdict never advances the player.
+    expect(service.getSession(session.id).currentStage).not.toBe('n1');
+  });
+
   test('check response carries a cheer sentence drawn from sentences.ok-* when pack ships them', async () => {
     const db = new Database(':memory:');
     db.exec(SCHEMA);
