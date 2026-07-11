@@ -19,6 +19,10 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+## [0.4.2] - 2026-07-11
+
+### Fixed
+
 - Stage 29 no longer rejects a correct update count while an LCM inventory is
   running: the count is left unverified for those few minutes instead of
   compared against a list LCM is still rebuilding.
@@ -130,7 +134,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 Baseline release. See the git history for changes up to this point.
 
-[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.3.0...v0.3.1
