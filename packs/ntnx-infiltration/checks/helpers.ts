@@ -367,34 +367,49 @@ export async function readLcmUpdates(
   if (entities === null) return null;
   const pe = await fetchPeClusters(nutanix, logger);
   if (pe === null) return null;
-  const peIds = new Set(pe.clusters.map((c) => c.extId));
+
+  const count = dedupedUpdateCount(entities, new Set(pe.clusters.map((c) => c.extId)));
+  // Settledness is judged per cluster: a PC can register several PEs, and
+  // aggregating would let a healthy neighbour mask a rebuilding one.
+  const settled = (
+    await Promise.all(
+      pe.clusters.map(async (c) => {
+        const busy = await clusterBusy(nutanix, pe.version, c.extId, logger);
+        if (busy === true) return false;
+        return flagAgreesWithCount(
+          c.hasAvailableUpgrades,
+          dedupedUpdateCount(entities, new Set([c.extId])),
+        );
+      }),
+    )
+  ).every(Boolean);
+  return { count, settled };
+}
+
+/** Updates on `peClusters`, deduped the way the LCM tab groups them: one row per
+ *  (cluster, type, model), so the same NIC firmware on 3 nodes counts once. */
+function dedupedUpdateCount(entities: LcmEntity[], peClusters: Set<string>): number {
   const seen = new Set<string>();
   for (const e of entities) {
     const av = e.availableVersions;
     const hasUpdate = Array.isArray(av) ? av.length > 0 : Boolean(av);
     if (!hasUpdate) continue;
-    if (!e.clusterExtId || !peIds.has(e.clusterExtId)) continue; // PE tab only
+    if (!e.clusterExtId || !peClusters.has(e.clusterExtId)) continue; // PE tab only
     seen.add(`${e.clusterExtId}|${e.entityType ?? ''}|${e.entityModel ?? ''}`);
   }
-  const count = seen.size;
-  const busy = await Promise.all(
-    pe.clusters.map((c) => clusterBusy(nutanix, pe.version, c.extId, logger)),
-  );
-  return { count, settled: isReadingSettled(pe.clusters, count, busy.some((b) => b === true)) };
+  return seen.size;
 }
 
 /**
- * A cluster whose `hasAvailableUpgrades` disagrees with what we counted is
+ * A cluster whose `hasAvailableUpgrades` disagrees with what we counted on it is
  * mid-rebuild: LCM flips that flag to false the moment it wipes the entity rows
  * and only restores it once they're all back. An undefined flag (older PC, mock
- * fixtures) tells us nothing, so it never triggers.
+ * fixtures) tells us nothing, so it never condemns the reading.
  */
-function isReadingSettled(clusters: PeCluster[], count: number, anyBusy: boolean): boolean {
-  if (anyBusy) return false;
-  const flags = clusters.map((c) => c.hasAvailableUpgrades).filter((f) => typeof f === 'boolean');
-  if (flags.length === 0) return true;
-  if (count === 0 && flags.some((f) => f)) return false; // LCM has updates, we counted none
-  if (count > 0 && flags.every((f) => !f)) return false; // we counted updates LCM doesn't have
+function flagAgreesWithCount(flag: boolean | undefined, count: number): boolean {
+  if (typeof flag !== 'boolean') return true;
+  if (count === 0 && flag) return false; // LCM has updates here, we counted none
+  if (count > 0 && !flag) return false; // we counted updates LCM doesn't have
   return true;
 }
 
