@@ -56,12 +56,9 @@ const PAGE_SIZE = 100;
  * firmware on 3 nodes is ONE update on screen) by (cluster, type, model).
  *
  * `settled` is false while an inventory is rebuilding the data, when the count
- * is noise: LCM wipes `availableVersions` cluster-wide, then repopulates module
- * by module, overshooting before it lands (issue #60). See `isReadingSettled`
- * for how we spot it.
- *
- * Returns `null` when LCM can't be read at all, so callers fall back to
- * format-only validation rather than reject a correct answer.
+ * is noise: LCM wipes `availableVersions` cluster-wide then repopulates module
+ * by module, overshooting before it lands (issue #60). `null` when LCM can't be
+ * read at all.
  *
  * Keep in sync with the pack-local copy in
  * `packs/ntnx-infiltration/checks/helpers.ts` if behaviour changes.

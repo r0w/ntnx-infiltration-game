@@ -122,11 +122,9 @@ export interface AdminClusterConfigPayload {
   discoverableNodeSerials: string[];
   lcmAvailableUpdates: number | null;
   /**
-   * What the stage-29 count logic reads off LCM *right now*, so the operator
-   * can compare it against the LCM page before the session and catch the day
-   * our grouping stops matching the screen — then override it here rather than
-   * watch every player fail. `settled: false` = an inventory is rebuilding the
-   * list, the count is noise. `null` in mock mode or when LCM can't be read.
+   * What we read off LCM right now, to compare with the cached value before a
+   * session (and override it if they disagree). `settled: false` = an inventory
+   * is rebuilding the list. `null` in mock mode or when LCM can't be read.
    */
   lcmLive: { count: number; settled: boolean } | null;
   /** Per-row metadata so /admin can show "edited by operator" vs probe-set. */

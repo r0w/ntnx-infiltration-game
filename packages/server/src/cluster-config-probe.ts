@@ -54,16 +54,12 @@ export async function probeClusterConfig(deps: ClusterConfigProbeDeps): Promise<
 }
 
 /**
- * Re-read the LCM update count and keep `lcm_available_updates` current.
+ * Re-read the LCM update count into `lcm_available_updates` — the row stage 29
+ * validates against. Runs at boot and behind the /admin refresh button.
  *
- * This row is what `lcm-check-updates` judges against while an inventory is
- * rebuilding the live list (issue #60), so it has to be the truth, not a
- * boot-time souvenir: a stale one would confirm an answer that stopped being
- * right. Called at boot and on a timer.
- *
- * Writes only a settled count (`countLcmAvailableUpdates` returns null while an
- * inventory is in flight — caching noise here is exactly the trap). An
- * operator's /admin override (`source: 'admin'`) stays sticky.
+ * Only ever writes a *settled* count: mid-inventory LCM reports noise, and
+ * caching that would pin a wrong answer for the whole event (issue #60). An
+ * operator's /admin value is never overwritten.
  */
 export async function refreshLcmCount(deps: ClusterConfigProbeDeps): Promise<void> {
   const { nutanix, cfg, logger } = deps;

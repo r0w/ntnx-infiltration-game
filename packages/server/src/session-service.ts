@@ -1248,9 +1248,8 @@ export class SessionService {
     if (r.pass && stage.invalidates) {
       for (const name of stage.invalidates) ctx.vars.delete(name);
     }
-    // Neutral = the check couldn't judge, so there is nothing to score: no
-    // failed attempt on the scoreboard, no history row, no telemetry. The
-    // player just gets re-prompted (the caller re-parks the input on !pass).
+    // Neutral = couldn't judge → nothing to score. The player is re-prompted
+    // (the caller re-parks the input on !pass).
     if (r.neutral) {
       return { kind: 'units', stageName: stage.name, units, actions, check: checkResult, disabledStages, typingSpeedMs };
     }

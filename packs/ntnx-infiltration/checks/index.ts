@@ -1357,12 +1357,9 @@ async function CheckUpdates(ctx: CheckContext): Promise<CheckResult> {
       detail: `${submitted} update(s) recorded (mock mode, format-only validation).`,
     };
   }
-  // Validate against the cached count, not a live query (issue #60). The cache
-  // is probed at boot, and the operator can refresh or correct it in /admin —
-  // they looked at the LCM page, we didn't. Reading LCM here instead WAS the
-  // bug: an inventory wipes the update list and rebuilds it, so for ~3.5
-  // minutes a live count is noise (0, then a ramp past the true value) and
-  // players got judged against it. A cached count doesn't move.
+  // Validate against the cached count, refreshable and correctable in /admin.
+  // Reading LCM live here was the bug (issue #60): an inventory wipes the
+  // update list and rebuilds it, so for ~3.5 minutes the count is noise.
   const expected = ctx.clusterConfig?.lcmAvailableUpdates;
   if (expected === undefined) {
     // No cached count (the probe never caught LCM at rest, or the operator
@@ -1375,12 +1372,9 @@ async function CheckUpdates(ctx: CheckContext): Promise<CheckResult> {
   if (expected === submitted) {
     return { pass: true, detail: `${submitted} update(s) — matches the LCM count.` };
   }
-  // Wrong — unless the cluster lied to them. The player counts what the LCM
-  // page shows, and that page shows the rebuild too: anyone can start an
-  // inventory from it, on a cluster everyone shares. So before failing them,
-  // ask LCM whether one is in flight (or landed moments ago, i.e. was still
-  // rebuilding while they counted). If so we can't tell a stale read from a
-  // wrong answer: re-prompt, and score nothing.
+  // Wrong — unless the cluster lied to them: the LCM page shows the rebuild
+  // too, and anyone can start an inventory from it. If one is in flight (or
+  // just landed), we can't tell a stale read from a wrong answer: don't judge.
   try {
     if (await lcmInventoryDisturbedTheCount(ctx.nutanix, ctx.logger)) {
       return {

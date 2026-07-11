@@ -327,16 +327,9 @@ const STALE_READ_GRACE_MS = 3 * 60 * 1000;
 /**
  * Was the LCM update list unreliable when the player counted it? True while an
  * inventory runs on any PE cluster, and for a few minutes after one lands.
- *
- * `lcm-check-updates` validates against the cached count, so this is only asked
- * on a mismatch — to tell "wrong answer" from "the page they counted was being
- * rebuilt" (an inventory wipes every `availableVersions` then repopulates them,
- * and the LCM page shows that; issue #60). Two cheap GETs, and only on the
- * failure path.
- *
- * `status` is scoped by header: without `X-Cluster-Id` PC answers for the PCVM
- * cluster only and reports idle right through a PE inventory. Throws if LCM
- * can't be reached — the caller then judges on the cached count alone.
+ * Asked only on a mismatch, to tell a wrong answer from a page that was being
+ * rebuilt. `status` needs the `X-Cluster-Id` header — without it PC answers for
+ * the PCVM cluster only and reports idle right through a PE inventory.
  */
 export async function lcmInventoryDisturbedTheCount(
   nutanix: NutanixClient,
@@ -352,13 +345,10 @@ export async function lcmInventoryDisturbedTheCount(
 }
 
 /**
- * Did an inventory land so recently that the player likely counted mid-rebuild?
- *
- * `lastInventoryAt` is PC's clock, `now` is ours: on an HPoC they drift. A PC
- * clock running ahead makes the age negative, and a negative age reads as
- * "recent" to any naive comparison — which would defer EVERY wrong answer and
- * quietly stop the stage from failing anyone. A skewed clock means we can't date
- * the read, so we refuse to call it recent and judge normally.
+ * Did an inventory land recently enough that the player counted mid-rebuild?
+ * `lastInventoryAt` is PC's clock, `now` is ours, and they drift: a negative age
+ * (PC ahead) would otherwise read as "recent" forever and stop the stage failing
+ * anyone. Can't date the read → judge normally.
  */
 export function justFinishedInventory(
   lastInventoryAt: number | null,

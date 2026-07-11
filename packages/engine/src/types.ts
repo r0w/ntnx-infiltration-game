@@ -233,9 +233,8 @@ export interface NutanixClient {
    * apps/blueprints/scheduler, projects) that aren't covered by any SDK,
    * and for any other path outside the SDK surface.
    *
-   * `headers` adds request headers, for endpoints that take their scope from
-   * one rather than from the path (LCM's `X-Cluster-Id`). Auth and the
-   * idempotency token stay the adapter's; ignored in mock mode.
+   * `headers` adds request headers, for endpoints scoped by one rather than by
+   * the path (LCM's `X-Cluster-Id`). Auth and the idempotency token stay ours.
    */
   readonly rest: {
     request<T = unknown>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T>;
@@ -293,11 +292,9 @@ export interface ClusterConfig {
    */
   discoverableNodeSerials?: string[];
   /**
-   * The LCM update count `lcm-check-updates` validates against — probed at boot
-   * and refreshable/editable by the operator in /admin. The check never queries
-   * LCM for it: a live count is noise while an inventory rebuilds the list, and
-   * judging players against that noise was issue #60. Whoever set this row last
-   * (probe or operator) is what the game expects.
+   * The count `lcm-check-updates` validates against: probed at boot, refreshed
+   * or corrected by the operator in /admin. The check never reads LCM itself —
+   * a live count is noise while an inventory rebuilds the list (issue #60).
    */
   lcmAvailableUpdates?: number;
 }
@@ -327,13 +324,10 @@ export interface SessionDirectory {
 export interface CheckResult {
   pass: boolean;
   /**
-   * "Can't judge this right now" — the player is re-prompted, and NOTHING is
-   * recorded: no failed attempt, no history row, no telemetry. For when the
-   * cluster, not the player, is at fault: stage 29 hits this while an LCM
-   * inventory is rebuilding the update list the player was told to count, so a
-   * number read off that screen is neither right nor wrong. Set it with
-   * `pass: false` + a `hint` telling them what to wait for. Never use it to
-   * paper over a real failure — a player who is simply wrong must be told.
+   * "Can't judge this right now": re-prompt the player and record nothing (no
+   * failed attempt, no history, no telemetry). For when the cluster, not the
+   * player, is at fault. Set with `pass: false` + a `hint`. Never use it to
+   * paper over a real failure.
    */
   neutral?: boolean;
   detail?: string;
