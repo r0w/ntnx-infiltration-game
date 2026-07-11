@@ -1078,7 +1078,7 @@ describe('email participant routes', () => {
     let res = await r.request('/email-config', { headers: AUTH });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      mailtrapToken: '', fromEmail: '', fromName: '', vars: {}, clusterName: '', pcPassword: '',
+      mailtrapTokenSet: false, fromEmail: '', fromName: '', vars: {}, clusterName: '', pcPassword: '',
     });
 
     res = await r.request('/email-config', {
@@ -1089,8 +1089,8 @@ describe('email participant routes', () => {
       }),
     });
     expect(res.status).toBe(200);
-    const saved = (await res.json()) as { mailtrapToken: string; vars: Record<string, string> };
-    expect(saved.mailtrapToken).toBe('tok');
+    const saved = (await res.json()) as { mailtrapTokenSet: boolean; vars: Record<string, string> };
+    expect(saved.mailtrapTokenSet).toBe(true);
     expect(saved.vars).toEqual({ CLUSTER: 'X' });
 
     // Empty string clears, missing key leaves untouched (planner-config semantics).
@@ -1099,9 +1099,44 @@ describe('email participant routes', () => {
       headers: JSON_AUTH,
       body: JSON.stringify({ fromName: '' }),
     });
-    const after = (await res.json()) as { mailtrapToken: string; fromName: string };
-    expect(after.mailtrapToken).toBe('tok');
+    const after = (await res.json()) as { mailtrapTokenSet: boolean; fromName: string };
+    expect(after.mailtrapTokenSet).toBe(true);
     expect(after.fromName).toBe('');
+  });
+
+  test('the stored token is write-only: never echoed back, kept when omitted, dropped on null', async () => {
+    const { r, service } = emailRouter(freshDb());
+    await r.request('/email-config', {
+      method: 'PUT',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ mailtrapToken: 'secret-tok', fromEmail: 'a@b.co' }),
+    });
+
+    // No response of this route may carry the raw token.
+    let res = await r.request('/email-config', { headers: AUTH });
+    let body = await res.text();
+    expect(body).not.toContain('secret-tok');
+    expect(JSON.parse(body).mailtrapTokenSet).toBe(true);
+
+    // Saving the rest of the form (token field left empty → key omitted) keeps it.
+    res = await r.request('/email-config', {
+      method: 'PUT',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ fromName: 'Tank' }),
+    });
+    body = await res.text();
+    expect(body).not.toContain('secret-tok');
+    expect(JSON.parse(body).mailtrapTokenSet).toBe(true);
+    expect(service.clusterConfig.get('mailtrap_token')).toBe('secret-tok');
+
+    // Explicit null = the operator hit "forget".
+    res = await r.request('/email-config', {
+      method: 'PUT',
+      headers: JSON_AUTH,
+      body: JSON.stringify({ mailtrapToken: null }),
+    });
+    expect((await res.json()).mailtrapTokenSet).toBe(false);
+    expect(service.clusterConfig.get('mailtrap_token')).toBeUndefined();
   });
 
   test('templates: 2 ids x 3 locales, defaults not overridden', async () => {

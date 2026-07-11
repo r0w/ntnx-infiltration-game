@@ -84,7 +84,9 @@ function applyStringField(cfg: ClusterConfigQueries, incoming: unknown, key: str
 export type AdminClusterVersionsPayload = SoftwareVersionsProbeResult;
 
 export interface AdminEmailConfigPayload {
-  mailtrapToken: string;
+  /** Whether a token is stored. The token itself is write-only: it never
+   *  leaves the server, so an operator screen-sharing /admin can't leak it. */
+  mailtrapTokenSet: boolean;
   fromEmail: string;
   fromName: string;
   /** Last-used template variable values ({CLUSTER}, {PASSWORD}, …), persisted per deployment. */
@@ -809,7 +811,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   const emailConfigPayload = (): AdminEmailConfigPayload => {
     const cfg = deps.service.clusterConfig;
     return {
-      mailtrapToken: cfg.get<string>('mailtrap_token') ?? '',
+      mailtrapTokenSet: (cfg.get<string>('mailtrap_token') ?? '') !== '',
       fromEmail: cfg.get<string>('email_from') ?? '',
       fromName: cfg.get<string>('email_from_name') ?? '',
       vars: cfg.get<Record<string, string>>('email_vars') ?? {},
@@ -868,6 +870,8 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     ) {
       throw new HttpError(400, 'vars must be an object of strings');
     }
+    // Token is write-only: the composer omits it unless the operator typed a
+    // new one (omitted = keep the stored one, null = forget it).
     applyStringField(cfg, body.mailtrapToken, 'mailtrap_token');
     applyStringField(cfg, body.fromEmail, 'email_from');
     applyStringField(cfg, body.fromName, 'email_from_name');
