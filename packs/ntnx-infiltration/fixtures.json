@@ -185,9 +185,12 @@
   },
   "GET /api/lifecycle/v4.0/resources/lcm-summaries": {
     "data": [
-      { "clusterExtId": "mock-pe", "clusterType": "AOS" },
-      { "clusterExtId": "mock-pc", "clusterType": "PRISM_CENTRAL" }
+      { "clusterExtId": "mock-pe", "clusterType": "AOS", "hasAvailableUpgrades": true },
+      { "clusterExtId": "mock-pc", "clusterType": "PRISM_CENTRAL", "hasAvailableUpgrades": true }
     ]
+  },
+  "GET /api/lifecycle/v4.0/resources/status": {
+    "data": { "inProgressOperation": {} }
   },
   "GET /api/lifecycle/v4.0/resources/entities": {
     "data": [

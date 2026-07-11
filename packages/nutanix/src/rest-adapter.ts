@@ -32,7 +32,12 @@ const IDEMPOTENT_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
  */
 export interface RestClient {
   readonly mode: 'live';
-  request<T = unknown>(method: string, path: string, body?: unknown): Promise<T>;
+  request<T = unknown>(
+    method: string,
+    path: string,
+    body?: unknown,
+    headers?: Record<string, string>,
+  ): Promise<T>;
 }
 
 /**
@@ -55,7 +60,12 @@ export function createRestAdapter(config: RestAdapterConfig): RestClient {
 
   return {
     mode: 'live',
-    async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    async request<T>(
+      method: string,
+      path: string,
+      body?: unknown,
+      headers?: Record<string, string>,
+    ): Promise<T> {
       const m = method.toUpperCase();
       const url = `${base}${path.startsWith('/') ? path : `/${path}`}`;
       const retryable = IDEMPOTENT_METHODS.has(m);
@@ -69,7 +79,11 @@ export function createRestAdapter(config: RestAdapterConfig): RestClient {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         const start = Date.now();
         try {
-          const res = await fetchWithTimeout(url, buildInit(m, body, auth, verifySsl, requestId), timeoutMs);
+          const res = await fetchWithTimeout(
+            url,
+            buildInit(m, body, auth, verifySsl, requestId, headers),
+            timeoutMs,
+          );
           const ct = res.headers.get('content-type') ?? '';
 
           if (!res.ok) {
@@ -129,6 +143,7 @@ function buildInit(
   auth: string,
   verifySsl: boolean,
   requestId: string,
+  extraHeaders?: Record<string, string>,
 ): FetchInit {
   const init: FetchInit = {
     method,
@@ -137,6 +152,7 @@ function buildInit(
       Accept: 'application/json',
       Authorization: auth,
       'Ntnx-Request-Id': requestId,
+      ...extraHeaders,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   };

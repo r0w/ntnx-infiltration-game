@@ -328,34 +328,103 @@ interface LcmEntity {
   clusterExtId?: string;
 }
 
+/** A PE cluster as LCM sees it. `hasAvailableUpgrades` is undefined on older PCs. */
+interface PeCluster {
+  extId: string;
+  hasAvailableUpgrades?: boolean;
+}
+
+/** A count, plus whether the inventory data behind it can be trusted. */
+export interface LcmUpdatesReading {
+  count: number;
+  settled: boolean;
+}
+
 /**
- * Pack-local copy of the engine's `countLcmAvailableUpdates` (same body, same
- * semantics — see the note on `discoverableNodeSerials` above for why the pack
- * carries its own copy). Counts the "Prism Element Clusters" LCM updates the
- * player sees: paginate all entities, keep only PE clusters
- * (`clusterType === 'AOS'` per lcm-summaries — the PCVM is itself an AOS-
- * software cluster so locationType can't tell the tabs apart), dedup per-node
- * rows by (cluster, type, model). Returns null when LCM is unreachable so the
- * caller falls back to format-only validation. Keep in sync with
- * `packages/engine/src/lcm-updates.ts`.
+ * Pack-local copy of the engine's `readLcmUpdates` (same body, same semantics —
+ * see the note on `discoverableNodeSerials` above for why the pack carries its
+ * own copy). Counts the "Prism Element Clusters" LCM updates the player sees:
+ * paginate all entities, keep only PE clusters (`clusterType === 'AOS'` per
+ * lcm-summaries — the PCVM is itself an AOS-software cluster so locationType
+ * can't tell the tabs apart), dedup per-node rows by (cluster, type, model).
+ *
+ * `settled` is false while an inventory is rebuilding the entity data, during
+ * which the count is noise: a "Perform Inventory" wipes `availableVersions` on
+ * the cluster's entities and repopulates them module by module, so the count
+ * reads 0 for over two minutes, then ramps past the true value before landing
+ * on it (issue #60). Detected from the per-cluster LCM status (which only
+ * answers for the right cluster when passed `X-Cluster-Id`) and from LCM's own
+ * `hasAvailableUpgrades` flag contradicting our count.
+ *
+ * Returns null when LCM is unreachable so the caller falls back to format-only
+ * validation. Keep in sync with `packages/engine/src/lcm-updates.ts`.
  */
-export async function countLcmAvailableUpdates(
+export async function readLcmUpdates(
   nutanix: NutanixClient,
   logger?: Pick<Logger, 'debug' | 'warn'>,
-): Promise<number | null> {
+): Promise<LcmUpdatesReading | null> {
   const entities = await fetchLcmEntities(nutanix, logger);
   if (entities === null) return null;
-  const peClusters = await fetchPeClusterIds(nutanix, logger);
-  if (peClusters === null) return null;
+  const pe = await fetchPeClusters(nutanix, logger);
+  if (pe === null) return null;
+  const peIds = new Set(pe.clusters.map((c) => c.extId));
   const seen = new Set<string>();
   for (const e of entities) {
     const av = e.availableVersions;
     const hasUpdate = Array.isArray(av) ? av.length > 0 : Boolean(av);
     if (!hasUpdate) continue;
-    if (!e.clusterExtId || !peClusters.has(e.clusterExtId)) continue; // PE tab only
+    if (!e.clusterExtId || !peIds.has(e.clusterExtId)) continue; // PE tab only
     seen.add(`${e.clusterExtId}|${e.entityType ?? ''}|${e.entityModel ?? ''}`);
   }
-  return seen.size;
+  const count = seen.size;
+  const busy = await Promise.all(
+    pe.clusters.map((c) => clusterBusy(nutanix, pe.version, c.extId, logger)),
+  );
+  return { count, settled: isReadingSettled(pe.clusters, count, busy.some((b) => b === true)) };
+}
+
+/**
+ * A cluster whose `hasAvailableUpgrades` disagrees with what we counted is
+ * mid-rebuild: LCM flips that flag to false the moment it wipes the entity rows
+ * and only restores it once they're all back. An undefined flag (older PC, mock
+ * fixtures) tells us nothing, so it never triggers.
+ */
+function isReadingSettled(clusters: PeCluster[], count: number, anyBusy: boolean): boolean {
+  if (anyBusy) return false;
+  const flags = clusters.map((c) => c.hasAvailableUpgrades).filter((f) => typeof f === 'boolean');
+  if (flags.length === 0) return true;
+  if (count === 0 && flags.some((f) => f)) return false; // LCM has updates, we counted none
+  if (count > 0 && flags.every((f) => !f)) return false; // we counted updates LCM doesn't have
+  return true;
+}
+
+/**
+ * Is LCM running an operation (inventory, upgrade) on this cluster? `status` is
+ * per-cluster and scoped by header: without `X-Cluster-Id` PC answers for the
+ * PCVM cluster only and reports idle all through a PE inventory. `null` when the
+ * call fails: unknown, so it doesn't by itself condemn the reading.
+ */
+async function clusterBusy(
+  nutanix: NutanixClient,
+  version: string,
+  clusterExtId: string,
+  logger?: Pick<Logger, 'debug' | 'warn'>,
+): Promise<boolean | null> {
+  try {
+    const res = await nutanix.request<{
+      data?: { inProgressOperation?: { operationType?: string } };
+    }>('GET', `/api/lifecycle/${version}/resources/status`, undefined, {
+      'X-Cluster-Id': clusterExtId,
+    });
+    const op = res?.data?.inProgressOperation?.operationType;
+    return typeof op === 'string' && op.length > 0;
+  } catch (err) {
+    logger?.debug?.('LCM status fetch failed, treating cluster as idle', {
+      clusterExtId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
 }
 
 async function fetchLcmEntities(
@@ -391,23 +460,29 @@ async function fetchLcmEntities(
   return null;
 }
 
-/** clusterExtId set for every PE cluster (clusterType === 'AOS'). */
-async function fetchPeClusterIds(
+/** Every PE cluster (clusterType === 'AOS'), plus the LCM API version that answered. */
+async function fetchPeClusters(
   nutanix: NutanixClient,
   logger?: Pick<Logger, 'debug' | 'warn'>,
-): Promise<Set<string> | null> {
+): Promise<{ version: string; clusters: PeCluster[] } | null> {
   for (const v of ['v4.2', 'v4.0']) {
     try {
       const res = await nutanix.request<{
-        data?: Array<{ clusterExtId?: string; clusterType?: string }>;
+        data?: Array<{
+          clusterExtId?: string;
+          clusterType?: string;
+          hasAvailableUpgrades?: boolean;
+        }>;
       }>('GET', `/api/lifecycle/${v}/resources/lcm-summaries`);
       const data = res?.data;
       if (!Array.isArray(data)) throw new Error('no data field');
-      const ids = new Set<string>();
+      const clusters: PeCluster[] = [];
       for (const s of data) {
-        if (s.clusterType === 'AOS' && s.clusterExtId) ids.add(s.clusterExtId);
+        if (s.clusterType === 'AOS' && s.clusterExtId) {
+          clusters.push({ extId: s.clusterExtId, hasAvailableUpgrades: s.hasAvailableUpgrades });
+        }
       }
-      return ids;
+      return { version: v, clusters };
     } catch (err) {
       logger?.debug?.('LCM summaries fetch failed, trying next version', {
         version: v,
