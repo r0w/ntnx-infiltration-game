@@ -71,27 +71,39 @@ describe('dedupedUpdateCount', () => {
 });
 
 describe('isReadingSettled', () => {
-  const withUpgrades = [{ extId: 'pe-1', hasAvailableUpgrades: true }];
-  const withoutUpgrades = [{ extId: 'pe-1', hasAvailableUpgrades: false }];
+  const reading = (hasAvailableUpgrades: boolean | undefined, count: number, busy = false) => ({
+    cluster: { extId: 'pe-1', hasAvailableUpgrades },
+    count,
+    busy,
+  });
 
   test('an in-progress operation condemns the reading', () => {
-    expect(isReadingSettled(withUpgrades, 6, true)).toBe(false);
+    expect(isReadingSettled([reading(true, 6, true)])).toBe(false);
   });
 
   test('zero while LCM says the cluster has upgrades is mid-rebuild', () => {
-    expect(isReadingSettled(withUpgrades, 0, false)).toBe(false);
+    expect(isReadingSettled([reading(true, 0)])).toBe(false);
   });
 
   test('zero on a cluster LCM says is up to date is a real zero', () => {
-    expect(isReadingSettled(withoutUpgrades, 0, false)).toBe(true);
+    expect(isReadingSettled([reading(false, 0)])).toBe(true);
   });
 
   test('counting updates LCM says do not exist is mid-rebuild', () => {
-    expect(isReadingSettled(withoutUpgrades, 4, false)).toBe(false);
+    expect(isReadingSettled([reading(false, 4)])).toBe(false);
   });
 
   test('no flag (older PC, mock fixtures) never condemns the reading', () => {
-    expect(isReadingSettled([{ extId: 'pe-1' }], 0, false)).toBe(true);
+    expect(isReadingSettled([reading(undefined, 0)])).toBe(true);
+  });
+
+  // Judged per cluster: aggregating count-vs-flag across clusters let a healthy
+  // neighbour mask one that is still repopulating (PR #61 review).
+  test('a repopulating cluster is not masked by a settled neighbour', () => {
+    const repopulating = { cluster: { extId: 'pe-1', hasAvailableUpgrades: false }, count: 3, busy: false };
+    const settled = { cluster: { extId: 'pe-2', hasAvailableUpgrades: true }, count: 5, busy: false };
+    expect(isReadingSettled([repopulating, settled])).toBe(false);
+    expect(isReadingSettled([settled])).toBe(true);
   });
 });
 

@@ -87,7 +87,7 @@ export async function readLcmUpdates(
     entities,
     new Set(pe.clusters.map((c) => c.extId)),
   );
-  const settled = await isSettled(nutanix, pe.version, pe.clusters, count, logger);
+  const settled = await isSettled(nutanix, pe.version, pe.clusters, entities, logger);
   return { count, settled };
 }
 
@@ -119,37 +119,56 @@ export function dedupedUpdateCount(entities: LcmEntity[], peClusters: Set<string
   return seen.size;
 }
 
+/** What we know about one PE cluster at read time. */
+export interface PeClusterReading {
+  cluster: PeCluster;
+  /** Updates counted on *this* cluster alone. */
+  count: number;
+  /** LCM reports an operation running on it. */
+  busy: boolean;
+}
+
 /**
- * Does `count` reflect a finished inventory? Pure half of the settled logic
+ * Does the reading reflect a finished inventory? Pure half of the settled logic
  * (the busy flags come from the live status calls), exported for unit tests.
  *
- * A cluster whose `hasAvailableUpgrades` disagrees with what we counted is
- * mid-rebuild: LCM flips that flag to false the moment it wipes the entity
- * rows and only restores it once they're all back. An undefined flag (older
- * PC, mock fixtures) tells us nothing, so it never triggers.
+ * Judged **per cluster**: a PC can register several PEs, and a cluster whose
+ * `hasAvailableUpgrades` disagrees with what we counted on it is mid-rebuild —
+ * LCM flips that flag to false the moment it wipes the entity rows and only
+ * restores it once they're all back. Comparing the *aggregate* count against
+ * the flags would let a healthy neighbour mask a rebuilding cluster. An
+ * undefined flag (older PC, mock fixtures) tells us nothing, so it never triggers.
  */
-export function isReadingSettled(clusters: PeCluster[], count: number, anyBusy: boolean): boolean {
-  if (anyBusy) return false;
-  const flags = clusters.map((c) => c.hasAvailableUpgrades).filter((f) => typeof f === 'boolean');
-  if (flags.length === 0) return true;
-  if (count === 0 && flags.some((f) => f)) return false; // LCM has updates, we counted none
-  if (count > 0 && flags.every((f) => !f)) return false; // we counted updates LCM doesn't have
-  return true;
+export function isReadingSettled(readings: PeClusterReading[]): boolean {
+  return readings.every(({ cluster, count, busy }) => {
+    if (busy) return false;
+    const flag = cluster.hasAvailableUpgrades;
+    if (typeof flag !== 'boolean') return true;
+    if (count === 0 && flag) return false; // LCM has updates here, we counted none
+    if (count > 0 && !flag) return false; // we counted updates LCM doesn't have
+    return true;
+  });
 }
 
 async function isSettled(
   nutanix: NutanixClient,
   version: string,
   clusters: PeCluster[],
-  count: number,
+  entities: LcmEntity[],
   logger?: Pick<Logger, 'debug' | 'warn'>,
 ): Promise<boolean> {
-  const busy = await Promise.all(
-    clusters.map((c) => clusterBusy(nutanix, version, c.extId, logger)),
+  const readings = await Promise.all(
+    clusters.map(async (cluster): Promise<PeClusterReading> => ({
+      cluster,
+      count: dedupedUpdateCount(entities, new Set([cluster.extId])),
+      busy: (await clusterBusy(nutanix, version, cluster.extId, logger)) === true,
+    })),
   );
-  const settled = isReadingSettled(clusters, count, busy.some((b) => b === true));
+  const settled = isReadingSettled(readings);
   if (!settled) {
-    logger?.debug?.('LCM inventory data is mid-rebuild, count not trustworthy', { count });
+    logger?.debug?.('LCM inventory data is mid-rebuild, count not trustworthy', {
+      clusters: readings.map((r) => ({ extId: r.cluster.extId, count: r.count, busy: r.busy })),
+    });
   }
   return settled;
 }
