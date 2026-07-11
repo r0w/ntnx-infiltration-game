@@ -14,8 +14,8 @@ import {
   lookupProtectionPolicyUuid,
   lookupSubnetUuid,
   lookupUserUuid,
+  lcmInventoryDisturbedTheCount,
   nutanixErrorDetail,
-  readLcmUpdates,
 } from './helpers';
 
 /**
@@ -1357,46 +1357,49 @@ async function CheckUpdates(ctx: CheckContext): Promise<CheckResult> {
       detail: `${submitted} update(s) recorded (mock mode, format-only validation).`,
     };
   }
-  // Always query live — operators want this stage to validate against
-  // the current LCM inventory (a scan + new updates may have landed
-  // since boot). Boot-time cache was an optimization that went stale;
-  // pay the LCM round-trip per attempt instead. Count matches the
-  // "Prism Element Clusters" LCM tab, grouped by component.
+  // Validate against the cached count, refreshable and correctable in /admin.
+  // Reading LCM live here was the bug (issue #60): an inventory wipes the
+  // update list and rebuilds it, so for ~3.5 minutes the count is noise.
+  const expected = ctx.clusterConfig?.lcmAvailableUpdates;
+  if (expected === undefined) {
+    // No cached count (the probe never caught LCM at rest, or the operator
+    // cleared it) — don't block the stage on our own missing data.
+    return {
+      pass: true,
+      detail: `${submitted} update(s) recorded (no cached LCM count, format-only validation).`,
+    };
+  }
+  if (expected === submitted) {
+    return { pass: true, detail: `${submitted} update(s) — matches the LCM count.` };
+  }
+  // Wrong — unless the cluster lied to them: the LCM page shows the rebuild
+  // too, and anyone can start an inventory from it. If one is in flight (or
+  // just landed), we can't tell a stale read from a wrong answer: don't judge.
   try {
-    const reading = await readLcmUpdates(ctx.nutanix, ctx.logger);
-    if (reading === null) {
-      // LCM endpoint not reachable on this PC — fall back to format-only
-      // validation so the stage doesn't block when LCM isn't reachable.
-      return {
-        pass: true,
-        detail: `${submitted} update(s) recorded (LCM endpoint unreachable, format-only validation).`,
-      };
-    }
-    // An inventory is rebuilding the list, so the live count is noise for a few
-    // minutes: never fail the player on a number nobody could have read. The
-    // last settled count can still confirm a right answer — an inventory
-    // re-derives the same list, it doesn't change what's available.
-    if (!reading.settled) {
-      const lastSettled = ctx.clusterConfig?.lcmAvailableUpdates;
-      if (lastSettled === submitted) {
-        return { pass: true, detail: `${submitted} update(s) — matches the last settled LCM inventory.` };
-      }
-      return {
-        pass: true,
-        detail: `${submitted} update(s) recorded — an LCM inventory is running, count not verifiable.`,
-      };
-    }
-    if (reading.count !== submitted) {
+    if (await lcmInventoryDisturbedTheCount(ctx.nutanix, ctx.logger)) {
       return {
         pass: false,
-        detail: `LCM reports ${reading.count} updates, you typed ${submitted}. If an inventory was running when you looked, refresh the LCM page and count again.`,
+        neutral: true,
+        detail: `LCM inventory in flight; cached count is ${expected}, player typed ${submitted} — not judged.`,
+        hint: localizedHint(ctx, {
+          en: 'An LCM inventory is running (or just finished), so the update list you counted was still being rebuilt. Wait for it to finish, refresh the page, and count again.',
+          fr: "Un inventaire LCM est en cours (ou vient de se terminer) : la liste que tu as comptée était encore en cours de reconstruction. Attends la fin, rafraîchis la page et recompte.",
+          de: 'Eine LCM-Inventur läuft (oder ist gerade fertig geworden): Die Liste, die du gezählt hast, wurde noch neu aufgebaut. Warte, aktualisiere die Seite und zähle erneut.',
+        }),
         retryFromVariable: 'NumberUpdates',
       };
     }
-    return { pass: true, detail: `${submitted} update(s) — matches LCM inventory.` };
   } catch (err) {
-    return { pass: false, detail: `LCM query failed: ${nutanixErrorDetail(err)}` };
+    // Couldn't ask — judge on the cache alone rather than swallow the answer.
+    ctx.logger.debug('LCM inventory probe failed, judging on the cached count', {
+      err: err instanceof Error ? err.message : String(err),
+    });
   }
+  return {
+    pass: false,
+    detail: `LCM reports ${expected} updates, you typed ${submitted}.`,
+    retryFromVariable: 'NumberUpdates',
+  };
 }
 
 /**

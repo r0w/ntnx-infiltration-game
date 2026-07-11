@@ -233,9 +233,8 @@ export interface NutanixClient {
    * apps/blueprints/scheduler, projects) that aren't covered by any SDK,
    * and for any other path outside the SDK surface.
    *
-   * `headers` adds request headers, for endpoints that take their scope from
-   * one rather than from the path (LCM's `X-Cluster-Id`). Auth and the
-   * idempotency token stay the adapter's; ignored in mock mode.
+   * `headers` adds request headers, for endpoints scoped by one rather than by
+   * the path (LCM's `X-Cluster-Id`). Auth and the idempotency token stay ours.
    */
   readonly rest: {
     request<T = unknown>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T>;
@@ -293,10 +292,9 @@ export interface ClusterConfig {
    */
   discoverableNodeSerials?: string[];
   /**
-   * Last LCM update count read while no inventory was running (boot probe, or
-   * the operator's /admin override). `lcm-check-updates` queries LCM live, and
-   * falls back to this one while an inventory is rebuilding the list — the live
-   * count is noise for those few minutes, this one still confirms a right answer.
+   * The count `lcm-check-updates` validates against: probed at boot, refreshed
+   * or corrected by the operator in /admin. The check never reads LCM itself —
+   * a live count is noise while an inventory rebuilds the list (issue #60).
    */
   lcmAvailableUpdates?: number;
 }
@@ -325,6 +323,13 @@ export interface SessionDirectory {
 
 export interface CheckResult {
   pass: boolean;
+  /**
+   * "Can't judge this right now": re-prompt the player and record nothing (no
+   * failed attempt, no history, no telemetry). For when the cluster, not the
+   * player, is at fault. Set with `pass: false` + a `hint`. Never use it to
+   * paper over a real failure.
+   */
+  neutral?: boolean;
   detail?: string;
   /**
    * Player-facing one-liner shown below the fail cheer, surfacing **which

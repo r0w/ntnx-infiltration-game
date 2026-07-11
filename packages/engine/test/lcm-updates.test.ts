@@ -124,7 +124,7 @@ describe('isReadingSettled', () => {
 describe('readLcmUpdates', () => {
   test('counts PE updates and reports them settled on an idle cluster', async () => {
     const { client, seenHeaders } = fakePc();
-    expect(await readLcmUpdates(client)).toEqual({ count: 2, settled: true });
+    expect(await readLcmUpdates(client)).toEqual({ count: 2, settled: true, lastInventoryAt: null });
     // The status call must carry the cluster scope, or PC answers for the PCVM
     // and reports idle right through a PE inventory.
     expect(seenHeaders).toContainEqual({ 'X-Cluster-Id': 'pe-1' });
@@ -132,7 +132,7 @@ describe('readLcmUpdates', () => {
 
   test('reports the wiped mid-inventory count as unsettled', async () => {
     const { client } = fakePc({ busy: true });
-    expect(await readLcmUpdates(client)).toEqual({ count: 0, settled: false });
+    expect(await readLcmUpdates(client)).toEqual({ count: 0, settled: false, lastInventoryAt: null });
   });
 
   test('countLcmAvailableUpdates withholds a mid-inventory count', async () => {
@@ -144,16 +144,41 @@ describe('readLcmUpdates', () => {
   // zero must not be served as fact — that was the original bug.
   test('a wiped cluster stays unsettled even when the status call fails', async () => {
     const { client } = fakePc({ busy: true, statusFails: true });
-    expect(await readLcmUpdates(client)).toEqual({ count: 0, settled: false });
+    expect(await readLcmUpdates(client)).toEqual({ count: 0, settled: false, lastInventoryAt: null });
   });
 
   test('a status failure does not condemn a corroborated non-zero count', async () => {
     const { client } = fakePc({ statusFails: true });
-    expect(await readLcmUpdates(client)).toEqual({ count: 2, settled: true });
+    expect(await readLcmUpdates(client)).toEqual({ count: 2, settled: true, lastInventoryAt: null });
   });
 
   test('LCM answering with no PE cluster reads as unreachable, not as zero', async () => {
     const { client } = fakePc({ summaries: [{ clusterExtId: 'pc-1', clusterType: 'PRISM_CENTRAL' }] });
     expect(await readLcmUpdates(client)).toBeNull();
+  });
+
+  // The check uses this to spot an answer counted off a list that was still
+  // rebuilding when the player looked — a stale read, not a wrong answer.
+  test('surfaces when the last inventory landed', async () => {
+    const { client } = fakePc({
+      summaries: [
+        {
+          clusterExtId: 'pe-1',
+          clusterType: 'AOS',
+          hasAvailableUpgrades: true,
+          lastInventoryTime: '2026-07-11T12:48:44Z',
+        },
+      ],
+    });
+    expect((await readLcmUpdates(client))?.lastInventoryAt).toBe(Date.parse('2026-07-11T12:48:44Z'));
+  });
+
+  test('an unparseable inventory time is null, not NaN', async () => {
+    const { client } = fakePc({
+      summaries: [
+        { clusterExtId: 'pe-1', clusterType: 'AOS', hasAvailableUpgrades: true, lastInventoryTime: 'nope' },
+      ],
+    });
+    expect((await readLcmUpdates(client))?.lastInventoryAt).toBeNull();
   });
 });

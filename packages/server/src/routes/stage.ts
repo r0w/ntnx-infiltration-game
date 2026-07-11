@@ -4,7 +4,7 @@ import { HttpError } from '../session-service';
 import type { LoadedPack } from '../pack-loader';
 import { NutanixTransportError } from '@ntnx-game/nutanix';
 import type { SubmitInputRequest } from '@ntnx-game/shared';
-import { discoverableNodeSerials, readLcmUpdates } from '@ntnx-game/engine';
+import { discoverableNodeSerials } from '@ntnx-game/engine';
 
 export interface StageRoutesDeps {
   service: SessionService;
@@ -195,19 +195,11 @@ async function lookupNodeSerial(ctx: import('@ntnx-game/engine').CheckContext): 
   }
 }
 
-/** Live lookup for stage 29 — count "Prism Element Clusters" LCM updates the
- *  same way CheckUpdates does, so auto-fill ↔ validation stay aligned. Prefer
- *  the last settled count mid-inventory: the live one is noise, and the
- *  inventory can settle between this lookup and the check, which would then
- *  reject it. */
+/** Stage 29 auto-fill — the cached count, i.e. exactly what CheckUpdates
+ *  validates against. No live LCM read: the check doesn't do one either. */
 async function lookupNumberUpdates(ctx: import('@ntnx-game/engine').CheckContext): Promise<string | null> {
-  const reading = await readLcmUpdates(ctx.nutanix, ctx.logger);
-  if (reading === null) return null;
-  if (!reading.settled) {
-    const lastSettled = ctx.clusterConfig?.lcmAvailableUpdates;
-    if (typeof lastSettled === 'number') return String(lastSettled);
-  }
-  return String(reading.count);
+  const cached = ctx.clusterConfig?.lcmAvailableUpdates;
+  return typeof cached === 'number' ? String(cached) : null;
 }
 
 /** Live lookup for stage 31 — query OldPC's v3/groups runway endpoint. */
