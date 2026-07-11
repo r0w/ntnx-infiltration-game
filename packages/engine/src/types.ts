@@ -293,12 +293,19 @@ export interface ClusterConfig {
    */
   discoverableNodeSerials?: string[];
   /**
-   * Last LCM update count read while no inventory was running (boot probe, or
-   * the operator's /admin override). `lcm-check-updates` queries LCM live, and
-   * falls back to this one while an inventory is rebuilding the list — the live
-   * count is noise for those few minutes, this one still confirms a right answer.
+   * The LCM update count `lcm-check-updates` judges against: either the last
+   * one read while no inventory was running (`source: 'probe'`, refreshed
+   * whenever LCM is quiet), or a number the operator typed in /admin.
    */
   lcmAvailableUpdates?: number;
+  /**
+   * Where `lcmAvailableUpdates` came from. `'admin'` means an operator looked
+   * at the LCM page and told us what it says — that wins over anything we
+   * compute, in every path. It's the escape hatch for the day our count stops
+   * matching the screen (LCM regroups its rows, a new entity class appears…),
+   * so a drifting count is an /admin edit, not a redeploy.
+   */
+  lcmAvailableUpdatesSource?: 'probe' | 'admin';
 }
 
 export interface SessionDirectory {

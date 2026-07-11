@@ -648,7 +648,8 @@ export class SessionService {
     // SQLite reads — fine to do per check, no need for an in-memory
     // cache that would have to invalidate on /admin edits.
     const discoverable = this.clusterConfig.get<unknown>('discoverable_node_serials');
-    const lcm = this.clusterConfig.get<unknown>('lcm_available_updates');
+    const lcmRow = this.clusterConfig.getRow<unknown>('lcm_available_updates');
+    const lcm = lcmRow?.value;
     return {
       nutanix,
       vars,
@@ -667,6 +668,7 @@ export class SessionService {
           ? (discoverable.filter((s) => typeof s === 'string') as string[])
           : undefined,
         lcmAvailableUpdates: typeof lcm === 'number' ? lcm : undefined,
+        lcmAvailableUpdatesSource: typeof lcm === 'number' ? lcmRow?.source : undefined,
       },
     };
   }

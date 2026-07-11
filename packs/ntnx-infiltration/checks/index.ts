@@ -1378,14 +1378,24 @@ async function CheckUpdates(ctx: CheckContext): Promise<CheckResult> {
         detail: `${submitted} update(s) recorded (LCM endpoint unreachable, format-only validation).`,
       };
     }
-    const lastSettled = ctx.clusterConfig?.lcmAvailableUpdates;
-    const expected = reading.settled ? reading.count : lastSettled;
+    // What counts as right, in order: the operator's /admin value if they set
+    // one (they looked at the LCM page — that beats anything we compute, and
+    // it's the escape hatch for the day our count stops matching the screen),
+    // then the live count, then the last settled one while an inventory runs.
+    const cfg = ctx.clusterConfig;
+    const operatorSet =
+      cfg?.lcmAvailableUpdatesSource === 'admin' ? cfg.lcmAvailableUpdates : undefined;
+    const lastSettled = cfg?.lcmAvailableUpdates;
+    const expected = operatorSet ?? (reading.settled ? reading.count : lastSettled);
     if (expected === submitted) {
       return {
         pass: true,
-        detail: reading.settled
-          ? `${submitted} update(s) — matches LCM inventory.`
-          : `${submitted} update(s) — matches the last settled LCM inventory (one is running now).`,
+        detail:
+          operatorSet !== undefined
+            ? `${submitted} update(s) — matches the operator-set count.`
+            : reading.settled
+              ? `${submitted} update(s) — matches LCM inventory.`
+              : `${submitted} update(s) — matches the last settled LCM inventory (one is running now).`,
       };
     }
     // Any other number, while the list is (or just was) being rebuilt, is
@@ -1414,7 +1424,10 @@ async function CheckUpdates(ctx: CheckContext): Promise<CheckResult> {
     }
     return {
       pass: false,
-      detail: `LCM reports ${expected} updates, you typed ${submitted}.`,
+      detail:
+        operatorSet !== undefined
+          ? `Operator-set count is ${expected}, you typed ${submitted}.`
+          : `LCM reports ${expected} updates, you typed ${submitted}.`,
       retryFromVariable: 'NumberUpdates',
     };
   } catch (err) {

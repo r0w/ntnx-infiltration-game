@@ -1596,6 +1596,22 @@ function ClusterConfigEditor({
             onChange={(e) => setLcmText(e.target.value)}
             placeholder="leave empty to clear (falls back to live query)"
           />
+          {/* Stage 29 asks the player to count what the LCM page shows, and we
+              rebuild that number from the raw API. Surface what we compute so
+              the operator can compare it with the page BEFORE the session — if
+              it ever drifts, typing the right count here fixes the stage
+              without a redeploy (an operator-set value wins over ours). */}
+          {data?.lcmLive && (
+            <div className="c-dim admin-cluster-hint">
+              {data.lcmLive.settled
+                ? `we currently count ${data.lcmLive.count} on the LCM "Prism Element Clusters" tab`
+                : `an LCM inventory is running — the list is being rebuilt (we read ${data.lcmLive.count}, not trustworthy)`}
+              {data.lcmLive.settled &&
+                data.lcmAvailableUpdates !== null &&
+                data.lcmAvailableUpdates !== data.lcmLive.count &&
+                ` · differs from the stored ${data.lcmAvailableUpdates}`}
+            </div>
+          )}
         </div>
         <div className="admin-cluster-actions">
           <button

@@ -198,6 +198,12 @@ async function lookupNodeSerial(ctx: import('@ntnx-game/engine').CheckContext): 
 /** Live lookup for stage 29 — count "Prism Element Clusters" LCM updates the
  *  same way CheckUpdates does, so auto-fill ↔ validation stay aligned. */
 async function lookupNumberUpdates(ctx: import('@ntnx-game/engine').CheckContext): Promise<string | null> {
+  // Same order of truth as CheckUpdates, or auto-play would submit a number its
+  // own check rejects: the operator's value first, then live, then last settled.
+  const cfg = ctx.clusterConfig;
+  if (cfg?.lcmAvailableUpdatesSource === 'admin' && typeof cfg.lcmAvailableUpdates === 'number') {
+    return String(cfg.lcmAvailableUpdates);
+  }
   const reading = await readLcmUpdates(ctx.nutanix, ctx.logger);
   if (reading === null) return null;
   if (reading.settled) return String(reading.count);

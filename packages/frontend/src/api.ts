@@ -627,6 +627,8 @@ export interface AdminPlannerConfigPayload {
 export interface AdminClusterConfigPayload {
   discoverableNodeSerials: string[];
   lcmAvailableUpdates: number | null;
+  /** What the stage-29 count logic reads off LCM right now (null in mock / on error). */
+  lcmLive: { count: number; settled: boolean } | null;
   meta: {
     discoverableNodeSerials?: { source: 'probe' | 'admin'; updatedAt: number };
     lcmAvailableUpdates?: { source: 'probe' | 'admin'; updatedAt: number };

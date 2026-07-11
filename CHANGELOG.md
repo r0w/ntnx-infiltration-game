@@ -20,6 +20,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 - Stage 29 tells players to read the LCM list without running an inventory, and
   a check it cannot judge (an inventory is rebuilding the list) now says so and
   asks for the number again, instead of counting as a failure.
+- The /admin update count is now what stage 29 validates against, so an operator
+  can correct it when it disagrees with the LCM page. The Cluster tab shows the
+  count the game reads, to compare before a session.
 
 ### Fixed
 

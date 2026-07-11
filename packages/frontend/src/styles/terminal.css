@@ -1697,6 +1697,11 @@ a.terminal-link:visited {
   text-transform: uppercase;
 }
 .admin-cluster-textarea,
+.admin-cluster-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
 .admin-cluster-input {
   font-family: inherit;
   font-size: 13px;
