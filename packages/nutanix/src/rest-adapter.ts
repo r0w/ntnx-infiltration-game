@@ -32,12 +32,7 @@ const IDEMPOTENT_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
  */
 export interface RestClient {
   readonly mode: 'live';
-  request<T = unknown>(
-    method: string,
-    path: string,
-    body?: unknown,
-    headers?: Record<string, string>,
-  ): Promise<T>;
+  request<T = unknown>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T>;
 }
 
 /**
@@ -60,12 +55,7 @@ export function createRestAdapter(config: RestAdapterConfig): RestClient {
 
   return {
     mode: 'live',
-    async request<T>(
-      method: string,
-      path: string,
-      body?: unknown,
-      headers?: Record<string, string>,
-    ): Promise<T> {
+    async request<T>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
       const m = method.toUpperCase();
       const url = `${base}${path.startsWith('/') ? path : `/${path}`}`;
       const retryable = IDEMPOTENT_METHODS.has(m);

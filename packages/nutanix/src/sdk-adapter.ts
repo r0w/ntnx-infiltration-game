@@ -74,12 +74,7 @@ export interface NutanixSdk {
 export interface NutanixSdkClient extends NutanixClient {
   readonly sdk: NutanixSdk;
   readonly rest: {
-    request<T = unknown>(
-      method: string,
-      path: string,
-      body?: unknown,
-      headers?: Record<string, string>,
-    ): Promise<T>;
+    request<T = unknown>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T>;
   };
 }
 
@@ -225,12 +220,7 @@ export async function createSdkAdapter(
     rest: {
       request: (method, path, body, headers) => rest.request(method, path, body, headers),
     },
-    async request<T>(
-      method: string,
-      path: string,
-      body?: unknown,
-      headers?: Record<string, string>,
-    ): Promise<T> {
+    async request<T>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
       // Legacy shim — routes to rest for paths that haven't been migrated to
       // `sdk.*`. Keeps the old `ctx.nutanix.request()` call-sites compiling.
       return rest.request<T>(method, path, body, headers);

@@ -381,15 +381,12 @@ export async function readLcmUpdates(
   );
   const settled = readings.every(clusterSettled);
   if (!settled) {
-    const detail = { clusters: readings.map((r) => ({ extId: r.cluster.extId, count: r.count, busy: r.busy })) };
-    // A running inventory is expected and passes; anything else means our count
-    // and LCM disagree with no operation to explain it — if that sticks, the
-    // stage silently stops validating, so the operator needs to see it.
-    if (readings.some((r) => r.busy === true)) {
-      logger?.debug?.('LCM inventory running, update count not trustworthy', detail);
-    } else {
-      logger?.warn?.('LCM update count contradicts LCM itself, not verifying it', detail);
-    }
+    // A running inventory explains itself; anything else means our count and LCM
+    // disagree with no operation behind it, and the stage then quietly stops
+    // validating — the operator needs to see that one.
+    const msg = 'LCM update count is not trustworthy';
+    if (readings.some((r) => r.busy === true)) logger?.debug?.(msg, { clusters: readings });
+    else logger?.warn?.(msg, { clusters: readings });
   }
   return { count, settled };
 }
@@ -408,29 +405,17 @@ function dedupedUpdateCount(entities: LcmEntity[], peClusters: Set<string>): num
   return seen.size;
 }
 
-/** Is this cluster's slice of the count trustworthy? Mirrors the engine's `clusterSettled`. */
-function clusterSettled({
-  cluster,
-  count,
-  busy,
-}: {
-  cluster: PeCluster;
-  count: number;
-  busy: boolean | null;
-}): boolean {
-  if (busy === true) return false;
-  const flag = cluster.hasAvailableUpgrades;
+/** Is this cluster's slice of the count trustworthy? Mirrors the engine's `isReadingSettled`. */
+function clusterSettled(r: { cluster: PeCluster; count: number; busy: boolean | null }): boolean {
+  if (r.busy === true) return false;
   // LCM's own flag disagreeing with what we counted only happens mid-rebuild.
-  // Undefined (older PC, mock fixtures) tells us nothing, so it never triggers.
-  if (typeof flag === 'boolean') {
-    if (count === 0 && flag) return false;
-    if (count > 0 && !flag) return false;
-  }
-  // Status unavailable and we counted nothing: LCM drops the flag during the
-  // wipe too, so neither signal can tell a wiped cluster from an up-to-date
-  // one. Don't gamble the player's answer on it.
-  if (busy === null && count === 0) return false;
-  return true;
+  // Undefined (older PC, mock fixtures) tells us nothing.
+  const flag = r.cluster.hasAvailableUpgrades;
+  if (flag === true && r.count === 0) return false;
+  if (flag === false && r.count > 0) return false;
+  // Status unavailable and nothing counted: LCM drops the flag during the wipe
+  // too, so neither signal separates a wiped cluster from an up-to-date one.
+  return !(r.busy === null && r.count === 0);
 }
 
 /**

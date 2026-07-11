@@ -219,12 +219,7 @@ export interface NutanixClient {
    * `sdk.*` (typed SDK calls, v4 domains) or `rest.request()` (explicit
    * REST, for v3 or uncovered paths) in new code.
    */
-  request<T = unknown>(
-    method: string,
-    path: string,
-    body?: unknown,
-    headers?: Record<string, string>,
-  ): Promise<T>;
+  request<T = unknown>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T>;
   /**
    * Domain-organized SDK surface. In live mode, backed by
    * `@nutanix-api/*-js-client` packages; in mock mode, fake objects that
@@ -243,12 +238,7 @@ export interface NutanixClient {
    * idempotency token stay the adapter's; ignored in mock mode.
    */
   readonly rest: {
-    request<T = unknown>(
-      method: string,
-      path: string,
-      body?: unknown,
-      headers?: Record<string, string>,
-    ): Promise<T>;
+    request<T = unknown>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T>;
   };
 }
 
