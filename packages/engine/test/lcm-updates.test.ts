@@ -9,7 +9,9 @@ import type { NutanixClient } from '../src/types';
  * and the entity rows lose their `availableVersions` — the live behaviour
  * measured in issue #60.
  */
-const fakePc = (opts: { busy?: boolean; entities?: unknown[]; summaries?: unknown[] } = {}) => {
+const fakePc = (
+  opts: { busy?: boolean; statusFails?: boolean; entities?: unknown[]; summaries?: unknown[] } = {},
+) => {
   const seenHeaders: Array<Record<string, string> | undefined> = [];
   const client = {
     mode: 'live',
@@ -26,6 +28,7 @@ const fakePc = (opts: { busy?: boolean; entities?: unknown[]; summaries?: unknow
         } as T;
       }
       if (path.includes('resources/status')) {
+        if (opts.statusFails) throw new Error('status 500');
         const forPe = headers?.['X-Cluster-Id'] === 'pe-1';
         return {
           data: { inProgressOperation: opts.busy && forPe ? { operationType: 'INVENTORY' } : {} },
@@ -93,8 +96,19 @@ describe('isReadingSettled', () => {
     expect(isReadingSettled([reading(false, 4)])).toBe(false);
   });
 
-  test('no flag (older PC, mock fixtures) never condemns the reading', () => {
-    expect(isReadingSettled([reading(undefined, 0)])).toBe(true);
+  test('no flag (older PC, mock fixtures) never condemns a non-zero reading', () => {
+    expect(isReadingSettled([reading(undefined, 4)])).toBe(true);
+  });
+
+  // Without the status call, a wiped cluster (count 0, flag false) is
+  // indistinguishable from an up-to-date one — don't judge the player on it.
+  test('an unverifiable zero is not trusted when the status call failed', () => {
+    expect(isReadingSettled([{ cluster: { extId: 'pe-1', hasAvailableUpgrades: false }, count: 0, busy: null }])).toBe(false);
+    expect(isReadingSettled([{ cluster: { extId: 'pe-1', hasAvailableUpgrades: true }, count: 5, busy: null }])).toBe(true);
+  });
+
+  test('no PE cluster at all is never a settled zero', () => {
+    expect(isReadingSettled([])).toBe(false);
   });
 
   // Judged per cluster: aggregating count-vs-flag across clusters let a healthy
@@ -124,5 +138,22 @@ describe('readLcmUpdates', () => {
   test('countLcmAvailableUpdates withholds a mid-inventory count', async () => {
     expect(await countLcmAvailableUpdates(fakePc({ busy: true }).client)).toBeNull();
     expect(await countLcmAvailableUpdates(fakePc().client)).toBe(2);
+  });
+
+  // The status call is the only signal that covers the wipe: if it's gone, a
+  // zero must not be served as fact — that was the original bug.
+  test('a wiped cluster stays unsettled even when the status call fails', async () => {
+    const { client } = fakePc({ busy: true, statusFails: true });
+    expect(await readLcmUpdates(client)).toEqual({ count: 0, settled: false });
+  });
+
+  test('a status failure does not condemn a corroborated non-zero count', async () => {
+    const { client } = fakePc({ statusFails: true });
+    expect(await readLcmUpdates(client)).toEqual({ count: 2, settled: true });
+  });
+
+  test('LCM answering with no PE cluster reads as unreachable, not as zero', async () => {
+    const { client } = fakePc({ summaries: [{ clusterExtId: 'pc-1', clusterType: 'PRISM_CENTRAL' }] });
+    expect(await readLcmUpdates(client)).toBeNull();
   });
 });

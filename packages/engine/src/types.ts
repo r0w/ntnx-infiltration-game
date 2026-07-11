@@ -238,9 +238,9 @@ export interface NutanixClient {
    * apps/blueprints/scheduler, projects) that aren't covered by any SDK,
    * and for any other path outside the SDK surface.
    *
-   * `headers` are merged over the defaults — needed for endpoints that take
-   * their scope from a header rather than the path, e.g. LCM's per-cluster
-   * `X-Cluster-Id`. Ignored in mock mode.
+   * `headers` adds request headers, for endpoints that take their scope from
+   * one rather than from the path (LCM's `X-Cluster-Id`). Auth and the
+   * idempotency token stay the adapter's; ignored in mock mode.
    */
   readonly rest: {
     request<T = unknown>(
@@ -303,10 +303,10 @@ export interface ClusterConfig {
    */
   discoverableNodeSerials?: string[];
   /**
-   * Count of LCM-tracked entities exposing `availableVersions` — used
-   * by `lcm-check-updates` so the player's NumberUpdates answer can be
-   * compared against a cached count instead of hitting the LCM
-   * inventory endpoint (which can be slow / require a prior scan).
+   * Last LCM update count read while no inventory was running (boot probe, or
+   * the operator's /admin override). `lcm-check-updates` queries LCM live, and
+   * falls back to this one while an inventory is rebuilding the list — the live
+   * count is noise for those few minutes, this one still confirms a right answer.
    */
   lcmAvailableUpdates?: number;
 }

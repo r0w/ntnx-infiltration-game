@@ -147,12 +147,14 @@ function buildInit(
 ): FetchInit {
   const init: FetchInit = {
     method,
+    // Extras first: auth and the idempotency token are ours to set, a caller
+    // passing `Authorization` or `Ntnx-Request-Id` must not silently win.
     headers: {
+      ...extraHeaders,
       'Content-Type': 'application/json',
       Accept: 'application/json',
       Authorization: auth,
       'Ntnx-Request-Id': requestId,
-      ...extraHeaders,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   };
