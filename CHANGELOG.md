@@ -17,8 +17,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
-- Wiring the Mailtrap sender now takes a single save: the token is checked as
-  you type, the from address is suggested right away, and a stored token can no
+- Wiring the Mailtrap sender takes a single save, and a stored token can no
   longer be revealed from the page.
 
 ### Fixed
