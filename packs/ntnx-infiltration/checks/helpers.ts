@@ -400,6 +400,29 @@ export async function readLcmUpdates(
   return { count, settled, lastInventoryAt: times.length > 0 ? Math.max(...times) : null };
 }
 
+/** How long after an inventory lands a count read off the rebuilding list can
+ *  still be in flight: the player counted during the rebuild, then submitted. */
+const STALE_READ_GRACE_MS = 3 * 60 * 1000;
+
+/**
+ * Did an inventory land so recently that the player likely counted mid-rebuild?
+ *
+ * `lastInventoryAt` is PC's clock, `now` is ours: on an HPoC they drift. A PC
+ * clock running ahead makes the age negative, and a negative age reads as
+ * "recent" to any naive comparison — which would defer EVERY wrong answer,
+ * forever, quietly turning stage 29 back into the free pass this whole change
+ * exists to kill. A skewed clock means we can't date the read, so we refuse to
+ * call it recent and judge normally.
+ */
+export function justFinishedInventory(
+  lastInventoryAt: number | null,
+  now: number = Date.now(),
+): boolean {
+  if (lastInventoryAt === null) return false;
+  const age = now - lastInventoryAt;
+  return age >= 0 && age < STALE_READ_GRACE_MS;
+}
+
 /** Updates on `peClusters`, deduped the way the LCM tab groups them: one row per
  *  (cluster, type, model), so the same NIC firmware on 3 nodes counts once. */
 function dedupedUpdateCount(entities: LcmEntity[], peClusters: Set<string>): number {

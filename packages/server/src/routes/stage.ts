@@ -196,18 +196,20 @@ async function lookupNodeSerial(ctx: import('@ntnx-game/engine').CheckContext): 
 }
 
 /** Live lookup for stage 29 — count "Prism Element Clusters" LCM updates the
- *  same way CheckUpdates does, so auto-fill ↔ validation stay aligned. Prefer
- *  the last settled count mid-inventory: the live one is noise, and the
- *  inventory can settle between this lookup and the check, which would then
- *  reject it. */
+ *  same way CheckUpdates does, so auto-fill ↔ validation stay aligned. */
 async function lookupNumberUpdates(ctx: import('@ntnx-game/engine').CheckContext): Promise<string | null> {
   const reading = await readLcmUpdates(ctx.nutanix, ctx.logger);
   if (reading === null) return null;
-  if (!reading.settled) {
-    const lastSettled = ctx.clusterConfig?.lcmAvailableUpdates;
-    if (typeof lastSettled === 'number') return String(lastSettled);
-  }
-  return String(reading.count);
+  if (reading.settled) return String(reading.count);
+  // Mid-inventory the live count is noise (and CheckUpdates won't judge it):
+  // answer with the last settled count, which the check accepts. With no
+  // settled count yet — a fresh deploy, the install runbook's own inventory
+  // still running — filling in the noise would just get the check deferred,
+  // and auto-play would resubmit it on a loop until the inventory lands. Fail
+  // loudly instead: auto-play disarms and the operator retries in a minute.
+  const lastSettled = ctx.clusterConfig?.lcmAvailableUpdates;
+  if (typeof lastSettled === 'number') return String(lastSettled);
+  throw new Error('an LCM inventory is running and no settled count exists yet — retry in a few minutes');
 }
 
 /** Live lookup for stage 31 — query OldPC's v3/groups runway endpoint. */

@@ -14,6 +14,7 @@ import {
   lookupProtectionPolicyUuid,
   lookupSubnetUuid,
   lookupUserUuid,
+  justFinishedInventory,
   nutanixErrorDetail,
   readLcmUpdates,
 } from './helpers';
@@ -1392,7 +1393,7 @@ async function CheckUpdates(ctx: CheckContext): Promise<CheckResult> {
     // that noise moves every few seconds, so we can't even tell a stale read
     // from a wrong answer. Re-prompt and score NOTHING — no free pass either,
     // they still have to come back with the right number once it settles.
-    if (!reading.settled || justFinishedInventory(reading)) {
+    if (!reading.settled || justFinishedInventory(reading.lastInventoryAt)) {
       return {
         pass: false,
         neutral: true,
@@ -1421,15 +1422,6 @@ async function CheckUpdates(ctx: CheckContext): Promise<CheckResult> {
   }
 }
 
-/** How long after an inventory lands a count read off the rebuilding list can
- *  still be in flight: the player counted during the rebuild, then submitted. */
-const STALE_READ_GRACE_MS = 3 * 60 * 1000;
-
-/** Did an inventory land so recently that the player likely counted mid-rebuild? */
-function justFinishedInventory(reading: { lastInventoryAt: number | null }): boolean {
-  const at = reading.lastInventoryAt;
-  return at !== null && Date.now() - at < STALE_READ_GRACE_MS;
-}
 
 /**
  * Stage 31 `capacity-runway` (CheckRunway). Player reads the runway
