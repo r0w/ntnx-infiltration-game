@@ -17,7 +17,11 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
-### Fixed
+- Stage 29 validates against the cached update count that /admin shows, which an
+  operator can refresh or correct, instead of querying LCM on every attempt.
+- Stage 29 tells players to read the LCM list without running an inventory, and
+  a check it cannot judge (an inventory is rebuilding that list) now says so and
+  asks for the number again, instead of counting as a failure.
 
 ## [0.4.2] - 2026-07-11
 

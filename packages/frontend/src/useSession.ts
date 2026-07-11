@@ -52,7 +52,7 @@ export type RenderItem =
   | { kind: 'image'; id: string; src: string; alt?: string }
   | { kind: 'page-break'; id: string }
   | { kind: 'check-dwell'; id: string; ms: number; label: string }
-  | { kind: 'check-result'; id: string; pass: boolean; detail?: string; hint?: string; cheer?: string }
+  | { kind: 'check-result'; id: string; pass: boolean; neutral?: boolean; detail?: string; hint?: string; cheer?: string }
   | { kind: 'finished'; id: string }
   | { kind: 'info'; id: string; text: string; color?: string };
 
@@ -310,6 +310,7 @@ export function useSession(): SessionHandle {
           kind: 'check-result',
           id: `${prefix}-check`,
           pass: r.check.pass,
+          neutral: r.check.neutral,
           detail: r.check.detail,
           hint: r.check.hint,
           cheer: r.check.cheer,

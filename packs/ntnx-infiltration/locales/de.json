@@ -150,7 +150,7 @@
   "stage-028.line-04": "Bitte geben Sie mir <white>die Seriennummer</white> des neuen Knotens: <input var='NodeSerial'/>",
   "stage-029.line-01": "Es gibt noch einen Punkt, den Sie für diese zukünftige Mission prüfen sollten: den Status der Updates.\n\n",
   "stage-029.line-02": "Schauen Sie auf der Seite <white>Admin Center > LCM</white> nach, um die <white>Prism Central</white>-Updates zu prüfen, und machen Sie einen Screenshot der Produktliste und der aktuellen Version.\n",
-  "stage-029.line-03": "Prüfen Sie auch, ob Updates für die Plattform verfügbar sind. Sie schicken sie mir später. <pause sec='3'/>\n\n",
+  "stage-029.line-03": "Prüfen Sie auch, ob Updates für die Plattform verfügbar sind. Sie schicken sie mir später. Lesen Sie die Liste nur ab: Starten Sie <white>keine</white> Inventur, sonst fliegen wir auf. <pause sec='3'/>\n\n",
   "stage-029.line-04": "Sagen Sie mir, <white>wie viele Updates</white> verfügbar sind: <input var='NumberUpdates'/>",
   "stage-030.line-01": "Großartig!<pause sec='2'/> Es gibt noch eine letzte Prüfung...<pause sec='1'/>\n\n",
   "stage-030.line-02": "Auf der Seite <white>Dashboard</white> der <white>Infrastructure</white> sollten Sie eine Kachel mit Sicherheitsbedenken haben.\n",

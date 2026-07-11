@@ -849,6 +849,23 @@ export interface ClusterConfigRow {
 export class ClusterConfigQueries {
   constructor(private readonly db: Database) {}
 
+  /** Fetch one row with its `source`. Checks use it to tell an operator's
+   *  deliberate value (`admin`) from whatever the probe last read (`probe`). */
+  getRow<T = unknown>(key: string): { value: T; source: 'probe' | 'admin' } | undefined {
+    const row = this.db
+      .prepare(`SELECT value, source FROM cluster_config WHERE key = $k`)
+      .get({ $k: key }) as { value: string; source: string } | null;
+    if (!row) return undefined;
+    try {
+      return {
+        value: JSON.parse(row.value) as T,
+        source: row.source === 'admin' ? 'admin' : 'probe',
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Fetch a single value. Returns the parsed JSON `value` or undefined. */
   get<T = unknown>(key: string): T | undefined {
     const row = this.db

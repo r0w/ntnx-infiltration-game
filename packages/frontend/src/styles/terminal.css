@@ -624,6 +624,16 @@ a.terminal-link:visited {
   background: rgba(255, 107, 107, 0.06);
   animation: check-appear 380ms cubic-bezier(0.16, 0.84, 0.22, 1) both;
 }
+/* Not judged (the cluster was mid-rebuild, not the player's doing): amber, so
+   it reads as "hold on", never as a failure. */
+.check-wait {
+  color: var(--yellow);
+  margin: 8px 0 24px;
+  padding: 4px 10px;
+  border-left: 2px solid var(--yellow);
+  background: rgba(224, 192, 104, 0.06);
+  animation: check-appear 380ms cubic-bezier(0.16, 0.84, 0.22, 1) both;
+}
 .check-hint {
   margin-top: 4px;
   padding-left: 4px;
@@ -1687,6 +1697,11 @@ a.terminal-link:visited {
   text-transform: uppercase;
 }
 .admin-cluster-textarea,
+.admin-cluster-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
 .admin-cluster-input {
   font-family: inherit;
   font-size: 13px;

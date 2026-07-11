@@ -180,7 +180,7 @@
   "stage-028.line-04": "Please give me <white>the serial number</white> of the new node : <input var='NodeSerial'/>",
   "stage-029.line-01": "There is another point I would like you check for this future mission: the status of the updates.\n\n",
   "stage-029.line-02": "Look at the <white>Admin Center > LCM</white> page to check <white>Prism Central</white> updates and take a screenshot of product list and current version.\n",
-  "stage-029.line-03": "Check also if updates are available for the platform. You'll send me it later. <pause sec='3'/>\n\n",
+  "stage-029.line-03": "Check also if updates are available for the platform. You'll send me it later. Just read the list: do <white>not</white> run an inventory, or you'll tip them off. <pause sec='3'/>\n\n",
   "stage-029.line-04": "Tell me <white>how many updates</white> are available : <input var='NumberUpdates'/>",
   "stage-030.line-01": "Awesome!<pause sec='2'/> There is one last check to do...<pause sec='1'/>\n\n",
   "stage-030.line-02": "From the <white>Dashboard</white> page of the <white>Infrastructure</white>, you should have a tile with security concerns.\n",

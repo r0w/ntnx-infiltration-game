@@ -13,6 +13,7 @@ interface LcmSummary {
   clusterExtId?: string;
   clusterType?: string; // 'AOS' (a PE cluster) | 'PRISM_CENTRAL'
   hasAvailableUpgrades?: boolean;
+  lastInventoryTime?: string; // ISO 8601; advances when an inventory completes
 }
 
 /** A PE cluster as LCM sees it. */
@@ -20,6 +21,8 @@ interface PeCluster {
   extId: string;
   /** LCM's own "this cluster has updates" flag. Undefined on older PCs. */
   hasAvailableUpgrades?: boolean;
+  /** Epoch ms of its last completed inventory, or null if LCM doesn't say. */
+  lastInventoryAt: number | null;
 }
 
 /** A count, plus whether the inventory data behind it can be trusted. */
@@ -27,6 +30,13 @@ export interface LcmUpdatesReading {
   count: number;
   /** False while LCM is rebuilding its entity list: the count is then noise. */
   settled: boolean;
+  /**
+   * When the most recent inventory finished (epoch ms), or null if LCM doesn't
+   * say. A count read off the screen just before that moment was read off a
+   * rebuilding list, so a mismatch right after one isn't necessarily a wrong
+   * answer.
+   */
+  lastInventoryAt: number | null;
 }
 
 // v4.0.a1 404s on PC 7.5; v4.2 + v4.0 both answer with the same shape.
@@ -46,12 +56,9 @@ const PAGE_SIZE = 100;
  * firmware on 3 nodes is ONE update on screen) by (cluster, type, model).
  *
  * `settled` is false while an inventory is rebuilding the data, when the count
- * is noise: LCM wipes `availableVersions` cluster-wide, then repopulates module
- * by module, overshooting before it lands (issue #60). See `isReadingSettled`
- * for how we spot it.
- *
- * Returns `null` when LCM can't be read at all, so callers fall back to
- * format-only validation rather than reject a correct answer.
+ * is noise: LCM wipes `availableVersions` cluster-wide then repopulates module
+ * by module, overshooting before it lands (issue #60). `null` when LCM can't be
+ * read at all.
  *
  * Keep in sync with the pack-local copy in
  * `packs/ntnx-infiltration/checks/helpers.ts` if behaviour changes.
@@ -77,7 +84,13 @@ export async function readLcmUpdates(
     new Set(pe.clusters.map((c) => c.extId)),
   );
   const settled = await isSettled(nutanix, pe.version, pe.clusters, entities, logger);
-  return { count, settled };
+  return { count, settled, lastInventoryAt: mostRecentInventory(pe.clusters) };
+}
+
+/** The freshest `lastInventoryTime` across the PE clusters, or null if none says. */
+function mostRecentInventory(clusters: PeCluster[]): number | null {
+  const times = clusters.map((c) => c.lastInventoryAt).filter((t): t is number => t !== null);
+  return times.length > 0 ? Math.max(...times) : null;
 }
 
 /**
@@ -92,6 +105,12 @@ export async function countLcmAvailableUpdates(
   const reading = await readLcmUpdates(nutanix, logger);
   if (reading === null || !reading.settled) return null;
   return reading.count;
+}
+
+function parseTime(iso?: string): number | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? t : null;
 }
 
 /** Pure counting logic, split out so it can be unit-tested without a client. */
@@ -210,7 +229,11 @@ async function fetchPeClusters(
       const clusters: PeCluster[] = [];
       for (const s of data) {
         if (s.clusterType === 'AOS' && s.clusterExtId) {
-          clusters.push({ extId: s.clusterExtId, hasAvailableUpgrades: s.hasAvailableUpgrades });
+          clusters.push({
+            extId: s.clusterExtId,
+            hasAvailableUpgrades: s.hasAvailableUpgrades,
+            lastInventoryAt: parseTime(s.lastInventoryTime),
+          });
         }
       }
       return { version: v, clusters };

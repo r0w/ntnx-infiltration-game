@@ -21,7 +21,7 @@ export interface AdvanceResponse {
   actions: string[];
   /** Phase-1 flag: check deferred to /resolve-check (two-phase themed check). */
   checkPending?: boolean;
-  check?: { pass: boolean; detail?: string; hint?: string; cheer?: string };
+  check?: { pass: boolean; neutral?: boolean; detail?: string; hint?: string; cheer?: string };
   disabledStages: DisabledStage[];
   typingSpeedMs?: number;
   rejected?: { expected: string; got: string; message?: string };
@@ -627,6 +627,8 @@ export interface AdminPlannerConfigPayload {
 export interface AdminClusterConfigPayload {
   discoverableNodeSerials: string[];
   lcmAvailableUpdates: number | null;
+  /** What the stage-29 count logic reads off LCM right now (null in mock / on error). */
+  lcmLive: { count: number; settled: boolean } | null;
   meta: {
     discoverableNodeSerials?: { source: 'probe' | 'admin'; updatedAt: number };
     lcmAvailableUpdates?: { source: 'probe' | 'admin'; updatedAt: number };

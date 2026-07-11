@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Database } from 'bun:sqlite';
 import type { CapabilityFlag, NutanixClient } from '@ntnx-game/engine';
+import { readLcmUpdates } from '@ntnx-game/engine';
 import { probeCapabilities, type CapabilityProbeDetail } from '@ntnx-game/nutanix';
 import { HttpError, type SessionService } from '../session-service';
 import { AttemptQueries, SessionQueries, ScoreboardPeerQueries, type AdminSessionRow, type AttemptRow, type ScoreboardPeerRow } from '../db/queries';
@@ -120,6 +121,12 @@ export interface AdminEmailSendPayload {
 export interface AdminClusterConfigPayload {
   discoverableNodeSerials: string[];
   lcmAvailableUpdates: number | null;
+  /**
+   * What we read off LCM right now, to compare with the cached value before a
+   * session (and override it if they disagree). `settled: false` = an inventory
+   * is rebuilding the list. `null` in mock mode or when LCM can't be read.
+   */
+  lcmLive: { count: number; settled: boolean } | null;
   /** Per-row metadata so /admin can show "edited by operator" vs probe-set. */
   meta: {
     discoverableNodeSerials?: { source: 'probe' | 'admin'; updatedAt: number };
@@ -584,7 +591,9 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   // Boot-populated, manually overridable. CheckNewNode and CheckUpdates
   // read from here to skip the discover-unconfigured-nodes / LCM-inventory
   // live calls.
-  function readClusterConfig(): AdminClusterConfigPayload {
+  function readClusterConfig(
+    lcmLive: { count: number; settled: boolean } | null = null,
+  ): AdminClusterConfigPayload {
     const rows = deps.service.clusterConfig.list();
     const byKey = new Map(rows.map((r) => [r.key, r]));
     const serialsRow = byKey.get('discoverable_node_serials');
@@ -596,6 +605,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     return {
       discoverableNodeSerials: serials,
       lcmAvailableUpdates: lcm,
+      lcmLive,
       meta: {
         ...(serialsRow
           ? {
@@ -609,7 +619,23 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     };
   }
 
-  router.get('/cluster-config', (c) => c.json(readClusterConfig()));
+  // Reads LCM live so the operator sees our count next to the stored one and
+  // can spot a drift before a player does. Admin-gated and only on tab open —
+  // a few GETs, same deal as the Intelligent Ops probe next to it.
+  router.get('/cluster-config', async (c) => c.json(readClusterConfig(await readLcmLive())));
+
+  async function readLcmLive(): Promise<{ count: number; settled: boolean } | null> {
+    if (deps.nutanix.mode !== 'live') return null;
+    try {
+      const reading = await readLcmUpdates(deps.nutanix, consoleLogger);
+      return reading === null ? null : { count: reading.count, settled: reading.settled };
+    } catch (err) {
+      consoleLogger.warn('admin: live LCM count probe failed', {
+        err: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+  }
 
   router.put('/cluster-config', async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as {
@@ -637,7 +663,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
         throw new HttpError(400, 'lcmAvailableUpdates must be a non-negative integer or null');
       }
     }
-    return c.json(readClusterConfig());
+    return c.json(readClusterConfig(await readLcmLive()));
   });
 
   router.post('/cluster-config/refresh', async (c) => {
@@ -654,7 +680,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       cfg: deps.service.clusterConfig,
       logger: consoleLogger,
     });
-    return c.json(readClusterConfig());
+    return c.json(readClusterConfig(await readLcmLive()));
   });
 
   // ─── scoreboard peers ───────────────────────────────────────────────
