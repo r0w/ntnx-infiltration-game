@@ -137,6 +137,20 @@ async function main() {
     frontendHost: cfg.gameFrontendHost,
   };
 
+  // NIG Central stats emitter — inert unless NIG_CENTRAL_URL is set.
+  const { Telemetry } = await import('./telemetry');
+  const telemetry = new Telemetry({
+    db,
+    logger: consoleLogger,
+    url: cfg.nigCentralUrl,
+    token: cfg.nigCentralToken,
+    packId: pack.manifest.id,
+    packVersion: pack.manifest.version,
+    serverMode: cfg.mode,
+    clusterProfile,
+  });
+  telemetry.start();
+
   const { app } = buildApp({
     db,
     pack,
@@ -150,6 +164,8 @@ async function main() {
     initialVariables,
     publicDir: cfg.publicDir,
     adminPassword: cfg.adminPassword,
+    pcPassword: cfg.pcPassword,
+    telemetry,
   });
 
   Bun.serve({

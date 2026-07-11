@@ -1,4 +1,5 @@
 {
+  "id": "eg-009",
   "name": "create-project",
   "active": true,
   "prompt": "tank",
@@ -11,7 +12,6 @@
     "stage-009.line-05",
     "stage-009.line-06"
   ],
-  "saveScore": false,
   "check": {
     "fn": "CheckProject"
   },

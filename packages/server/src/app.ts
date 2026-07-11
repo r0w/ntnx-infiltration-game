@@ -15,6 +15,7 @@ import { buildSshRoutes } from './routes/ssh';
 import { buildAdminRoutes } from './routes/admin';
 import { buildActRoutes } from './routes/act';
 import { getVersionInfo } from './version';
+import type { Telemetry } from './telemetry';
 
 export interface AppDeps {
   db: Database;
@@ -36,6 +37,10 @@ export interface AppDeps {
   initialVariables?: Record<string, unknown>;
   publicDir?: string;
   adminPassword: string;
+  /** PC admin password (deploy env) — seeds the invitation email's {PASSWORD}. */
+  pcPassword?: string;
+  /** NIG Central stats emitter — optional, absent in tests. */
+  telemetry?: Telemetry;
 }
 
 export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } {
@@ -50,6 +55,7 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
     bundle: deps.pack.bundle,
     globalTypingSpeedMs: deps.globalTypingSpeedMs,
     initialVariables: deps.initialVariables,
+    telemetry: deps.telemetry,
   });
 
   const app = new Hono();
@@ -88,8 +94,7 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
       clusterProfile: deps.clusterProfile,
       defaultLocale: deps.pack.manifest.defaultLocale,
       supportedLocales: deps.pack.manifest.supportedLocales,
-      // Stable string identifier — Phase 11 made `name` the canonical id.
-      // The frontend keys + displays stages by name; `s.id` is the engine's
+      // The frontend keys + displays stages by name; `s.index` is the engine's
       // ephemeral positional index and must never leak past this boundary.
       stages: deps.pack.stages.map((s) => ({
         name: s.name,
@@ -164,6 +169,7 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
       clusterProfile: deps.clusterProfile,
       capabilities: deps.capabilities,
       pcEndpoint: deps.clusterEndpoint,
+      pcPassword: deps.pcPassword,
     }),
   );
   app.route(

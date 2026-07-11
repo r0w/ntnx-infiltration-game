@@ -509,6 +509,7 @@ export const api = {
   adminEmailConfigSave: (
     password: string,
     body: {
+      /** Omit to keep the stored token, null to forget it. */
       mailtrapToken?: string | null;
       fromEmail?: string | null;
       fromName?: string | null;
@@ -580,12 +581,15 @@ export interface AdminCapabilitiesRefreshPayload {
 }
 
 export interface AdminEmailConfigPayload {
-  mailtrapToken: string;
+  /** A token is stored. The token itself never reaches the browser. */
+  mailtrapTokenSet: boolean;
   fromEmail: string;
   fromName: string;
   vars: Record<string, string>;
-  /** PE cluster name probed live ('' when unknown) — default for {CLUSTER}/{PASSWORD}. */
+  /** PE cluster name probed live ('' when unknown) — default for {CLUSTER}. */
   clusterName: string;
+  /** PC admin password from the deploy env ('' when unknown) — default for {PASSWORD}. */
+  pcPassword: string;
 }
 
 export interface AdminEmailTemplate {

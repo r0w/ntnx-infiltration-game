@@ -1,4 +1,5 @@
 {
+  "id": "eg-012",
   "name": "create-vm",
   "active": true,
   "prompt": "tank",
@@ -17,7 +18,6 @@
     "stage-012.line-11",
     "stage-012.line-12"
   ],
-  "saveScore": false,
   "check": {
     "fn": "CheckVM"
   },

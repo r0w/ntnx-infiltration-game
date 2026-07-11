@@ -1,4 +1,5 @@
 {
+  "id": "eg-018",
   "name": "create-microseg-policy",
   "active": true,
   "prompt": "tank",
@@ -18,7 +19,6 @@
     "stage-018.line-12",
     "stage-018.line-13"
   ],
-  "saveScore": false,
   "check": {
     "fn": "CheckSecurityPolicy"
   },

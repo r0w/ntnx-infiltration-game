@@ -1,4 +1,5 @@
 {
+  "id": "eg-021",
   "name": "create-approval-policy",
   "active": true,
   "prompt": "tank",
@@ -16,14 +17,13 @@
     "stage-021.line-10",
     "stage-021.line-11"
   ],
-  "saveScore": false,
+  "requiresOnOther": [
+    "ApprovalPolicy"
+  ],
   "check": {
     "fn": "CheckApprovalPolicy"
   },
   "needs": [
     "Trigram"
-  ],
-  "requiresOnOther": [
-    "ApprovalPolicy"
   ]
 }

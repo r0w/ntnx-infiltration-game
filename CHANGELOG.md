@@ -19,6 +19,29 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+## [0.4.0] - 2026-07-11
+
+### Added
+
+- Optional anonymous usage stats: set `NIG_CENTRAL_URL` to send session and
+  stage-timing events to a NIG Central instance; unset means nothing is ever
+  sent, and an unreachable Central never affects the game.
+- Blueprint deployments report those usage stats to the team's NIG Central
+  by default (endpoint baked into the blueprint, not an operator field).
+- Per-stage wall-clock timing (time the player actually spent on each stage).
+
+### Changed
+
+- Stages now carry a durable `id` (`eg-NNN`, from the original escape-game
+  lineage) that survives renames and pack restructuring.
+
+### Fixed
+
+- An agent code that has already completed the game can no longer be reused by
+  another player; retyping it with the right PIN reopens the finished session.
+- The invitation email's password field now defaults to the Prism Central admin
+  password instead of the cluster name.
+
 ## [0.3.1] - 2026-07-05
 
 ### Added
@@ -96,7 +119,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 Baseline release. See the git history for changes up to this point.
 
-[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.2.1...v0.3.0
 [0.2.0]: https://github.com/r0w/ntnx-infiltration-game/releases/tag/v0.2.0

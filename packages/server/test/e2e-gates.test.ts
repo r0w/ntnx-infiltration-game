@@ -49,9 +49,9 @@ const PACK_ID = 'e2e-pack';
 // Stage 1 has the adminGate so the very first advance can pass without
 // hitting it (sets up the "player at the gate" state cleanly).
 const stages: StageDefinition[] = [
-  { id: 0, name: 'intro',     active: true, messages: ['s1.m1'], saveScore: false },
-  { id: 1, name: 'checkpoint', active: true, adminGate: true, messages: ['s2.m1'], saveScore: false },
-  { id: 2, name: 'finale',    active: true, messages: ['s3.m1'], saveScore: false },
+  { index: 0, id: 'intro', name: 'intro',     active: true, messages: ['s1.m1'] },
+  { index: 1, id: 'checkpoint', name: 'checkpoint', active: true, adminGate: true, messages: ['s2.m1'] },
+  { index: 2, id: 'finale', name: 'finale',    active: true, messages: ['s3.m1'] },
 ];
 
 const bundle: LocaleBundle = makeBundle('en', {

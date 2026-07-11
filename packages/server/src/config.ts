@@ -69,6 +69,16 @@ export interface ServerConfig {
    * deployment; the default is widely-known intentionally.
    */
   adminPassword: string;
+  /**
+   * NIG Central base URL (e.g. `https://central.example.com`). Unset =
+   * telemetry fully disabled; the game never emits anything. When set, the
+   * server queues anonymous usage events (sessions, stage timings) in a
+   * local outbox and flushes them fire-and-forget — Central being down can
+   * never affect the game.
+   */
+  nigCentralUrl: string;
+  /** Optional bearer token for the Central ingest endpoint. */
+  nigCentralToken: string;
 }
 
 const asInt = (v: string | undefined, d: number) => {
@@ -131,5 +141,7 @@ export function loadConfig(env = process.env): ServerConfig {
     // (e.g. BP secret value popped at compile), fall back to the default
     // rather than locking everyone out of /admin.
     adminPassword: env.ADMIN_PASSWORD || 'nutanix/4u',
+    nigCentralUrl: env.NIG_CENTRAL_URL ?? '',
+    nigCentralToken: env.NIG_CENTRAL_TOKEN ?? '',
   };
 }

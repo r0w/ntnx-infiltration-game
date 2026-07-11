@@ -1,4 +1,5 @@
 {
+  "id": "eg-015",
   "name": "create-category",
   "active": true,
   "prompt": "tank",
@@ -13,7 +14,6 @@
     "stage-015.line-08",
     "stage-015.line-09"
   ],
-  "saveScore": false,
   "check": {
     "fn": "CheckCat"
   },
