@@ -139,7 +139,6 @@ async function loadLocaleBundle(dir: string, manifest: PackManifest): Promise<Lo
   return {
     defaultLocale: manifest.defaultLocale,
     supported: manifest.supportedLocales,
-    wip: manifest.wipLocales ?? [],
     catalogs,
   };
 }
@@ -150,7 +149,6 @@ function emptyBundleFromManifest(manifest: PackManifest): LocaleBundle {
   return {
     defaultLocale: manifest.defaultLocale,
     supported: manifest.supportedLocales,
-    wip: manifest.wipLocales ?? [],
     catalogs,
   };
 }
