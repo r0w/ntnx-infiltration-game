@@ -110,9 +110,11 @@ export function GameApp() {
     // Named-var prompts that auto-fill from the cluster (NodeSerial,
     // NumberUpdates, Runway) — short-circuit the act path: just hit
     // /auto-fill-current and submit the returned value. No "Ok" submit,
-    // no act fire.
+    // no act fire. Enabled in both `test` (live PC lookup) and `mock`
+    // (fixtures / canned values) — the backend serves both; only `live`
+    // keeps auto-fill off so demos don't skip steps in front of an audience.
     const AUTOFILLABLE = new Set(['NodeSerial', 'NumberUpdates', 'Runway']);
-    if (pack?.mode === 'test' && AUTOFILLABLE.has(awaitingRef)) {
+    if ((pack?.mode === 'test' || pack?.mode === 'mock') && AUTOFILLABLE.has(awaitingRef)) {
       setAutoPlayActing(true);
       try {
         const r = await api.autoFillCurrent(session.sessionId);
