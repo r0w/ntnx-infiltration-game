@@ -1,0 +1,17 @@
+{
+  "stage-000.lore-connected": "Connesso!<pause sec='3'/>\n\n",
+  "stage-000.lore-connecting": "Sto stabilendo una connessione sicura con l'endpoint centrale. Attendere qualche secondo...<pause sec='4'/>\n",
+  "stage-000.lore-endpoint": "Endpoint raggiunto, scambio delle chiavi di crittografia in corso... <pause sec='3'/>Fatto.\n",
+  "stage-000.lore-initializing": "Inizializzazione...<pause sec='3'/>\n",
+  "stage-001.greeting-new": "Benvenuto! Scegli un PIN di 4 cifre per proteggere la tua connessione",
+  "stage-001.greeting-returning": "Bentornato! Reinserisci il tuo PIN per decifrare la comunicazione",
+  "stage-001.pin-prompt": "{Greeting}: <input var='PIN'/><pause sec='2'/>",
+  "stage-001.trigram-prompt": "Per favore, inserisci il tuo Trigramma Agente <red>(riutilizza sempre le stesse 3 lettere se sei stato disconnesso)</red>: <input var='Trigram'/><pause sec='2'/>",
+  "stage-002.line-01": "Grazie! Ora, attendi il contatto di un agente...\n<pause sec='5'/>",
+  "stage-003.line-02": "Ciao! Sono Tank, il tuo Operatore, e sono qui per aiutarti.\n",
+  "stage-003.line-03": "Per favore, dimmi il tuo nome agente <red>(limitati a un massimo di 24 caratteri)</red>: <input var='Username'/><pause sec='4'/>\n",
+  "stage-003.line-04": "Ciao agente <white>{Username}</white>, è la nostra prima volta insieme. Non aver paura, sei in buone mani!<pause sec='2'/>\n",
+  "stage-003.line-05": "Non abbiamo molto tempo, ti guiderò durante questa missione. Segui attentamente le mie istruzioni.<pause sec='5'/>\n\n",
+  "stage-004.line-02": "<white>{Username}</white>, abbiamo intercettato un messaggio dei cattivi e ora abbiamo accesso al loro cluster Nutanix.\n",
+  "stage-004.line-03": "Non si curano delle regole di sicurezza elementari, questa è la nostra occasione.\n\n"
+}

@@ -9,7 +9,12 @@ export interface SessionRoutesDeps {
   clusterProfile: ClusterProfile;
   capabilities: CapabilityFlag[];
   defaultLocale: Locale;
-  supportedLocales: readonly Locale[];
+  /**
+   * Getter (not array) so the WIP-locale gate (issue #65) is re-evaluated
+   * on each session-create — an operator flipping a WIP locale in `/admin`
+   * takes effect immediately without a server restart.
+   */
+  getSupportedLocales: () => readonly Locale[];
 }
 
 export function buildSessionRoutes(deps: SessionRoutesDeps): Hono {
@@ -18,8 +23,9 @@ export function buildSessionRoutes(deps: SessionRoutesDeps): Hono {
   router.post('/', async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as CreateSessionRequest;
     const requested = typeof body.locale === 'string' ? body.locale : undefined;
+    const supported = deps.getSupportedLocales();
     const locale: Locale =
-      requested && deps.supportedLocales.includes(requested) ? requested : deps.defaultLocale;
+      requested && supported.includes(requested) ? requested : deps.defaultLocale;
     const session = await deps.service.create({
       locale,
       clusterEndpoint: deps.clusterEndpoint,
