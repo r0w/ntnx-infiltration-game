@@ -75,6 +75,26 @@ describe('refreshLcmCount', () => {
     expect(row).toEqual({ value: 7, source: 'admin' });
   });
 
+  // The /admin refresh button: it must not leave the row empty just because an
+  // inventory happens to be running — an empty row drops stage 29 to format-only
+  // validation, i.e. every answer passes.
+  test('a forced refresh mid-inventory keeps the count it could not replace', async () => {
+    const cfg = newCfg();
+    cfg.set('lcm_available_updates', 6, 'probe');
+    const written = await refreshLcmCount({ nutanix: fakePc(6, true), cfg, logger: silentLogger }, { force: true });
+    expect(written).toBe(false);
+    expect(cfg.get('lcm_available_updates')).toBe(6);
+  });
+
+  test('a forced refresh overrides the operator, a normal one does not', async () => {
+    const cfg = newCfg();
+    cfg.set('lcm_available_updates', 9, 'admin');
+    await refreshLcmCount({ nutanix: fakePc(6), cfg, logger: silentLogger });
+    expect(cfg.get('lcm_available_updates')).toBe(9);
+    await refreshLcmCount({ nutanix: fakePc(6), cfg, logger: silentLogger }, { force: true });
+    expect(cfg.getRow<number>('lcm_available_updates')).toEqual({ value: 6, source: 'probe' });
+  });
+
   test('is a no-op in mock mode', async () => {
     const cfg = newCfg();
     const mock = { mode: 'mock', request: async () => ({}) } as unknown as NutanixClient;

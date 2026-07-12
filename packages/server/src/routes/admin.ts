@@ -7,7 +7,7 @@ import { HttpError, type SessionService } from '../session-service';
 import { AttemptQueries, SessionQueries, ScoreboardPeerQueries, type AdminSessionRow, type AttemptRow, type ScoreboardPeerRow } from '../db/queries';
 import type { LoadedPack } from '../pack-loader';
 import { analyzeDeps, cascadeDisable, type BrokenStage } from '../dep-analysis';
-import { probeClusterConfig } from '../cluster-config-probe';
+import { probeClusterConfig, refreshLcmCount } from '../cluster-config-probe';
 import {
   probeClusterName,
   probeIntelligentOps,
@@ -670,16 +670,24 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     if (deps.nutanix.mode !== 'live') {
       throw new HttpError(400, `cluster-config refresh disabled in ${deps.nutanix.mode} mode`);
     }
-    // Force-refresh: drop existing rows so the probe re-populates from
-    // the cluster (the probe's setIfAbsent semantics protect operator
-    // edits, but here the operator explicitly asked to re-fetch).
+    // Force-refresh: drop the serials so the probe re-populates them (setIfAbsent
+    // protects operator edits, but here they explicitly asked to re-fetch).
+    //
+    // NOT the LCM count: refreshLcmCount refuses to store a mid-inventory count,
+    // so deleting first would leave the row empty whenever an inventory happens
+    // to be running — and an empty row drops stage 29 to format-only validation
+    // (every answer passes) until someone refreshes again. Overwrite in place,
+    // or keep what we had; `lcmLive` in the response tells the operator why.
     deps.service.clusterConfig.delete('discoverable_node_serials');
-    deps.service.clusterConfig.delete('lcm_available_updates');
     await probeClusterConfig({
       nutanix: deps.nutanix,
       cfg: deps.service.clusterConfig,
       logger: consoleLogger,
     });
+    await refreshLcmCount(
+      { nutanix: deps.nutanix, cfg: deps.service.clusterConfig, logger: consoleLogger },
+      { force: true },
+    );
     return c.json(readClusterConfig(await readLcmLive()));
   });
 

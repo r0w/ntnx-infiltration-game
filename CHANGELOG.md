@@ -19,6 +19,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- The /admin "refresh from cluster" button no longer clears the LCM update count
+  when an inventory is running, which left stage 29 accepting any answer.
+
 ## [0.4.3] - 2026-07-12
 
 ### Changed

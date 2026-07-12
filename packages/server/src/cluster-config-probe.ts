@@ -55,32 +55,39 @@ export async function probeClusterConfig(deps: ClusterConfigProbeDeps): Promise<
 
 /**
  * Re-read the LCM update count into `lcm_available_updates` — the row stage 29
- * validates against. Runs at boot and behind the /admin refresh button.
+ * validates against. Runs at boot and behind the /admin refresh button (`force`,
+ * which also overrides an operator's own value; the boot probe never does).
  *
  * Only ever writes a *settled* count: mid-inventory LCM reports noise, and
- * caching that would pin a wrong answer for the whole event (issue #60). An
- * operator's /admin value is never overwritten.
+ * caching that would pin a wrong answer for the whole event (issue #60). When it
+ * can't read one it leaves the row alone and returns false — the previous count
+ * is better than none, which would drop stage 29 to format-only validation.
  */
-export async function refreshLcmCount(deps: ClusterConfigProbeDeps): Promise<void> {
+export async function refreshLcmCount(
+  deps: ClusterConfigProbeDeps,
+  opts: { force?: boolean } = {},
+): Promise<boolean> {
   const { nutanix, cfg, logger } = deps;
-  if (nutanix.mode === 'mock') return;
+  if (nutanix.mode === 'mock') return false;
   try {
     const count = await countLcmAvailableUpdates(nutanix, logger);
     if (count === null) {
-      logger.debug('cluster-config: LCM count unreadable or mid-inventory, keeping the last one');
-      return;
+      logger.info('cluster-config: LCM count unreadable or mid-inventory, kept the current one');
+      return false;
     }
     const row = cfg.list().find((r) => r.key === 'lcm_available_updates');
-    if (row?.source === 'admin') return; // operator knows better
-    if (row?.value === count) return;
+    if (row?.source === 'admin' && !opts.force) return false; // operator knows better
+    if (row?.value === count) return true;
     cfg.set('lcm_available_updates', count, 'probe');
     logger.info('cluster-config: lcm_available_updates refreshed', {
       count,
       previous: row?.value ?? null,
     });
+    return true;
   } catch (err) {
     logger.warn('cluster-config: LCM count refresh failed', {
       err: err instanceof Error ? err.message : String(err),
     });
+    return false;
   }
 }
