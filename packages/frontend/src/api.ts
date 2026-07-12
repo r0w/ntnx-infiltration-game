@@ -132,6 +132,9 @@ export interface PackInfo {
   clusterProfile: 'hpoc' | 'other';
   defaultLocale: string;
   supportedLocales: string[];
+  /** Subset of `supportedLocales` that is still work-in-progress
+   *  (partially translated) — the language picker flags these. */
+  wipLocales?: string[];
   stages: Array<{
     name: string;
     active: boolean;
