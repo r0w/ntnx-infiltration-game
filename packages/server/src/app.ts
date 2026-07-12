@@ -14,6 +14,7 @@ import { buildScoreboardRoutes } from './routes/scoreboard';
 import { buildSshRoutes } from './routes/ssh';
 import { buildAdminRoutes } from './routes/admin';
 import { buildActRoutes } from './routes/act';
+import { effectiveSupportedLocales } from './effective-locales';
 import { getVersionInfo } from './version';
 import type { Telemetry } from './telemetry';
 
@@ -65,6 +66,19 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
   // existing tests (which use `nutanix.mode = 'mock'`) accurate.
   const serverMode: 'mock' | 'test' | 'live' = deps.serverMode ?? deps.nutanix.mode;
 
+  // WIP-locale filter (issue #65). Evaluated per request so the operator
+  // enabling/disabling a WIP locale from /admin takes effect on the next
+  // /api/pack + session-create call — no server restart. Mock/test always
+  // include WIP locales (for translators + QA); live filters them unless
+  // the operator has enabled them via the cluster_config override.
+  const getEffectiveLocales = () =>
+    effectiveSupportedLocales(
+      deps.pack.manifest.supportedLocales,
+      deps.pack.manifest.wipLocales,
+      serverMode,
+      service.clusterConfig,
+    );
+
   app.get('/api/health', (c) =>
     c.json({
       status: 'ok',
@@ -93,7 +107,7 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
       // those stages play normally and shouldn't be marked red.
       clusterProfile: deps.clusterProfile,
       defaultLocale: deps.pack.manifest.defaultLocale,
-      supportedLocales: deps.pack.manifest.supportedLocales,
+      supportedLocales: getEffectiveLocales(),
       // The frontend keys + displays stages by name; `s.index` is the engine's
       // ephemeral positional index and must never leak past this boundary.
       stages: deps.pack.stages.map((s) => ({
@@ -138,7 +152,7 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
       clusterProfile: deps.clusterProfile,
       capabilities: deps.capabilities,
       defaultLocale: deps.pack.manifest.defaultLocale,
-      supportedLocales: deps.pack.manifest.supportedLocales,
+      getSupportedLocales: getEffectiveLocales,
     }),
   );
   app.route(

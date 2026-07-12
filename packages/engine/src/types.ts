@@ -17,6 +17,13 @@ export type LocaleCatalog = Record<string, string>;
 export interface LocaleBundle {
   defaultLocale: Locale;
   supported: readonly Locale[];
+  /**
+   * Locales flagged as work-in-progress. Missing keys fall back to
+   * `defaultLocale` (same as any other locale, but expected here). Consumers
+   * decide whether to expose them to end users; the runtime engine treats
+   * them like any other supported locale once selected.
+   */
+  wip?: readonly Locale[];
   catalogs: Record<Locale, LocaleCatalog>;
 }
 

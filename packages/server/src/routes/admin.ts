@@ -8,6 +8,7 @@ import { AttemptQueries, SessionQueries, ScoreboardPeerQueries, type AdminSessio
 import type { LoadedPack } from '../pack-loader';
 import { analyzeDeps, cascadeDisable, type BrokenStage } from '../dep-analysis';
 import { probeClusterConfig } from '../cluster-config-probe';
+import { readEnabledWipLocales, writeEnabledWipLocales } from '../effective-locales';
 import {
   probeClusterName,
   probeIntelligentOps,
@@ -231,6 +232,34 @@ export interface AdminPackTogglePreview {
   requested: string;
   /** Stages that would also become broken if `requested` were turned off. */
   cascade: BrokenStage[];
+}
+
+export interface AdminLanguageEntry {
+  /** Locale code (BCP-47 style, e.g. `en`, `fr`, `es`). */
+  code: string;
+  /** True when the pack manifest flags this locale as work-in-progress. */
+  wip: boolean;
+  /**
+   * True when this locale would appear in the end-user language selector
+   * *right now* given the current server mode + admin override. Non-WIP
+   * locales: always true. WIP locales in `mock`/`test`: always true. WIP
+   * locales in `live`: true only if the operator enabled the code.
+   */
+  visible: boolean;
+  /**
+   * True when the operator has explicitly enabled this WIP locale for
+   * `live`. Always false for non-WIP locales (the toggle is meaningless).
+   * The stored set persists across restarts; toggling in mock/test only
+   * changes what `live` would show, not what selectors show now.
+   */
+  enabledInLive: boolean;
+}
+
+export interface AdminLanguagesPayload {
+  /** Server mode, so the UI can show "these are visible in `live` only if enabled". */
+  mode: 'mock' | 'test' | 'live';
+  defaultLocale: string;
+  entries: AdminLanguageEntry[];
 }
 
 export interface AdminLunchStatus {
@@ -681,6 +710,58 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       logger: consoleLogger,
     });
     return c.json(readClusterConfig(await readLcmLive()));
+  });
+
+  // ─── languages (issue #65) ─────────────────────────────────────────
+  // Pack-declared locales, with per-code WIP metadata + the operator's
+  // per-code enable override for `live`. In `mock` / `test`, WIP locales
+  // are always shown to end users (translators + QA need them); in
+  // `live` they're hidden unless the operator flipped the toggle here.
+  // The override is persisted in cluster_config so it survives restarts
+  // and is shared across clients (mirrors the pattern the pack overlay,
+  // planner config, and email config already use).
+  function languagesPayload(): AdminLanguagesPayload {
+    const supported = deps.pack.manifest.supportedLocales;
+    const wipSet = new Set(deps.pack.manifest.wipLocales ?? []);
+    const enabledSet = new Set(readEnabledWipLocales(deps.service.clusterConfig));
+    const entries: AdminLanguageEntry[] = supported.map((code) => {
+      const wip = wipSet.has(code);
+      const enabledInLive = wip && enabledSet.has(code);
+      // Visible = what the /api/pack filter will surface right now.
+      const visible = !wip || deps.serverMode !== 'live' || enabledInLive;
+      return { code, wip, visible, enabledInLive };
+    });
+    return {
+      mode: deps.serverMode,
+      defaultLocale: deps.pack.manifest.defaultLocale,
+      entries,
+    };
+  }
+
+  router.get('/languages', (c) => c.json(languagesPayload()));
+
+  // PUT /languages/:code — body `{ enabled: boolean }`. Only WIP codes are
+  // toggleable (non-WIP are always visible, no override to store). Unknown
+  // codes → 404. The stored set is the source of truth; disabling drops
+  // the code from it, enabling adds it, and the /api/pack filter re-reads
+  // it on every request.
+  router.put('/languages/:code', async (c) => {
+    const code = c.req.param('code');
+    const supported = deps.pack.manifest.supportedLocales;
+    if (!supported.includes(code)) throw new HttpError(404, `unknown locale '${code}'`);
+    const wipSet = new Set(deps.pack.manifest.wipLocales ?? []);
+    if (!wipSet.has(code)) {
+      throw new HttpError(400, `locale '${code}' is not WIP — nothing to toggle`);
+    }
+    const body = (await c.req.json().catch(() => ({}))) as { enabled?: unknown };
+    if (typeof body.enabled !== 'boolean') {
+      throw new HttpError(400, 'enabled must be a boolean');
+    }
+    const current = new Set(readEnabledWipLocales(deps.service.clusterConfig));
+    if (body.enabled) current.add(code);
+    else current.delete(code);
+    writeEnabledWipLocales(deps.service.clusterConfig, Array.from(current));
+    return c.json(languagesPayload());
   });
 
   // ─── scoreboard peers ───────────────────────────────────────────────
