@@ -97,8 +97,9 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
   // (no admin auth) on purpose: it leaks nothing sensitive.
   app.get('/api/version', (c) => c.json(getVersionInfo()));
 
-  app.get('/api/pack', (c) =>
-    c.json({
+  app.get('/api/pack', (c) => {
+    const locales = getEffectiveLocales();
+    return c.json({
       id: deps.pack.manifest.id,
       name: deps.pack.manifest.name,
       mode: serverMode,
@@ -107,7 +108,12 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
       // those stages play normally and shouldn't be marked red.
       clusterProfile: deps.clusterProfile,
       defaultLocale: deps.pack.manifest.defaultLocale,
-      supportedLocales: getEffectiveLocales(),
+      supportedLocales: locales,
+      // Which of the offered locales are still work-in-progress, so the
+      // language picker can flag them as such (partially translated).
+      wipLocales: locales.filter((l) =>
+        (deps.pack.manifest.wipLocales ?? []).includes(l),
+      ),
       // The frontend keys + displays stages by name; `s.index` is the engine's
       // ephemeral positional index and must never leak past this boundary.
       stages: deps.pack.stages.map((s) => ({
@@ -118,8 +124,8 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
         hasCheck: !!s.check,
         captures: s.captures ?? [],
       })),
-    }),
-  );
+    });
+  });
 
   // Pack-bundled assets (images referenced by `<image src='…'/>` tags in
   // locale catalogs). Flat filenames only — reject anything that looks like

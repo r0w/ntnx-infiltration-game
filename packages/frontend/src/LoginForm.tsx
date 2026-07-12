@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 export interface LoginFormProps {
   busy: boolean;
   error: string | null;
   defaultLocale: string;
   supportedLocales: readonly string[];
+  /** Codes still work-in-progress — shown with a "(WIP)" suffix. */
+  wipLocales?: readonly string[];
   onSubmit: (input: { locale: string }) => void;
 }
 
@@ -19,8 +21,9 @@ const LOCALE_LABELS: Record<string, string> = {
   zh: '中文',
 };
 
-function labelFor(code: string): string {
-  return LOCALE_LABELS[code] ?? code;
+function labelFor(code: string, wip?: ReadonlySet<string>): string {
+  const base = LOCALE_LABELS[code] ?? code;
+  return wip?.has(code) ? `${base} (WIP)` : base;
 }
 
 export function LoginForm({
@@ -28,8 +31,10 @@ export function LoginForm({
   error,
   defaultLocale,
   supportedLocales,
+  wipLocales,
   onSubmit,
 }: LoginFormProps) {
+  const wip = useMemo(() => new Set(wipLocales ?? []), [wipLocales]);
   const [locale, setLocale] = useState<string>(defaultLocale);
 
   useEffect(() => {
@@ -53,6 +58,7 @@ export function LoginForm({
               <LocaleDropdown
                 value={locale}
                 options={supportedLocales}
+                wip={wip}
                 onChange={setLocale}
               />
             </div>
@@ -81,10 +87,12 @@ export function LoginForm({
 function LocaleDropdown({
   value,
   options,
+  wip,
   onChange,
 }: {
   value: string;
   options: readonly string[];
+  wip: ReadonlySet<string>;
   onChange: (next: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -152,7 +160,7 @@ function LocaleDropdown({
         onKeyDown={handleTriggerKey}
       >
         <span className="locale-dd-code">{value.toUpperCase()}</span>
-        <span className="locale-dd-label">{labelFor(value)}</span>
+        <span className="locale-dd-label">{labelFor(value, wip)}</span>
         <span className="locale-dd-caret" aria-hidden>▾</span>
       </button>
       {open && (
@@ -181,7 +189,7 @@ function LocaleDropdown({
                 }}
               >
                 <span className="locale-dd-code">{code.toUpperCase()}</span>
-                <span className="locale-dd-label">{labelFor(code)}</span>
+                <span className="locale-dd-label">{labelFor(code, wip)}</span>
                 {selected && <span className="locale-dd-check" aria-hidden>✓</span>}
               </li>
             );

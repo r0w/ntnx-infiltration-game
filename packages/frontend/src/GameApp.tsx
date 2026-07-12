@@ -233,6 +233,7 @@ export function GameApp() {
         error={session.error}
         defaultLocale={pack?.defaultLocale ?? 'en'}
         supportedLocales={pack?.supportedLocales ?? ['en']}
+        wipLocales={pack?.wipLocales ?? []}
         onSubmit={session.createSession}
       />
     );
