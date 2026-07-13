@@ -199,7 +199,14 @@ async function lookupNodeSerial(ctx: import('@ntnx-game/engine').CheckContext): 
  *  validates against. No live LCM read: the check doesn't do one either. */
 async function lookupNumberUpdates(ctx: import('@ntnx-game/engine').CheckContext): Promise<string | null> {
   const cached = ctx.clusterConfig?.lcmAvailableUpdates;
-  return typeof cached === 'number' ? String(cached) : null;
+  if (typeof cached === 'number') return String(cached);
+  // Mock has no cluster-config probe seeding the count, and the LCM fixture
+  // shows 0 available updates — return that so mock auto-play can walk stage
+  // 29 (CheckUpdates does format-only validation in mock, accepting any
+  // non-negative integer). test/live without a cached count stay null so the
+  // operator types it.
+  if (ctx.nutanix.mode === 'mock') return '0';
+  return null;
 }
 
 /** Live lookup for stage 31 — query OldPC's v3/groups runway endpoint. */

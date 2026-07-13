@@ -15,7 +15,17 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- Spanish (`es`) and Italian (`it`) locale resources, flagged as
+  work-in-progress in `pack.json`. WIP locales are always visible in `mock` /
+  `test` for translators + QA; in `live` they are hidden from the player
+  language selector unless the operator explicitly enables them from the new
+  Languages panel in `/admin` (persisted in `cluster_config`).
+- Full Spanish and Italian translations of the game (all 238 lines).
+
 ### Changed
+
+- The language picker now marks work-in-progress languages with a "(WIP)"
+  suffix so players know they are not fully translated yet.
 
 ### Fixed
 
