@@ -4,7 +4,7 @@ import { DevPanel } from './DevPanel';
 import { FauxTerminal } from './FauxTerminal';
 import { LoginForm } from './LoginForm';
 import { ConfirmModal } from './Modal';
-import { useSession, CONTINUE_VAR } from './useSession';
+import { useSession, CONTINUE_VAR, AUTOFILLABLE_VARS } from './useSession';
 
 type MaxWidth = '80ch' | '100ch' | '120ch' | 'none';
 const MAX_WIDTH_KEY = 'terminal-max-width';
@@ -110,9 +110,10 @@ export function GameApp() {
     // Named-var prompts that auto-fill from the cluster (NodeSerial,
     // NumberUpdates, Runway) — short-circuit the act path: just hit
     // /auto-fill-current and submit the returned value. No "Ok" submit,
-    // no act fire.
-    const AUTOFILLABLE = new Set(['NodeSerial', 'NumberUpdates', 'Runway']);
-    if (pack?.mode === 'test' && AUTOFILLABLE.has(awaitingRef)) {
+    // no act fire. Enabled in both `test` (live PC lookup) and `mock`
+    // (fixtures / canned values) — the backend serves both; only `live`
+    // keeps auto-fill off so demos don't skip steps in front of an audience.
+    if ((pack?.mode === 'test' || pack?.mode === 'mock') && AUTOFILLABLE_VARS.has(awaitingRef)) {
       setAutoPlayActing(true);
       try {
         const r = await api.autoFillCurrent(session.sessionId);
@@ -233,6 +234,7 @@ export function GameApp() {
         error={session.error}
         defaultLocale={pack?.defaultLocale ?? 'en'}
         supportedLocales={pack?.supportedLocales ?? ['en']}
+        wipLocales={pack?.wipLocales ?? []}
         onSubmit={session.createSession}
       />
     );

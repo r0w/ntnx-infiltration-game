@@ -10,6 +10,7 @@ import {
   type AdminEmailSendPayload,
   type AdminEmailTemplate,
   type AdminGateEntry,
+  type AdminLanguageEntry,
   type AdminLunchStatus,
   type AdminPackStageEntry,
   type AdminPackTogglePreview,
@@ -1540,6 +1541,7 @@ function ClusterConfigEditor({
         />
         <PolicyEngineStatus password={password} />
         <PlannerConfigEditor password={password} />
+        <LanguagesEditor password={password} />
       </div>
       <div className="admin-cluster-col">
         <ClusterVersions password={password} />
@@ -1928,6 +1930,158 @@ function PlannerConfigEditor({ password }: { password: string }) {
           <span className="c-green admin-cluster-saved">saved {fmtAge(savedAt)}</span>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Languages editor (issue #65) — WIP locales (e.g. `es`, `it`) that ship
+ * partially translated. In `mock` / `test` they're always shown to end
+ * users so translators + QA can see them; in `live` each WIP locale is
+ * hidden by default and the operator enables it here per code. Non-WIP
+ * locales are always visible everywhere and can't be toggled.
+ */
+function LanguagesEditor({ password }: { password: string }) {
+  const [entries, setEntries] = useState<AdminLanguageEntry[] | null>(null);
+  const [mode, setMode] = useState<'mock' | 'test' | 'live' | null>(null);
+  const [defaultLocale, setDefaultLocale] = useState<string>('');
+  const [busyCode, setBusyCode] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const hydrate = useCallback((p: {
+    entries: AdminLanguageEntry[];
+    mode: 'mock' | 'test' | 'live';
+    defaultLocale: string;
+  }) => {
+    setEntries(p.entries);
+    setMode(p.mode);
+    setDefaultLocale(p.defaultLocale);
+  }, []);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      hydrate(await api.adminLanguages(password));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [password, hydrate]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const toggle = async (code: string, next: boolean) => {
+    setBusyCode(code);
+    setError(null);
+    try {
+      hydrate(await api.adminLanguageToggle(password, code, next));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyCode(null);
+    }
+  };
+
+  if (entries === null) {
+    return <div className="admin-empty">loading languages…</div>;
+  }
+  const wipCount = entries.filter((e) => e.wip).length;
+  return (
+    <div className="admin-cluster admin-cluster-block">
+      <PanelHead eyebrow="i18n" title="Languages">
+        Pack-declared locales. Fully-supported ones are always listed in the
+        player language selector. WIP locales{' '}
+        {wipCount === 0 ? (
+          <span className="c-dim">(none)</span>
+        ) : (
+          <>
+            are always visible in <span className="c-cyan">mock</span> /{' '}
+            <span className="c-cyan">test</span> for translators; in{' '}
+            <span className="c-green">live</span> each one is hidden until you
+            enable it below.
+          </>
+        )}
+      </PanelHead>
+      {error && <div className="app-error">{error}</div>}
+      {mode && (
+        <div className="admin-pack-meta c-dim">
+          mode:{' '}
+          <span
+            className={
+              mode === 'mock' ? 'c-yellow' : mode === 'test' ? 'c-cyan' : 'c-green'
+            }
+          >
+            {mode}
+          </span>
+        </div>
+      )}
+      <table className="admin-table admin-pack-table">
+        <thead>
+          <tr>
+            <th>code</th>
+            <th>flag</th>
+            <th>visible now</th>
+            <th>enable in live</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((e) => {
+            const busy = busyCode === e.code;
+            const isDefault = e.code === defaultLocale;
+            return (
+              <tr key={e.code} className="pack-row">
+                <td className="pack-td-name">
+                  {e.code.toUpperCase()}
+                  {isDefault && <span className="c-dim"> · default</span>}
+                </td>
+                <td>
+                  {e.wip ? (
+                    <span
+                      className="c-yellow"
+                      title="work-in-progress: some strings fall back to the default locale"
+                    >
+                      WIP
+                    </span>
+                  ) : (
+                    <span className="c-dim">stable</span>
+                  )}
+                </td>
+                <td>
+                  {e.visible ? (
+                    <span className="c-green">● shown</span>
+                  ) : (
+                    <span className="c-dim">○ hidden</span>
+                  )}
+                </td>
+                <td>
+                  {e.wip ? (
+                    <button
+                      type="button"
+                      className={`pack-toggle ${e.enabledInLive ? 'pack-toggle-on' : 'pack-toggle-off'}`}
+                      disabled={busy}
+                      title={
+                        mode === 'live'
+                          ? e.enabledInLive
+                            ? 'currently visible to players — click to hide'
+                            : 'currently hidden from players — click to show'
+                          : `takes effect when server mode = live (currently ${mode})`
+                      }
+                      onClick={() => void toggle(e.code, !e.enabledInLive)}
+                    >
+                      {busy ? '…' : e.enabledInLive ? 'enabled' : 'disabled'}
+                    </button>
+                  ) : (
+                    <span className="c-dim" title="non-WIP locale — always visible">
+                      —
+                    </span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

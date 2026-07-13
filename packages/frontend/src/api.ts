@@ -132,6 +132,9 @@ export interface PackInfo {
   clusterProfile: 'hpoc' | 'other';
   defaultLocale: string;
   supportedLocales: string[];
+  /** Subset of `supportedLocales` that is still work-in-progress
+   *  (partially translated) — the language picker flags these. */
+  wipLocales?: string[];
   stages: Array<{
     name: string;
     active: boolean;
@@ -320,6 +323,22 @@ export interface AdminLunchStatus {
   affectedCount: number;
 }
 
+export interface AdminLanguageEntry {
+  code: string;
+  /** Pack manifest flags this locale as work-in-progress. */
+  wip: boolean;
+  /** Currently listed in the end-user language selector (given mode + override). */
+  visible: boolean;
+  /** Operator has enabled this WIP locale for `live`. Always false for non-WIP. */
+  enabledInLive: boolean;
+}
+
+export interface AdminLanguagesPayload {
+  mode: 'mock' | 'test' | 'live';
+  defaultLocale: string;
+  entries: AdminLanguageEntry[];
+}
+
 export interface VersionInfo {
   version: string;
   gitSha: string | null;
@@ -489,6 +508,14 @@ export const api = {
       headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
       body: JSON.stringify({ label }),
     }).then((res) => handle<{ label: string | null }>(res)),
+  adminLanguages: (password: string) =>
+    adminGet<AdminLanguagesPayload>('/admin/languages', password),
+  adminLanguageToggle: (password: string, code: string, enabled: boolean) =>
+    fetch(`/api/admin/languages/${encodeURIComponent(code)}`, {
+      method: 'PUT',
+      headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    }).then((res) => handle<AdminLanguagesPayload>(res)),
   adminPlannerConfig: (password: string) =>
     adminGet<AdminPlannerConfigPayload>('/admin/planner-config', password),
   adminPlannerConfigSave: (
