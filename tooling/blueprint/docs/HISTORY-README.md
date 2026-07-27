@@ -12,4 +12,4 @@ isn't load-bearing for current operation.
   with each step's live outcome on HPoC.
 
 For the current operator-facing runbook see [`../README.md`](../README.md)
-and the top-level [`OPERATOR.md`](../../../OPERATOR.md).
+and the top-level [`OPERATOR.md`](../../../docs/OPERATOR.md).
