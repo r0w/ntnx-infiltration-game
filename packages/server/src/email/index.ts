@@ -187,30 +187,39 @@ export async function listMailtrapDomains(
     // bounds the slowest lookup, not the sum.
     const perAccount = await Promise.all(
       accounts.map(async (acc) => {
-        const dRes = await fetch(`https://mailtrap.io/api/accounts/${acc.id}/sending_domains`, {
-          headers,
-          signal: controller.signal,
-        });
-        if (!dRes.ok) return [];
-        const body = (await dRes.json()) as {
-          data?: Array<{
-            domain_name: string;
-            demo?: boolean;
-            dns_records?: Array<{ status: string }>;
-          }>;
-        } | null;
-        return (body?.data ?? [])
-          // demomailtrap.co & co: Mailtrap's sandbox domains only deliver
-          // to the account owner — useless for real participant sends.
-          .filter((d) => !d.demo)
-          .map((d) => ({
-            domain: d.domain_name,
-            // A domain with no DNS records at all is not verified — don't
-            // let .every() on an empty array vouch for it.
-            verified:
-              (d.dns_records?.length ?? 0) > 0 &&
-              (d.dns_records ?? []).every((r) => r.status === 'pass'),
-          }));
+        try {
+          const dRes = await fetch(`https://mailtrap.io/api/accounts/${acc.id}/sending_domains`, {
+            headers,
+            signal: controller.signal,
+          });
+          if (!dRes.ok) return [];
+          const body = (await dRes.json()) as {
+            data?: Array<{
+              domain_name: string;
+              demo?: boolean;
+              dns_records?: Array<{ status: string }>;
+            }>;
+          } | null;
+          const data = body?.data;
+          const rows = Array.isArray(data) ? data : [];
+          return rows
+            // demomailtrap.co & co: Mailtrap's sandbox domains only deliver
+            // to the account owner — useless for real participant sends.
+            .filter((d) => !d.demo)
+            .map((d) => ({
+              domain: d.domain_name,
+              // A domain with no DNS records at all is not verified — don't
+              // let .every() on an empty array vouch for it.
+              verified:
+                (d.dns_records?.length ?? 0) > 0 &&
+                (d.dns_records ?? []).every((r) => r.status === 'pass'),
+            }));
+        } catch (err) {
+          // One account failing (network blip, bad JSON) shouldn't drop the
+          // others. A timeout aborts every fetch, though — let that surface.
+          if (controller.signal.aborted) throw err;
+          return [];
+        }
       }),
     );
     return { domains: perAccount.flat() };
