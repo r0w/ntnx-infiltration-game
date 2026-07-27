@@ -1,0 +1,11 @@
+{
+  "id": "nkp-009",
+  "name": "storage-intro",
+  "active": true,
+  "prompt": "system",
+  "defaultColor": "cyan",
+  "messages": [
+    "nkp.storage.intro",
+    "nkp.storage.diagram"
+  ]
+}

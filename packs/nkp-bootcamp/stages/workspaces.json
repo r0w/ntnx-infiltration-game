@@ -1,0 +1,11 @@
+{
+  "id": "nkp-008",
+  "name": "workspaces",
+  "active": true,
+  "prompt": "system",
+  "defaultColor": "cyan",
+  "messages": [
+    "nkp.ws.intro",
+    "nkp.ws.explore"
+  ]
+}

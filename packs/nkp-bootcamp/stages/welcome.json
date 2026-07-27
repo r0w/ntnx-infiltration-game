@@ -1,0 +1,17 @@
+{
+  "id": "nkp-000",
+  "name": "welcome",
+  "active": true,
+  "prompt": "system",
+  "defaultColor": "cyan",
+  "messages": [
+    "nkp.welcome.intro",
+    "nkp.welcome.prompt"
+  ],
+  "check": {
+    "fn": "CheckUserNum"
+  },
+  "captures": [
+    "UserNum"
+  ]
+}

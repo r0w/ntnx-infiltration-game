@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { Hono } from 'hono';
 import { serveStatic } from 'hono/bun';
 import type { Database } from 'bun:sqlite';
-import type { CapabilityFlag, ClusterProfile, NutanixClient } from '@ntnx-game/engine';
+import type { CapabilityFlag, ClusterProfile, KubeClient, NutanixClient } from '@ntnx-game/engine';
 import { StageRunner } from '@ntnx-game/engine';
 import type { CapabilityProbeDetail } from '@ntnx-game/nutanix';
 import type { LoadedPack } from './pack-loader';
@@ -22,6 +22,8 @@ export interface AppDeps {
   db: Database;
   pack: LoadedPack;
   nutanix: NutanixClient;
+  /** Read-only k8s transport, present only for packs that need it (NKP). */
+  kube?: KubeClient;
   /**
    * Operator-facing mode (`mock | test | live`). The engine's NutanixClient
    * is binary (`mock | live`) — `serverMode` carries the UI-only `test`
@@ -50,6 +52,7 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
     db: deps.db,
     runner,
     nutanix: deps.nutanix,
+    kube: deps.kube,
     actions: deps.pack.actions,
     logger: consoleLogger,
     packId: deps.pack.manifest.id,

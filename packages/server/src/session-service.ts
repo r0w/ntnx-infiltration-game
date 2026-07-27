@@ -6,6 +6,7 @@ import type {
   ActFunction,
   CheckContext,
   ClusterProfile,
+  KubeClient,
   Locale,
   LocaleBundle,
   Logger,
@@ -15,6 +16,7 @@ import type {
 } from '@ntnx-game/engine';
 import { ActionRegistry, StageRunner, resolveKey } from '@ntnx-game/engine';
 import { withMockOverlay, withVariableInterpolation } from '@ntnx-game/nutanix';
+import { withVariableInterpolation as withKubeInterpolation } from '@ntnx-game/kube-transport';
 import type { DisabledStage, MessageUnit } from '@ntnx-game/shared';
 import {
   AttemptQueries,
@@ -70,6 +72,7 @@ export interface SessionServiceDeps {
   db: Database;
   runner: StageRunner;
   nutanix: NutanixClient;
+  kube?: KubeClient;
   actions?: ActionRegistry;
   logger: Logger;
   packId: string;
@@ -160,6 +163,7 @@ export class SessionService {
    */
   private readonly baseStages: readonly StageDefinition[];
   private readonly nutanix: NutanixClient;
+  private readonly kube?: KubeClient;
   readonly actions: ActionRegistry;
   private readonly logger: Logger;
   readonly packId: string;
@@ -199,6 +203,7 @@ export class SessionService {
     this.runner = deps.runner;
     this.baseStages = [...deps.runner.listStages()];
     this.nutanix = deps.nutanix;
+    this.kube = deps.kube;
     this.actions = deps.actions ?? new ActionRegistry();
     this.logger = deps.logger;
     this.packId = deps.packId;
@@ -643,6 +648,9 @@ export class SessionService {
     // the fixture for subsequent queries. Real adapters are passthrough.
     const interpolated = withVariableInterpolation(this.nutanix, () => vars.snapshot());
     const nutanix = withMockOverlay(interpolated, () => overlay.list());
+    // Same per-session `{Var}` templating for the k8s transport (NKP pack), so a
+    // fixture named `user{UserNum}-...` matches the player's captured UserNum.
+    const kube = this.kube ? withKubeInterpolation(this.kube, () => vars.snapshot()) : undefined;
     // Snapshot the cluster_config table once per check call. Two rows
     // max (discoverable_node_serials, lcm_available_updates), so two cheap
     // SQLite reads — fine to do per check, no need for an in-memory
@@ -651,6 +659,7 @@ export class SessionService {
     const lcm = this.clusterConfig.get<unknown>('lcm_available_updates');
     return {
       nutanix,
+      kube,
       vars,
       cache,
       args: {},

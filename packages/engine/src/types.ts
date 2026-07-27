@@ -252,8 +252,38 @@ export interface NutanixClient {
  */
 export type NutanixSdkSurface = unknown;
 
+/**
+ * Read-only Kubernetes transport for pack checks that validate cluster state
+ * (the NKP pack). Deliberately tiny and read-only: checks only `list` resources
+ * and assert fields. Mirrors {@link NutanixClient} in shape (a `mode` + a read
+ * method backed by fixtures in mock, a real API in live) so the engine stays
+ * transport-agnostic — it names the interface, not any k8s client library.
+ * Optional on {@link CheckContext}: the NCP pack never touches it.
+ */
+export interface KubeResourceRef {
+  /** API group; omit/empty for the core group (`/api/v1`). e.g. `apps`, `source.toolkit.fluxcd.io`. */
+  group?: string;
+  /** API version, e.g. `v1`, `v1beta1`. */
+  version: string;
+  /** Resource plural, e.g. `deployments`, `services`, `gitrepositories`. */
+  plural: string;
+  /** Namespace to scope to; omit for cluster-scoped or all-namespaces. */
+  namespace?: string;
+}
+
+export interface KubeClient {
+  readonly mode: 'mock' | 'live';
+  /** List resources of a kind, returning the `.items` array (empty if none). */
+  list(ref: KubeResourceRef): Promise<Array<Record<string, unknown>>>;
+}
+
 export interface CheckContext {
   nutanix: NutanixClient;
+  /**
+   * Read-only Kubernetes transport, present only for packs that declare they
+   * need it (the NKP pack). `undefined` for the NCP pack. See {@link KubeClient}.
+   */
+  kube?: KubeClient;
   vars: Variables;
   cache: ClusterCache;
   args: Record<string, unknown>;

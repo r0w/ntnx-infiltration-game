@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createNutanixClient, probeCapabilities } from '@ntnx-game/nutanix';
+import { createKubeClient, createLiveKubeFromKubeconfig } from '@ntnx-game/kube-transport';
 import { loadConfig } from './config';
 import { consoleLogger } from './logger';
 import { openDatabase } from './db/database';
@@ -67,6 +68,19 @@ async function main() {
     timeoutMs: cfg.pcTimeoutMs,
     maxRetries: cfg.pcMaxRetries,
   });
+
+  // Read-only k8s transport for the NKP pack. In mock mode it reads the pack's
+  // fixtures.json (`kube` section), no cluster. In live/test mode, if a
+  // kubeconfig path is provided (NKP_KUBECONFIG), read the real cluster with it.
+  // NCP packs never touch ctx.kube, so this stays undefined for them.
+  let kube;
+  if (transportMode === 'mock') {
+    kube = createKubeClient({ mode: 'mock', fixtures: fixturesPath });
+  } else if (process.env.NKP_KUBECONFIG) {
+    const { readFileSync } = await import('node:fs');
+    kube = createLiveKubeFromKubeconfig(readFileSync(process.env.NKP_KUBECONFIG, 'utf8'));
+    consoleLogger.info('kube transport ready (live)', { kubeconfig: process.env.NKP_KUBECONFIG });
+  }
 
   const probe = await probeCapabilities({ nutanix, logger: consoleLogger });
 
@@ -135,6 +149,9 @@ async function main() {
     ProdUsername: cfg.gameProdUsername,
     ProdPassword: cfg.gameProdPassword,
     frontendHost: cfg.gameFrontendHost,
+    // NKP pack: the real Kommander dashboard URL (clickable in-game). Falls back
+    // to a placeholder so the prompt renders before an operator sets it.
+    DashboardUrl: process.env.NKP_DASHBOARD_URL || 'https://your-nkp-console/dkp/kommander/dashboard',
   };
 
   // NIG Central stats emitter — inert unless NIG_CENTRAL_URL is set.
@@ -155,6 +172,7 @@ async function main() {
     db,
     pack,
     nutanix,
+    kube,
     serverMode: cfg.mode,
     clusterEndpoint: cfg.pcEndpoint,
     clusterProfile,

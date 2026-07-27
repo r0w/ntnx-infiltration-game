@@ -1,0 +1,22 @@
+{
+  "id": "nkp-011",
+  "name": "block-storage",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.block.intro",
+    "nkp.block.manifest",
+    "nkp.block.apply",
+    "nkp.block.prompt"
+  ],
+  "check": {
+    "fn": "CheckBlockStorage"
+  },
+  "captures": [
+    "Ok"
+  ],
+  "needs": [
+    "UserNum"
+  ]
+}

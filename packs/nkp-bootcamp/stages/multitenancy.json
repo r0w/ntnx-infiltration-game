@@ -1,0 +1,11 @@
+{
+  "id": "nkp-006",
+  "name": "multitenancy",
+  "active": true,
+  "prompt": "system",
+  "defaultColor": "cyan",
+  "messages": [
+    "nkp.mt.intro",
+    "nkp.mt.diagram"
+  ]
+}

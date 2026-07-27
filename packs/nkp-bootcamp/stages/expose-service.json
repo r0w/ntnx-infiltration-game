@@ -1,0 +1,15 @@
+{
+  "id": "nkp-003",
+  "name": "expose-service",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.service.intro",
+    "nkp.service.cmd",
+    "nkp.service.result"
+  ],
+  "needs": [
+    "UserNum"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "id": "nkp-007",
+  "name": "create-project",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.project.intro",
+    "nkp.project.form",
+    "nkp.project.done"
+  ],
+  "needs": [
+    "UserNum"
+  ]
+}

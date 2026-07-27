@@ -1,0 +1,13 @@
+{
+  "id": "nkp-001",
+  "name": "access",
+  "active": true,
+  "prompt": "system",
+  "defaultColor": "cyan",
+  "messages": [
+    "nkp.access.console"
+  ],
+  "needs": [
+    "UserNum"
+  ]
+}

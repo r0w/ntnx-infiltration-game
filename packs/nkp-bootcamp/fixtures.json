@@ -1,0 +1,25 @@
+{
+  "kube": {
+    "v1/persistentvolumeclaims": [
+      {
+        "metadata": { "name": "mysql-pv-claim", "namespace": "user{UserNum}", "labels": { "app": "wordpress" } },
+        "spec": {
+          "accessModes": ["ReadWriteOnce"],
+          "resources": { "requests": { "storage": "20Gi" } },
+          "storageClassName": "nutanix-volume"
+        },
+        "status": { "phase": "Bound" }
+      }
+    ],
+    "apps/v1/deployments": [
+      {
+        "metadata": { "name": "wordpress-mysql", "namespace": "user{UserNum}", "labels": { "app": "wordpress" } },
+        "spec": {
+          "strategy": { "type": "Recreate" },
+          "template": { "spec": { "containers": [{ "name": "mysql", "image": "mysql:8.0" }] } }
+        },
+        "status": { "availableReplicas": 1 }
+      }
+    ]
+  }
+}

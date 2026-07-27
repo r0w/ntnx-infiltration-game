@@ -1,0 +1,15 @@
+{
+  "id": "nkp-005",
+  "name": "loadbalancer",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.lb.intro",
+    "nkp.lb.cmd",
+    "nkp.lb.result"
+  ],
+  "needs": [
+    "UserNum"
+  ]
+}
