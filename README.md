@@ -68,7 +68,7 @@ packages/
   frontend/     Vite + React faux terminal
   shared/       wire types
 packs/
-  ntnx-infiltration/   39 stages, locales/ (en, fr, de + WIP es, it), checks, fixtures, scripts/
+  ntnx-infiltration/   39 stages, locales/ (en, fr, de, + es/it as WIP), checks, fixtures, scripts/
 tooling/
   blueprint/    Calm DSL Python blueprint + post-compile patcher
 docs/
