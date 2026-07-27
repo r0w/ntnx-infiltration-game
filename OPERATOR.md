@@ -120,7 +120,7 @@ In Prism Central:
 | Prism Central IP                      | your PC IP (no scheme, no port - e.g. `192.0.2.10`) |
 | Prism Central username                | `admin`                                      |
 | Prism Central password                | the PC admin password                        |
-| Planner PC password                   | leave default (`REDACTED`)                |
+| Planner PC password                   | leave the pre-filled default (ask the game team if empty) |
 | ghcr.io token                         | leave empty (only needed if the container image is in a private repo) |
 | Image tag                             | `latest` (or a specific `vX.Y.Z`)            |
 | Container image repository            | leave default                                |
