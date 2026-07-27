@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BrailleSpinner, TerminalItem, VERIFYING_LABELS } from './renderer';
 import { usePageBreakScrollPin } from './usePageBreakScrollPin';
-import { awaitingLabel, CONTINUE_VAR, type GatedAt, type RenderItem } from './useSession';
+import { awaitingLabel, CONTINUE_VAR, AUTOFILLABLE_VARS, type GatedAt, type RenderItem } from './useSession';
 
 export interface FauxTerminalProps {
   items: RenderItem[];
@@ -101,10 +101,9 @@ export function FauxTerminal({
   // `units: []` and re-arms the same await-input, so its id is unchanged
   // and the guard prevents an infinite resubmit loop. A fresh prompt in a
   // new stage gets a new id, so submission resumes naturally.
-  // Auto-fillable named vars — server-side endpoint can look up the live
-  // cluster value for these, so auto-play submits the answer instead of
-  // skipping the prompt. Trigram/PIN/Username stay manual (player identity).
-  const AUTOFILLABLE = new Set(['NodeSerial', 'NumberUpdates', 'Runway']);
+  // Auto-fillable named vars (AUTOFILLABLE_VARS) — server-side endpoint can
+  // look up the live cluster value, so auto-play submits the answer instead
+  // of skipping the prompt. Trigram/PIN/Username stay manual (player identity).
   const autoSubmittedIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!autoPlay) {
@@ -113,7 +112,7 @@ export function FauxTerminal({
     }
     if (!inputVisible) return;
     const isContinue = awaitingVariable === CONTINUE_VAR;
-    const isAutoFillable = awaitingVariable !== null && AUTOFILLABLE.has(awaitingVariable);
+    const isAutoFillable = awaitingVariable !== null && AUTOFILLABLE_VARS.has(awaitingVariable);
     if (!isContinue && !isAutoFillable) return;
     let target: string | null = null;
     for (let i = items.length - 1; i >= 0; i--) {

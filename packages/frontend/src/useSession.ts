@@ -6,6 +6,18 @@ import { VERIFYING_LABELS } from './renderer';
 /** Sentinel variable name emitted by `<input/>` — press-Enter-to-continue. */
 export const CONTINUE_VAR = '$continue';
 
+/**
+ * Named-var prompts whose answer is a cluster fact the server can look up
+ * via `/auto-fill-current` (in `mock`/`test`). Shared so FauxTerminal (which
+ * decides to fire `onAutoPlayOk`) and GameApp (which decides to auto-fill vs
+ * submit "Ok") never drift — that drift is what broke mock auto-play once.
+ */
+export const AUTOFILLABLE_VARS: ReadonlySet<string> = new Set([
+  'NodeSerial',
+  'NumberUpdates',
+  'Runway',
+]);
+
 /** Floor for the "verifying…" beat so even an instant mock check reads as real.
  *  Real latency counts toward it; "skip pauses" zeroes it in the renderer. */
 const VERIFY_FLOOR_MIN_MS = 800;

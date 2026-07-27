@@ -48,6 +48,14 @@ export interface PackManifest {
   locales?: string;
   defaultLocale: Locale;
   supportedLocales: Locale[];
+  /**
+   * Locales flagged as work-in-progress: strings can be missing, so the runtime
+   * falls back to `defaultLocale`. Hidden from end users in `live` mode unless
+   * the operator explicitly enables them from `/admin`; always shown in
+   * `mock` / `test` for translators + QA. Non-WIP locales ignore this list
+   * and are always visible. Empty/missing = no WIP locales.
+   */
+  wipLocales?: Locale[];
 }
 
 export interface LoadedPack {

@@ -14,6 +14,7 @@ import { buildScoreboardRoutes } from './routes/scoreboard';
 import { buildSshRoutes } from './routes/ssh';
 import { buildAdminRoutes } from './routes/admin';
 import { buildActRoutes } from './routes/act';
+import { effectiveSupportedLocales } from './effective-locales';
 import { getVersionInfo } from './version';
 import type { Telemetry } from './telemetry';
 
@@ -65,6 +66,19 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
   // existing tests (which use `nutanix.mode = 'mock'`) accurate.
   const serverMode: 'mock' | 'test' | 'live' = deps.serverMode ?? deps.nutanix.mode;
 
+  // WIP-locale filter (issue #65). Evaluated per request so the operator
+  // enabling/disabling a WIP locale from /admin takes effect on the next
+  // /api/pack + session-create call — no server restart. Mock/test always
+  // include WIP locales (for translators + QA); live filters them unless
+  // the operator has enabled them via the cluster_config override.
+  const getEffectiveLocales = () =>
+    effectiveSupportedLocales(
+      deps.pack.manifest.supportedLocales,
+      deps.pack.manifest.wipLocales,
+      serverMode,
+      service.clusterConfig,
+    );
+
   app.get('/api/health', (c) =>
     c.json({
       status: 'ok',
@@ -83,8 +97,9 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
   // (no admin auth) on purpose: it leaks nothing sensitive.
   app.get('/api/version', (c) => c.json(getVersionInfo()));
 
-  app.get('/api/pack', (c) =>
-    c.json({
+  app.get('/api/pack', (c) => {
+    const locales = getEffectiveLocales();
+    return c.json({
       id: deps.pack.manifest.id,
       name: deps.pack.manifest.name,
       mode: serverMode,
@@ -93,7 +108,12 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
       // those stages play normally and shouldn't be marked red.
       clusterProfile: deps.clusterProfile,
       defaultLocale: deps.pack.manifest.defaultLocale,
-      supportedLocales: deps.pack.manifest.supportedLocales,
+      supportedLocales: locales,
+      // Which of the offered locales are still work-in-progress, so the
+      // language picker can flag them as such (partially translated).
+      wipLocales: locales.filter((l) =>
+        (deps.pack.manifest.wipLocales ?? []).includes(l),
+      ),
       // The frontend keys + displays stages by name; `s.index` is the engine's
       // ephemeral positional index and must never leak past this boundary.
       stages: deps.pack.stages.map((s) => ({
@@ -104,8 +124,8 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
         hasCheck: !!s.check,
         captures: s.captures ?? [],
       })),
-    }),
-  );
+    });
+  });
 
   // Pack-bundled assets (images referenced by `<image src='…'/>` tags in
   // locale catalogs). Flat filenames only — reject anything that looks like
@@ -138,7 +158,7 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
       clusterProfile: deps.clusterProfile,
       capabilities: deps.capabilities,
       defaultLocale: deps.pack.manifest.defaultLocale,
-      supportedLocales: deps.pack.manifest.supportedLocales,
+      getSupportedLocales: getEffectiveLocales,
     }),
   );
   app.route(
