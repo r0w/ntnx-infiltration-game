@@ -75,7 +75,6 @@ docs/
   ARCHITECTURE.md   boundaries diagram, design rationale
   STAGES.md         stage map (39 stages, name, check function, parity with original Python)
   TESTS.md          what's tested and how
-  ROADMAP.md        current status + open paths
 ```
 
 ## Authoring a stage
