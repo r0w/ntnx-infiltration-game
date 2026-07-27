@@ -68,7 +68,7 @@ packages/
   frontend/     Vite + React faux terminal
   shared/       wire types
 packs/
-  ntnx-infiltration/   39 stages, locales/{en,fr}.json, checks, fixtures, scripts/
+  ntnx-infiltration/   39 stages, locales/ (en, fr, de, + es/it as WIP), checks, fixtures, scripts/
 tooling/
   blueprint/    Calm DSL Python blueprint + post-compile patcher
 docs/
@@ -105,7 +105,7 @@ Drop `packs/<pack>/locales/<code>.json` with every key from `en.json` translated
 ## Development
 
 ```bash
-bun test           # 216 tests across engine + server + nutanix + frontend
+bun test           # full suite across engine + server + nutanix + frontend
 bun run typecheck  # tsc --noEmit, all 4 workspace packages
 ```
 

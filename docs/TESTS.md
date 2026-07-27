@@ -1,9 +1,9 @@
 # TESTS.md - what is tested, how, and how to run
 
-**TL;DR** - 216 tests across 16 files, all unit + integration, no browser. `bun test` from the repo root runs the lot in ~7 s. CI-friendly: no network, no DB on disk (in-memory SQLite), no real Nutanix calls (mock adapter).
+**TL;DR** - 329 tests across 28 files, all unit + integration, no browser. `bun test` from the repo root runs the lot in ~9 s. CI-friendly: no network, no DB on disk (in-memory SQLite), no real Nutanix calls (mock adapter).
 
 ```bash
-bun test                                       # everything (216 tests)
+bun test                                       # everything
 bun test packages/server                       # one package
 bun test packages/server/test/e2e-gates.test.ts  # one file
 bun test --filter "lunch lock"                 # by name pattern
@@ -23,6 +23,7 @@ The engine has zero external dependencies (no DB, no fetch, no fs at runtime), s
 | `stage-runner.test.ts` | Stage rendering + ordering | next-stage gating, locale fallback, double-newline avoidance, await-input index |
 | `capability-gate.test.ts` | Per-stage gate verdicts | inactive / already-passed / missing-capability / destructive-on-shared / missing-upstream - all four `disabled` reasons |
 | `variables.test.ts` | The `Variables` store | get/set/delete, listener notifications, snapshot shape, missing-key behaviour |
+| `lcm-updates.test.ts` | LCM update counting | `dedupedUpdateCount` + `isReadingSettled` - the stage-29 counting rules |
 
 ### `packages/nutanix` - transport adapters
 
@@ -47,7 +48,18 @@ The bulk of the suite. Each test file boots an in-memory SQLite + Hono router fo
 | `scoreboard.test.ts` | Sort, anonymous pre-stage filtering, anti-leak of placeholder UUIDs, packId scoping, duplicate trigrams |
 | `cluster-profile.test.ts` | Auto-detection (10.x → dedicated, generic → shared) + explicit override |
 | `ssh.test.ts` | `/api/ssh/ping` argv validation (no shell, no leading dash) + tcp probe error remapping |
-| **`e2e-gates.test.ts`** *(new)* | **Full-stack admin gate + lunch lock flows - see below** |
+| `auto-fill-current.test.ts` | `POST /auto-fill-current` in mock - auto-fillable vars (NodeSerial, NumberUpdates, Runway…) resolve instead of submitting a placeholder |
+| `cluster-config-probe.test.ts` | The cached LCM update count stage 29 judges against - refreshed when LCM is quiet, never while an inventory rebuilds the list |
+| `pack-helpers.test.ts` | Stage-29 verdict deferral window after an LCM inventory (PC clock vs ours drift) |
+| `pack-integrity.test.ts` | Pack invariants that silently rotted before - dependency-audit orphan detection, fixture placeholders resolving without removed captured vars |
+| `recovery-point-action.test.ts` | Recovery-point `<action/>` wiring - the POST actually fires |
+| `effective-locales.test.ts` | `effectiveSupportedLocales` - WIP-locale filtering per mode + operator override |
+| `languages-gating.test.ts` | e2e WIP-locale gate - hidden from `live` players unless operator-enabled, always visible in `mock`/`test` |
+| `telemetry.test.ts` | Anonymous usage stats - stage wall-time aggregation, fire-and-forget send path |
+| `e2e-gates.test.ts` | Full-stack admin gate + lunch lock flows - see below |
+| `e2e-mock-autoplay.test.ts` | Full 39-stage auto-play run in mock - every stage advances end-to-end |
+| `e2e-mock-forward-goto.test.ts` | DevPanel forward goto - jumping ahead preserves captures + cluster cache |
+| `e2e-mock-press-enter.test.ts` | Press-Enter-to-continue stages advance without input |
 
 ### `packages/frontend` - pure utilities
 
@@ -59,7 +71,7 @@ Frontend tests are intentionally narrow: only the pure helpers that don't need a
 
 React components, the typewriter, the auto-play toggle, the polling loop - **not unit-tested**. The end-to-end path is covered indirectly: the full HTTP contract these components rely on is exercised in `e2e-gates.test.ts` and the admin/session route tests.
 
-## End-to-end gate tests *(new - `packages/server/test/e2e-gates.test.ts`)*
+## End-to-end gate tests *(`packages/server/test/e2e-gates.test.ts`)*
 
 These are full-stack integration tests: they boot the **complete Hono app** via `buildApp()`, then drive both the player session and the operator with `app.fetch()` - the same code path the browser hits. They validate the contract that `useSession`'s polling loop and `AdminPage`'s gates panel rely on.
 
