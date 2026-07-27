@@ -292,7 +292,7 @@ def main():
         return 0
     print(
         "[FAIL] policy engine could not be brought up on either %s or %s. "
-        "See ROADMAP 'BP install — open issues' — operator can deploy the "
+        "Operator can deploy the "
         "Policy VM manually via Prism > Settings > Calm." % (primary, fallback)
     )
     return 1

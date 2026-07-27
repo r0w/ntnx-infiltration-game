@@ -141,7 +141,7 @@ export interface StageDefinition {
    *
    * Only affects the variable store. Mutating real cluster state (mock fixture
    * overlay / live API) is a separate concern — see the action-dispatch
-   * follow-up in docs/ROADMAP.md.
+   * follow-up in issue #23.
    */
   invalidates?: string[];
   /**

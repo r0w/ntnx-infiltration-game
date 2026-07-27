@@ -122,5 +122,3 @@ If the server replies `409` on advance (we thought we were free but the server s
 ## Dev iteration
 
 `GET /api/pack` lists every stage; `POST /api/session/:id/goto/:stageId` jumps forward or backward, clears `stage_history` from the target, preserves `session_variables` + `cluster_cache`. The frontend's `DevPanel` consumes both for a clickable stage grid, colour-coded by `impact` and capability.
-
-For current status and open paths see [ROADMAP.md](./ROADMAP.md).
