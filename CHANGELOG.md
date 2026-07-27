@@ -19,6 +19,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- The email roster now flags malformed addresses instantly and ignores
+  duplicates in a single paste, instead of counting them as skips.
+
 ## [0.5.0] - 2026-07-27
 
 ### Added
