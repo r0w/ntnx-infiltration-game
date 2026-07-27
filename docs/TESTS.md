@@ -6,7 +6,7 @@
 bun test                                          # everything
 bun test packages/server                          # one package
 bun test packages/server/test/e2e-gates.test.ts   # one file
-bun test --filter "lunch lock"                     # by name
+bun test -t "lunch lock"                           # by name
 ```
 
 ## Coverage by package
@@ -17,7 +17,7 @@ bun test --filter "lunch lock"                     # by name
 |---|---|
 | `message-parser.test.ts` | The JSX-like grammar: `{Var}` substitution, `<pause/>`, `<input/>`, links, color/style stacking, escaping |
 | `stage-runner.test.ts` | Stage rendering + ordering, gating, locale fallback, await-input index |
-| `capability-gate.test.ts` | The four `disabled` reasons (inactive, passed, missing capability, destructive-off-hpoc, missing upstream) |
+| `capability-gate.test.ts` | The gate verdicts: inactive, passed, missing capability, destructive-off-hpoc, missing upstream, admin gate |
 | `variables.test.ts` | The `Variables` store: get/set/delete, listeners, snapshot shape |
 | `lcm-updates.test.ts` | Stage-29 update counting (`dedupedUpdateCount`, `isReadingSettled`) |
 

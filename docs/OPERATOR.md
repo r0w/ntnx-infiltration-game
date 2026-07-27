@@ -45,7 +45,8 @@ Everything runs from `http://<vm>:3000/admin`. Default password **`nutanix/4u`**
 Booking with the **AOS + PC Demo - Latest (7.5.x)** runbook gives the tested versions (AOS 7.5, PC 7.5, Self-Service 4.3.1, Flow Networking + Security, Leap). Two things to know:
 
 - **4 nodes**, no more, no less. The install removes one so stage 28 (expand-cluster) has a node to add back.
-- **Intelligent Operations enabled.** Stage 26 (create-report) checks against it. Fresh HPoCs ship it off; enable it in Prism. `/admin` shows a banner while it's off.
+- **Intelligent Operations enabled.** The create-report stage checks against it. Fresh HPoCs ship it off; enable it in Prism. `/admin` shows a banner while it's off.
+- **A cluster dedicated to the game.** The install reshapes it: removes a node, creates the production VMs, project and subnets.
 
 ### The launch form
 
@@ -62,6 +63,7 @@ Click **Credentials** and set the `NUTANIX` credential to your PC admin password
 | Planner PC password | leave the pre-filled default (ask the game team if empty) |
 | ghcr.io token | leave empty (only for a private image repo) |
 | Image tag | `latest` (or a specific `vX.Y.Z`) |
+| Container image repository | leave default |
 
 The substrate section asks for the cluster and first NIC subnet (any real ones on your HPoC). Submit.
 
