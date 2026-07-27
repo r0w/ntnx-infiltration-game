@@ -15,6 +15,14 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [0.5.0] - 2026-07-27
+
+### Added
+
 - Spanish (`es`) and Italian (`it`) locale resources, flagged as
   work-in-progress in `pack.json`. WIP locales are always visible in `mock` /
   `test` for translators + QA; in `live` they are hidden from the player
@@ -26,8 +34,6 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 - The language picker now marks work-in-progress languages with a "(WIP)"
   suffix so players know they are not fully translated yet.
-
-### Fixed
 
 ## [0.4.3] - 2026-07-12
 
@@ -154,7 +160,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 Baseline release. See the git history for changes up to this point.
 
-[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.0...v0.4.1
