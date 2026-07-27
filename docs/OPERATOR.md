@@ -53,6 +53,7 @@ Click **Credentials** and set the `NUTANIX` credential to your PC admin password
 
 | Field | Value |
 |---|---|
+| Cluster profile | `hpoc` (the default - a dedicated HPoC) |
 | Run mode | `live` for an event, `test` for dry-runs |
 | Time zone | the event's local zone |
 | Prism Central IP | your PC IP, no scheme or port (e.g. `192.0.2.10`) |
