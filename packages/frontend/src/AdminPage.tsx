@@ -2363,6 +2363,13 @@ function EmailsTab({ password }: { password: string }) {
       .map((e) => e.trim())
       .filter(Boolean);
     if (emails.length === 0) return;
+    // Catch malformed addresses here so the operator gets instant feedback
+    // instead of a round-trip 400 (the server re-validates the same way).
+    const invalid = emails.filter((e) => !EMAIL_RE.test(e));
+    if (invalid.length > 0) {
+      setError(`invalid email(s): ${invalid.join(', ')}`);
+      return;
+    }
     setBusy('roster');
     setError(null);
     try {
@@ -2770,7 +2777,7 @@ function EmailsTab({ password }: { password: string }) {
               type="button"
               className="modal-btn"
               disabled={
-                busy !== null || !canSend || !draftReady || !/^\S+@\S+\.\S+$/.test(testAddr.trim())
+                busy !== null || !canSend || !draftReady || !EMAIL_RE.test(testAddr.trim())
               }
               onClick={() => void send('test')}
               title="send the selected template's current draft to this address only"

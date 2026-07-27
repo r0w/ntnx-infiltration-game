@@ -1158,8 +1158,9 @@ describe('email participant routes', () => {
     }
   });
 
-  test('roster: seats assigned lowest-free-first, duplicates skipped, delete frees the seat', async () => {
+  test('roster: seats lowest-free-first, in-paste dupes deduped, re-adds skipped, delete frees the seat', async () => {
     const { r } = emailRouter(freshDb());
+    // 'a@x.co' twice in one paste is deduped, not counted as a skip.
     let res = await addRoster(r, ['a@x.co', 'b@x.co', 'c@x.co', 'a@x.co']);
     expect(res.status).toBe(200);
     let body = (await res.json()) as {
@@ -1167,8 +1168,14 @@ describe('email participant routes', () => {
       entries: Array<{ id: number; seat: number; email: string }>;
     };
     expect(body.added).toBe(3);
-    expect(body.skipped).toBe(1);
+    expect(body.skipped).toBe(0);
     expect(body.entries.map((e) => e.seat)).toEqual([1, 2, 3]);
+
+    // Re-adding an address already on the roster is a genuine skip.
+    res = await addRoster(r, ['b@x.co', 'e@x.co']);
+    body = (await res.json()) as typeof body;
+    expect(body.added).toBe(1);
+    expect(body.skipped).toBe(1);
 
     const bId = body.entries.find((e) => e.email === 'b@x.co')!.id;
     res = await r.request(`/email-roster/${bId}`, { method: 'DELETE', headers: AUTH });
@@ -1176,7 +1183,7 @@ describe('email participant routes', () => {
 
     res = await addRoster(r, ['d@x.co']);
     body = (await res.json()) as typeof body;
-    // d takes the freed seat 2, not seat 4.
+    // d takes the freed seat 2, not the next-highest.
     expect(body.entries.find((e) => e.email === 'd@x.co')!.seat).toBe(2);
   });
 
