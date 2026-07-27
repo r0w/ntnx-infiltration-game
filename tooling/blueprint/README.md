@@ -5,7 +5,7 @@ Authored in calm-dsl 4.2.1 (`blueprint.py`); a 6-pass post-compile
 patcher (`patch_escript.py`) adapts the JSON to PC 7.5's quirks.
 
 For the operator-facing "host the game in 2 clicks" guide, see
-[`../../OPERATOR.md`](../../OPERATOR.md). For the overview of all
+[`../../docs/OPERATOR.md`](../../docs/OPERATOR.md). For the overview of all
 generations (this active dir + 3 archives), see
 [`../README.md`](../README.md). For the historical phase notes
 that produced this code, see [`docs/`](./docs/).
@@ -50,7 +50,7 @@ here. External operators use the Prism UI path below.
 
 Download `nig-00-runbook-prerequisites.json` + `nig-01-blueprint.json`
 from the [latest GitHub Release](https://github.com/r0w/ntnx-infiltration-game/releases/latest).
-See [`../../OPERATOR.md`](../../OPERATOR.md) for the operator
+See [`../../docs/OPERATOR.md`](../../docs/OPERATOR.md) for the operator
 walk-through.
 
 ## Why a patcher

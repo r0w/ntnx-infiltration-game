@@ -1099,10 +1099,14 @@ export class EmailRosterQueries {
   }
 
   remove(id: number): boolean {
-    // No FK pragma in this DB — clean the send log by hand.
-    this.db.prepare(`DELETE FROM email_sends WHERE roster_id = $id`).run({ $id: id });
-    const r = this.db.prepare(`DELETE FROM email_roster WHERE id = $id`).run({ $id: id });
-    return r.changes > 0;
+    // No FK pragma in this DB — clean the send log by hand. One transaction so a
+    // mid-delete crash can't leave email_sends rows orphaned from their roster.
+    const tx = this.db.transaction((rowId: number) => {
+      this.db.prepare(`DELETE FROM email_sends WHERE roster_id = $id`).run({ $id: rowId });
+      const r = this.db.prepare(`DELETE FROM email_roster WHERE id = $id`).run({ $id: rowId });
+      return r.changes > 0;
+    });
+    return tx(id);
   }
 
   /** Roster entries with no successful delivery of this template yet. */

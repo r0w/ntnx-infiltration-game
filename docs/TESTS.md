@@ -1,102 +1,72 @@
-# TESTS.md - what is tested, how, and how to run
+# Tests
 
-**TL;DR** - 216 tests across 16 files, all unit + integration, no browser. `bun test` from the repo root runs the lot in ~7 s. CI-friendly: no network, no DB on disk (in-memory SQLite), no real Nutanix calls (mock adapter).
+**329 tests across 28 files**, all unit + integration, no browser. `bun test` from the repo root runs the lot in ~9 s. CI-friendly: no network, in-memory SQLite, mock Nutanix adapter.
 
 ```bash
-bun test                                       # everything (216 tests)
-bun test packages/server                       # one package
-bun test packages/server/test/e2e-gates.test.ts  # one file
-bun test --filter "lunch lock"                 # by name pattern
+bun test                                          # everything
+bun test packages/server                          # one package
+bun test packages/server/test/e2e-gates.test.ts   # one file
+bun test -t "lunch lock"                           # by name
 ```
-
-Typecheck the same coverage with `bunx tsc --noEmit -p packages/<pkg>` per package.
 
 ## Coverage by package
 
-### `packages/engine` - pure logic, no I/O
-
-The engine has zero external dependencies (no DB, no fetch, no fs at runtime), so its tests are fast and exhaustive.
-
-| File | Lines validated | What it pins |
-|---|---|---|
-| `message-parser.test.ts` | JSX-like tag grammar | `{Var}` substitution, `<pause/>`, `<input var=…/>`, `<a href=…/>`, color/style stacking, escaping rules |
-| `stage-runner.test.ts` | Stage rendering + ordering | next-stage gating, locale fallback, double-newline avoidance, await-input index |
-| `capability-gate.test.ts` | Per-stage gate verdicts | inactive / already-passed / missing-capability / destructive-on-shared / missing-upstream - all four `disabled` reasons |
-| `variables.test.ts` | The `Variables` store | get/set/delete, listener notifications, snapshot shape, missing-key behaviour |
-
-### `packages/nutanix` - transport adapters
-
-Mocks vs. live REST, capability probing.
+**`packages/engine`** - pure logic, zero I/O, so fast and exhaustive.
 
 | File | What it pins |
 |---|---|
-| `mock-adapter.test.ts` | Fixture matching (method + path), error message on miss, the SDK envelope shim, the per-session overlay filter (`<action name='deleteVM'/>` removes the entity from subsequent GETs) |
-| `rest-adapter.test.ts` | Basic auth + JSON headers, TLS toggle (`NUTANIX_VERIFY_SSL`), non-2xx → typed `NutanixHttpError`, GET-only 5xx retry, transport error wrapping |
-| `capability-probe.test.ts` | All four capability flags (NCM / IO / CalmDSL / NodeRemove) detected on healthy responses; reachability failures degrade gracefully (probe never throws) |
+| `message-parser.test.ts` | The JSX-like grammar: `{Var}` substitution, `<pause/>`, `<input/>`, links, color/style stacking, escaping |
+| `stage-runner.test.ts` | Stage rendering + ordering, gating, locale fallback, await-input index |
+| `capability-gate.test.ts` | The gate verdicts: inactive, passed, missing capability, destructive-off-hpoc, missing upstream, admin gate |
+| `variables.test.ts` | The `Variables` store: get/set/delete, listeners, snapshot shape |
+| `lcm-updates.test.ts` | Stage-29 update counting (`dedupedUpdateCount`, `isReadingSettled`) |
 
-### `packages/server` - HTTP + DB + service layer
-
-The bulk of the suite. Each test file boots an in-memory SQLite + Hono router for the routes under test, then drives via `app.fetch()` (= same path the browser hits in production).
-
-| File | What it pins |
-|---|---|
-| `session-service.test.ts` | The whole gameplay state machine - advance, awaiting input, capture+substitute, destructive gating, `skipTo`, `sentences.{ok,ko,retry}-*` cheers, `<action/>` dispatch + mock overlay, retry-from-variable rewind, `computeGreeting`, `switchTo` re-auth path, `invalidates`, **adminGate** (4 tests), **lunch lock** (2 tests, DB-backed persistence covered) |
-| `admin.test.ts` | `/api/admin/*` - login, users (with PIN, scoped to packId), delete cascade, gates list + unlock/lock, pack editor toggles, lunch status |
-| `check-trigram.test.ts` | Shape validation (length, charset) + collision logic via `SessionDirectory` (returning-agent re-auth path) |
-| `dep-analysis.test.ts` | The cascade-disable preview: which downstream stages break when an upstream producer is turned off (env-seeded vars treated as always-available) |
-| `scoreboard.test.ts` | Sort, anonymous pre-stage filtering, anti-leak of placeholder UUIDs, packId scoping, duplicate trigrams |
-| `cluster-profile.test.ts` | Auto-detection (10.x → dedicated, generic → shared) + explicit override |
-| `ssh.test.ts` | `/api/ssh/ping` argv validation (no shell, no leading dash) + tcp probe error remapping |
-| **`e2e-gates.test.ts`** *(new)* | **Full-stack admin gate + lunch lock flows - see below** |
-
-### `packages/frontend` - pure utilities
-
-Frontend tests are intentionally narrow: only the pure helpers that don't need a DOM.
+**`packages/nutanix`** - transport adapters.
 
 | File | What it pins |
 |---|---|
-| `ssh-console.test.ts` | Tab-completion against the command registry + `classifyPingLine` (`Request timed out` → fail, `0% packet loss` → pass) - drives the SSH console's color decisions |
+| `mock-adapter.test.ts` | Fixture matching, miss errors, SDK envelope shim, per-session overlay (`<action name='deleteVM'/>` hides the entity) |
+| `rest-adapter.test.ts` | Auth + headers, TLS toggle, non-2xx → typed error, GET 5xx retry |
+| `capability-probe.test.ts` | The four capability flags on healthy responses; degrades gracefully (never throws) |
 
-React components, the typewriter, the auto-play toggle, the polling loop - **not unit-tested**. The end-to-end path is covered indirectly: the full HTTP contract these components rely on is exercised in `e2e-gates.test.ts` and the admin/session route tests.
+**`packages/server`** - HTTP + DB + service layer, the bulk of the suite. Each file boots an in-memory SQLite + Hono router and drives it via `app.fetch()`, the same path the browser hits.
 
-## End-to-end gate tests *(new - `packages/server/test/e2e-gates.test.ts`)*
+| File | What it pins |
+|---|---|
+| `session-service.test.ts` | The gameplay state machine: advance, input, capture + substitute, destructive gating, `skipTo`, cheers, `<action/>` dispatch, retry rewind, re-auth, admin gates, lunch lock |
+| `admin.test.ts` | `/api/admin/*`: login, users, delete cascade, gates, pack toggles, lunch status |
+| `check-trigram.test.ts` | Trigram shape + collision (returning-agent re-auth) |
+| `dep-analysis.test.ts` | Cascade-disable preview: which downstream stages break when an upstream producer is off |
+| `scoreboard.test.ts` | Sort, anonymous filtering, UUID anti-leak, packId scoping |
+| `cluster-profile.test.ts` | Explicit `hpoc`/`other`, fallback to `other` when unset |
+| `ssh.test.ts` | `/api/ssh/ping` argv validation + probe error remapping |
+| `auto-fill-current.test.ts` | Auto-fillable vars (NodeSerial, NumberUpdates, Runway…) resolve in mock |
+| `cluster-config-probe.test.ts` | The cached LCM count stage 29 judges against |
+| `pack-helpers.test.ts` | Stage-29 verdict deferral window after an LCM inventory |
+| `pack-integrity.test.ts` | Pack invariants: dependency-audit orphans, fixture placeholders |
+| `recovery-point-action.test.ts` | Recovery-point `<action/>` actually fires |
+| `effective-locales.test.ts` | WIP-locale filtering per mode + operator override |
+| `languages-gating.test.ts` | e2e WIP-locale gate (hidden in `live` unless enabled) |
+| `telemetry.test.ts` | Anonymous stats: wall-time aggregation, fire-and-forget send |
+| `e2e-gates.test.ts` | Full-stack admin gate + lunch lock flows |
+| `e2e-mock-autoplay.test.ts` | Full 39-stage auto-play run in mock |
+| `e2e-mock-forward-goto.test.ts` | DevPanel goto preserves captures + cache |
+| `e2e-mock-press-enter.test.ts` | Press-Enter-to-continue stages advance |
 
-These are full-stack integration tests: they boot the **complete Hono app** via `buildApp()`, then drive both the player session and the operator with `app.fetch()` - the same code path the browser hits. They validate the contract that `useSession`'s polling loop and `AdminPage`'s gates panel rely on.
+**`packages/frontend`** - only the pure helpers that don't need a DOM.
 
-### Admin gate on a stage *(2 tests)*
+| File | What it pins |
+|---|---|
+| `ssh-console.test.ts` | Tab-completion + `classifyPingLine` (timeout → fail, 0% loss → pass) |
 
-Pack: 3 stages, middle one has `adminGate: true`.
+The React components, typewriter, and polling loop aren't unit-tested; they're thin views over state whose HTTP contract is covered by the route + e2e tests.
 
-1. **player hits gated stage → admin unlocks → player flows through**
-   - First advance plays the intro narrative (`kind: 'units'`).
-   - Second advance returns `kind: 'gated', gatedReason: 'stage', stageName: 'checkpoint'` - the discriminator the frontend banner reads.
-   - Admin GETs `/api/admin/gates` → sees the locked entry with `arrivedCount: 1`.
-   - Repeated advances stay gated (the polling loop is safe to spam - no `currentStage` mutation).
-   - Admin POSTs `/gates/checkpoint/unlock` → 200.
-   - Next advance flows into `checkpoint`, the one after into `finale`.
+## End-to-end (`e2e-gates.test.ts`)
 
-2. **admin re-locking after unlock parks subsequent sessions at the same gate**
-   - Session A passes through after admin unlocks.
-   - Admin re-locks; a fresh session B hits the gate.
-   - Session A's `currentStage` is unaffected - re-locking can't drag a session backward.
+Boots the complete app via `buildApp()` and drives both the player and the operator with `app.fetch()`. Covers the admin gate (player parks at a gated stage, admin unlocks, player flows through; re-locking can't drag a session backward) and the lunch lock (admin pauses all sessions global, unlocks, flow resumes; lunch lock survives a restart via DB-backed persistence).
 
-### Lunch lock (pack-wide pause) *(2 tests)*
+## Not tested (on purpose)
 
-3. **admin locks → all sessions gate global → admin unlocks → flow resumes**
-   - Two players in flight, both advancing normally.
-   - Admin POSTs `/api/admin/lunch/lock`. Status endpoint reports `paused: true, affectedCount ≥ 2`.
-   - Both sessions' next advance returns `kind: 'gated', gatedReason: 'global', stageName: undefined` - the frontend banner swaps copy/icon based on the `'global'` discriminator.
-   - Admin POSTs `/lunch/unlock`. Sessions resume - but session A then parks at the per-stage gate (lunch lock doesn't override stage gates).
-
-4. **lunch lock survives a process restart**
-   - Confirms `/api/admin/lunch` returns `paused: true` after engagement (DB-backed persistence - the cross-process side is covered separately by `session-service.test.ts:927+` using a shared db).
-
-## What is NOT tested
-
-Deliberate gaps, listed so reviewers don't expect them:
-
-- **Browser UI** - no Playwright / no JSDOM React-component tests. The faux-terminal typewriter, the auto-play toggle, the admin pages render correctly *in our hands* but aren't pinned in CI. Risk is low because the components are thin views over well-tested state (the contract they bind to IS covered).
-- **Live Nutanix API** - every test runs against the mock adapter. Live validation is exercised manually via the auto-play harness (`POST /api/act/auto-play/:trigram`) against a real Prism Central.
-- **Prompt/locale wording** - the parser and substitution machinery is tested, but specific stage prose isn't asserted character-for-character. Pack edits are caught at the next live validation pass, not in CI.
-- **The frontend's polling loop timing** - `useSession`'s 3 s `setInterval` while gated is logic that could in theory be unit-tested with fake timers; it isn't, because the cost (mocking `useEffect` + timers + fetch) outweighs the value (the loop is six lines, the contract it's polling against IS pinned by `e2e-gates.test.ts`).
-- **Auto-play act-current end-to-end** - the act handlers are exercised by the live auto-play harness against a real cluster. Not in CI because acts are intrinsically I/O against Prism Central.
+- **Browser UI** - no Playwright / JSDOM. The components are thin views over tested state.
+- **Live Nutanix API** - everything runs on the mock adapter. Live validation is manual via the auto-play harness (`POST /api/act/auto-play/:trigram`).
+- **Stage prose** - the parser is tested, specific wording isn't; pack edits are caught at the next live pass.

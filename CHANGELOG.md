@@ -19,6 +19,13 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+## [1.0.0] - 2026-07-28
+
+### Fixed
+
+- The email roster now flags malformed addresses instantly and ignores
+  duplicates in a single paste, instead of counting them as skips.
+
 ## [0.5.0] - 2026-07-27
 
 ### Added
@@ -160,7 +167,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 Baseline release. See the git history for changes up to this point.
 
-[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.5.0...v1.0.0
 [0.5.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.1...v0.4.2

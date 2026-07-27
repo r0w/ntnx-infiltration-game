@@ -1069,9 +1069,11 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     if (invalid.length > 0) {
       throw new HttpError(400, `invalid email(s): ${invalid.join(', ')}`);
     }
+    // Dedupe the payload so a repeated address isn't counted as a roster skip.
+    const unique = [...new Set(cleaned)];
     let added = 0;
     let skipped = 0;
-    for (const e of cleaned) {
+    for (const e of unique) {
       if (roster.add(e)) added++;
       else skipped++; // already on the roster
     }

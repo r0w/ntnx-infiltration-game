@@ -55,7 +55,8 @@ The 39 stages of the `ntnx-infiltration` pack, in play order.
 
 ## Design notes
 
-- **Stages 15 + 16 are split.** 15 verifies the prod user's project-scoped isolation; 16 live-migrates the VM after Tank spots a host scan. Two distinct narrative beats.
-- **Stages 22 → 25 are kept separate.** `verify-protection-secure`, `incident-freeze`, `incident-reconnect`, `welcome-back` preserve the dramatic rhythm of the incident interlude.
-- **Stages 38 + 39 are split.** 38 is mission accomplished; 39 is trace cleanup and disconnect.
-- **Stages 3 / 4 / 5 are not collapsed.** Three beats of the Tank intro; merging them would flatten the opening.
+A few stages are deliberately kept separate rather than merged, to preserve the story's rhythm:
+
+- **13 + 14** - `verify-prod-user-isolation` (the prod user is project-scoped) then `live-migrate-vm` after Tank spots a host scan.
+- **22 → 25** - `verify-protection-secure`, `incident-freeze`, `incident-reconnect`, `welcome-back`: the incident interlude.
+- **38 + 39** - `mission-complete` (mission accomplished) then `outro-cleanup` (wipe traces and disconnect).
