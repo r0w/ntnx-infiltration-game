@@ -119,7 +119,7 @@ CI runs both on every push and PR. No live cluster needed - everything is mock-b
 
 ## Telemetry
 
-Deployments can report anonymous usage stats to the game team's NIG Central dashboard: session counts, per-stage wall times, and the deployment's game version, run mode and cluster profile. No trigrams, no player names, no cluster credentials. Blueprint deployments report by default (the blueprint sets `NIG_CENTRAL_URL`); local dev doesn't unless you set it. Sending is fire-and-forget - an unreachable Central never affects the game.
+Blueprint deployments report anonymous usage stats (session counts, per-stage timings, game version) to the team's NIG Central dashboard - never trigrams, names or credentials. Controlled by `NIG_CENTRAL_URL`; unset = off (the local-dev default).
 
 ## Contributing
 
