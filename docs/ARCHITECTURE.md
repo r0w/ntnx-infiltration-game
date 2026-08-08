@@ -53,11 +53,39 @@ packs/ntnx-infiltration/
 └── fixtures.json      # mock-mode responses
 ```
 
-A stage carries ordered catalog keys. The runner resolves each against the requested locale, falling back to `defaultLocale` and then to the key itself, so a missing translation shows up in-game as the raw key (a grep-able marker). Adding a language is pure data; a second game on another product is a new `packs/` directory and a different `GAME_PACK`. No engine changes either way.
+A stage carries ordered catalog keys. The runner resolves each against the requested locale, falling back to `defaultLocale` and then to the key itself, so a missing translation shows up in-game as the raw key (a grep-able marker). Adding a language is pure data; a second game on another product is a new `packs/` directory and a different `GAME_PACK`.
+
+`packs/nkp-bootcamp` is that second game, and it exercised the claim. Content was
+indeed pure data, but two things were not: its checks read Kubernetes rather than
+Prism (see the transport below), and a pack that teaches through screenshots
+wants different presentation from one that does not. So the manifest also carries
+display and boot switches, all defaulting to the infiltration game's behaviour:
+
+| Key | Effect when true |
+|---|---|
+| `pauseAfterImages` | Park on a "press Enter" after each image so it is not scrolled away |
+| `imageCaptions` | Print each image's alt text under it, not just in the lightbox |
+| `title` | The name players see, so a second pack is not branded as the first |
+| `clusterFacts` (false) | Skip the two Prism boot probes a pack that reads no cluster facts does not need |
+
+## Two transports, one shape
+
+A check's only handle on the world is its context. `ctx.nutanix` reaches Prism
+Central; `ctx.kube` reaches Kubernetes and is present only for packs that need
+it. Both follow the same contract: an interface the engine names, a mock adapter
+backed by the pack's `fixtures.json`, and a live adapter. That is what lets the
+whole NKP run play with no cluster at all.
+
+`packages/kube-transport` differs from the Nutanix one in a way worth knowing:
+an NKP fleet is several clusters, so a client is a router. `ref.cluster` picks
+one by NKP name and omitting it means the management cluster — necessary because
+a Project is a management object while the namespace it federates lives on a
+workload cluster. The operator still supplies one kubeconfig: the workload
+credentials are read from the CAPI `<cluster>-kubeconfig` secrets at boot.
 
 ## Wire protocol
 
-The frontend never parses markup. The server parses a small JSX-like grammar (`{Name}`, `<pause sec='3'/>`, `<input var='X'/>`, `<action name='foo'/>`, `<clear/>`, `<code>`, `<img>`, style tags) into `MessageUnit[]`:
+The frontend never parses markup. The server parses a small JSX-like grammar (`{Name}`, `<pause sec='3'/>`, `<input var='X'/>`, `<action name='foo'/>`, `<clear/>`, `<code>`, `<image>`, `<demo>`, style tags) into `MessageUnit[]`:
 
 ```ts
 type MessageUnit =

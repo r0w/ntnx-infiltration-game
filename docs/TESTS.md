@@ -20,6 +20,7 @@ bun test -t "lunch lock"                           # by name
 | `capability-gate.test.ts` | The gate verdicts: inactive, passed, missing capability, destructive-off-hpoc, missing upstream, admin gate |
 | `variables.test.ts` | The `Variables` store: get/set/delete, listeners, snapshot shape |
 | `lcm-updates.test.ts` | Stage-29 update counting (`dedupedUpdateCount`, `isReadingSettled`) |
+| `pause-after-images.test.ts` | The `pauseAfterImages` pacing rule: a prompt after each screenshot, never two, not fooled by the newline between messages |
 
 **`packages/nutanix`** - transport adapters.
 
@@ -28,6 +29,12 @@ bun test -t "lunch lock"                           # by name
 | `mock-adapter.test.ts` | Fixture matching, miss errors, SDK envelope shim, per-session overlay (`<action name='deleteVM'/>` hides the entity) |
 | `rest-adapter.test.ts` | Auth + headers, TLS toggle, non-2xx → typed error, GET 5xx retry |
 | `capability-probe.test.ts` | The four capability flags on healthy responses; degrades gracefully (never throws) |
+
+**`packages/kube-transport`** - read-only Kubernetes transport for the NKP pack.
+
+| File | What it pins |
+|---|---|
+| `mock.test.ts` | Fixture reads, `{Var}` interpolation then namespace filtering, per-cluster routing (management vs workload), kubeconfig parsing |
 
 **`packages/server`** - HTTP + DB + service layer, the bulk of the suite. Each file boots an in-memory SQLite + Hono router and drives it via `app.fetch()`, the same path the browser hits.
 
@@ -62,6 +69,7 @@ bun test -t "lunch lock"                           # by name
 |---|---|
 | `ssh-console.test.ts` | Tab-completion + `classifyPingLine` (timeout → fail, 0% loss → pass) |
 | `pack-state.test.ts` | What the Pack tab shows per stage: the five states, their precedence, and the reason line |
+| `append-units.test.ts` | Every protocol unit kind survives the conversion into render items — the whitelist that silently swallowed the `demo` unit |
 
 The React components, typewriter, and polling loop aren't unit-tested; they're thin views over state whose HTTP contract is covered by the route + e2e tests.
 
