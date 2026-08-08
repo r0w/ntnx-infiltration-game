@@ -19,6 +19,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- The install no longer fails on a Prism Central older than 7.5: it now asks the
+  cluster which API version it speaks instead of assuming the newest one.
+
 ## [1.0.0] - 2026-07-28
 
 ### Fixed

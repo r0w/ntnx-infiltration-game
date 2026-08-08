@@ -35,13 +35,42 @@ BASE = "https://%s:9440" % PC_IP
 AUTH = (PC_USERNAME, PC_PASSWORD)
 HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
+# PC 7.5 serves these v4 namespaces at v4.2; PC 7.3 stops at v4.1 and 404s
+# anything pinned higher. Probe once per namespace, highest first.
+_NS_VER = {}
+
+
+def ns_version(ns, probe, candidates=('v4.2', 'v4.1', 'v4.0')):
+    """Highest version of a v4 namespace this PC actually serves."""
+    if ns in _NS_VER:
+        return _NS_VER[ns]
+    for v in candidates:
+        try:
+            r = requests.get("%s/api/%s/%s/%s" % (BASE, ns, v, probe),
+                             auth=AUTH, headers=HEADERS, verify=False, timeout=30)
+            code = r.status_code
+        except Exception:
+            # Unreachable, or a response we can't read a status off — treat
+            # as "this version didn't answer" and try the next candidate.
+            continue
+        if code != 404:
+            print("[ver]  %s -> %s" % (ns, v))
+            _NS_VER[ns] = v
+            return v
+    print("[ver]  %s -> %s (no probe answered, using lowest)" % (ns, candidates[-1]))
+    _NS_VER[ns] = candidates[-1]
+    return candidates[-1]
+
+
+def lcm_version():
+    return ns_version('lifecycle', 'resources/lcm-summaries')
+
 
 # The v4 LCM action is `inventory` (NOT `perform-inventory` — that path
-# 404s, the bug seen in the 2026-06-01 run). v4.2 (PC 7.3+) verified live
-# = 202 with a `{}` body. No older fallback — v4.0 rejects any body
-# ("No request body is expected"), so it'd 400 on the 7.5 HPoC we ship to.
-SUMMARIES = "/api/lifecycle/v4.2/resources/lcm-summaries"
-INVENTORY = "/api/lifecycle/v4.2/operations/$actions/inventory"
+# 404s, the bug seen in the 2026-06-01 run). Version is negotiated: PC 7.5
+# has v4.2, PC 7.3 tops out at v4.1. v4.2/v4.1 want a `{}` body; v4.0
+# rejects any body ("No request body is expected") and wants none, both
+# verified live -> 202.
 
 
 def cluster_ids():
@@ -50,7 +79,9 @@ def cluster_ids():
     # back to a single default-cluster inventory rather than crashing the
     # install runbook (this task is non-fatal by design).
     try:
-        r = requests.get(BASE + SUMMARIES, auth=AUTH, headers=HEADERS,
+        r = requests.get("%s/api/lifecycle/%s/resources/lcm-summaries"
+                         % (BASE, lcm_version()),
+                         auth=AUTH, headers=HEADERS,
                          verify=False, timeout=20)
         ids = []
         if r.status_code == 200:
@@ -72,8 +103,12 @@ def fire(cid):
     if cid:
         HEADERS["X-Cluster-Id"] = cid
     try:
-        r = requests.post(BASE + INVENTORY, auth=AUTH, headers=HEADERS,
-                          verify=False, timeout=20, data="{}")
+        v = lcm_version()
+        url = "%s/api/lifecycle/%s/operations/$actions/inventory" % (BASE, v)
+        # v4.0 refuses a request body; v4.1+ expects one.
+        body = None if v == "v4.0" else "{}"
+        r = requests.post(url, auth=AUTH, headers=HEADERS,
+                          verify=False, timeout=20, data=body)
         return r.status_code in (200, 201, 202), r.status_code, r.text[:160]
     except Exception as e:
         return False, 0, str(e)[:160]

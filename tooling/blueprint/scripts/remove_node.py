@@ -40,11 +40,40 @@ CLUSTER_PROFILE = '@@{CLUSTER_PROFILE}@@'
 
 PC_BASE = "https://%s:9440" % PC_IP
 BASE = "%s/api/clustermgmt/v4.0" % PC_BASE
-# remove-node is driven on v4.2 (the version whose precheck reports the
-# EC-X blocker we retry on); the host list stays on v4.0 (unchanged).
-REMOVE_BASE = "%s/api/clustermgmt/v4.2" % PC_BASE
 AUTH = (PC_USERNAME, PC_PASSWORD)
 HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
+
+# PC 7.5 serves these v4 namespaces at v4.2; PC 7.3 stops at v4.1 and 404s
+# anything pinned higher. Probe once per namespace, highest first.
+_NS_VER = {}
+
+
+def ns_version(ns, probe, candidates=('v4.2', 'v4.1', 'v4.0')):
+    """Highest version of a v4 namespace this PC actually serves."""
+    if ns in _NS_VER:
+        return _NS_VER[ns]
+    for v in candidates:
+        try:
+            r = requests.get("%s/api/%s/%s/%s" % (PC_BASE, ns, v, probe),
+                             auth=AUTH, headers=HEADERS, verify=False, timeout=30)
+            code = r.status_code
+        except Exception:
+            # Unreachable, or a response we can't read a status off — treat
+            # as "this version didn't answer" and try the next candidate.
+            continue
+        if code != 404:
+            print("[ver]  %s -> %s" % (ns, v))
+            _NS_VER[ns] = v
+            return v
+    print("[ver]  %s -> %s (no probe answered, using lowest)" % (ns, candidates[-1]))
+    _NS_VER[ns] = candidates[-1]
+    return candidates[-1]
+
+
+def remove_base():
+    # remove-node precheck is the one that reports the EC-X blocker we retry on.
+    return "%s/api/clustermgmt/%s" % (
+        PC_BASE, ns_version('clustermgmt', 'config/clusters?$limit=1'))
 
 # Fast polling for the first 90 s (catches the NORMAL → TO_BE_REMOVED
 # transition quickly), then slow polling every 15 s for up to ~50 min.
@@ -102,7 +131,7 @@ def attempt_remove(node_uuid):
     """
     body = {"nodeUuids": [node_uuid]}
     r = requests.post(
-        "%s/config/clusters/%s/$actions/remove-node" % (REMOVE_BASE, CLUSTER_UUID),
+        "%s/config/clusters/%s/$actions/remove-node" % (remove_base(), CLUSTER_UUID),
         auth=AUTH, headers=HEADERS, verify=False, timeout=60,
         json=body,
     )
@@ -116,7 +145,8 @@ def attempt_remove(node_uuid):
         print("  remove-node accepted (HTTP %d, no task ref) — polling hosts" % r.status_code)
         return 'started'
 
-    task_url = "%s/api/prism/v4.2/config/tasks/%s" % (PC_BASE, task_ext_id)
+    task_url = "%s/api/prism/%s/config/tasks/%s" % (
+        PC_BASE, ns_version('prism', 'config/tasks?$limit=1'), task_ext_id)
     for _ in range(TASK_PRECHECK_ITERS):
         try:
             tr = requests.get(task_url, auth=AUTH, headers=HEADERS, verify=False, timeout=30)

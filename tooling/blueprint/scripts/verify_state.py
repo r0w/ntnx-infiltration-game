@@ -39,6 +39,32 @@ BASE = "%s/api/clustermgmt" % PC_BASE
 AUTH = (PC_USERNAME, PC_PASSWORD)
 HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
+# PC 7.5 serves these v4 namespaces at v4.2; PC 7.3 stops at v4.1 and 404s
+# anything pinned higher. Probe once per namespace, highest first.
+_NS_VER = {}
+
+
+def ns_version(ns, probe, candidates=('v4.2', 'v4.1', 'v4.0')):
+    """Highest version of a v4 namespace this PC actually serves."""
+    if ns in _NS_VER:
+        return _NS_VER[ns]
+    for v in candidates:
+        try:
+            r = requests.get("%s/api/%s/%s/%s" % (PC_BASE, ns, v, probe),
+                             auth=AUTH, headers=HEADERS, verify=False, timeout=30)
+            code = r.status_code
+        except Exception:
+            # Unreachable, or a response we can't read a status off — treat
+            # as "this version didn't answer" and try the next candidate.
+            continue
+        if code != 404:
+            print("[ver]  %s -> %s" % (ns, v))
+            _NS_VER[ns] = v
+            return v
+    print("[ver]  %s -> %s (no probe answered, using lowest)" % (ns, candidates[-1]))
+    _NS_VER[ns] = candidates[-1]
+    return candidates[-1]
+
 
 def fetch(version, path):
     r = requests.get(
@@ -74,7 +100,8 @@ def discover_unconfigured_nodes(cluster_uuid, max_polls=60):
     if not task_ext_id:
         return None, "discover task missing extId"
 
-    task_url = "%s/api/prism/v4.2/config/tasks/%s" % (PC_BASE, task_ext_id)
+    task_url = "%s/api/prism/%s/config/tasks/%s" % (
+        PC_BASE, ns_version('prism', 'config/tasks?$limit=1'), task_ext_id)
     last_status = None
     succeeded = False
     for _ in range(max_polls):
@@ -93,8 +120,8 @@ def discover_unconfigured_nodes(cluster_uuid, max_polls=60):
 
     short_id = task_ext_id.split(':')[-1]
     resp_url = (
-        "%s/api/clustermgmt/v4.2/config/task-response/%s?taskResponseType=UNCONFIGURED_NODES"
-        % (PC_BASE, short_id)
+        "%s/api/clustermgmt/%s/config/task-response/%s?taskResponseType=UNCONFIGURED_NODES"
+        % (PC_BASE, ns_version('clustermgmt', 'config/clusters?$limit=1'), short_id)
     )
     try:
         rr = requests.get(resp_url, auth=AUTH, headers=HEADERS, verify=False, timeout=20)
