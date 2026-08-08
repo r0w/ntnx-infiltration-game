@@ -22,6 +22,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
   pause on each one so it is not scrolled away while you read it.
 - The NKP tour and the NDK lab open their interactive demo in the game instead
   of sending players off to the bootcamp site.
+- A collapsible contents menu down the left of the NKP bootcamp, with the
+  chapters of the original, showing where you are and scrolling back to any
+  step you have already read.
 - The blueprint launch screen now asks which game to install, NCP or NKP.
 - The Pack tab can export the stage setup as one string, import it on another
   instance, and reset every stage back to the pack defaults.
@@ -40,6 +43,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- A screenshot with a long caption no longer sits off to the left of it.
 - The install no longer stops when the cluster serves an older v4 API than
   expected, or when erasure coding has to be turned off on an Objects container.
 - The install no longer stops on clusters running NCM Self-Service 4.4.0, which

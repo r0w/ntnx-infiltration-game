@@ -51,6 +51,7 @@ bun test -t "lunch lock"                           # by name
 | `auto-fill-current.test.ts` | Auto-fillable vars (NodeSerial, NumberUpdates, Runway…) resolve in mock |
 | `nkp-pack.test.ts` | The NKP pack holds together: play order, stage ids, every check reachable, every message key and image present, and all twelve checks pass on the fixtures |
 | `e2e-nkp-mock.test.ts` | A learner plays the whole NKP bootcamp in mock and reaches the last stage |
+| `pack-nav.test.ts` | The contents menu resolves: translated titles with fallback, nesting, run index, lab flag, and a row naming a missing stage dropped with a warning |
 | `cluster-config-probe.test.ts` | The cached LCM count stage 29 judges against |
 | `pack-helpers.test.ts` | Stage-29 verdict deferral window after an LCM inventory |
 | `pack-integrity.test.ts` | Pack invariants: dependency-audit orphans, fixture placeholders |
@@ -69,7 +70,8 @@ bun test -t "lunch lock"                           # by name
 |---|---|
 | `ssh-console.test.ts` | Tab-completion + `classifyPingLine` (timeout → fail, 0% loss → pass) |
 | `pack-state.test.ts` | What the Pack tab shows per stage: the five states, their precedence, and the reason line |
-| `append-units.test.ts` | Every protocol unit kind survives the conversion into render items — the whitelist that silently swallowed the `demo` unit |
+| `append-units.test.ts` | Every protocol unit kind survives the conversion into render items — the whitelist that silently swallowed the `demo` unit — and `firstId`, the anchor the contents menu scrolls back to |
+| `reader-position.test.ts` | Where the contents menu thinks the player is, from the session's two different position reports |
 
 The React components, typewriter, and polling loop aren't unit-tested; they're thin views over state whose HTTP contract is covered by the route + e2e tests.
 

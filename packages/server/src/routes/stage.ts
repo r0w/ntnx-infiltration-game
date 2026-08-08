@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import type { SessionService } from '../session-service';
 import { HttpError } from '../session-service';
 import type { LoadedPack } from '../pack-loader';
+import { resolvePackNav } from '../pack-nav';
+import { consoleLogger } from '../logger';
 import { NutanixTransportError } from '@ntnx-game/nutanix';
 import type { SubmitInputRequest } from '@ntnx-game/shared';
 import { discoverableNodeSerials } from '@ntnx-game/engine';
@@ -54,6 +56,18 @@ export function buildStageRoutes(deps: StageRoutesDeps): Hono {
     if (!stageName) throw new HttpError(400, 'missing stage name');
     const r = service.gotoStage(c.req.param('id'), stageName);
     return c.json(r);
+  });
+
+  // The player-facing reading menu. Session-scoped because the titles are
+  // translated and the locale is a property of the session, not the pack.
+  // Returns an empty list for a pack with no `nav` — the caller renders
+  // nothing and the infiltration game is untouched.
+  router.get('/:id/nav', (c) => {
+    const session = service.getSession(c.req.param('id'));
+    const chapters = resolvePackNav(pack, session.locale, (m) =>
+      consoleLogger.warn(m, { pack: pack.manifest.id }),
+    );
+    return c.json({ chapters });
   });
 
   router.post('/:id/switch-identity', (c) => {

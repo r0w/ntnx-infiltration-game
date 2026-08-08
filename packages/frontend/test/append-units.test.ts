@@ -53,6 +53,39 @@ describe('appendUnits', () => {
     expect(awaiting).toBe('UserNum');
   });
 
+  // firstId is what the stage menu anchors on. Point it at the wrong item and
+  // "read this step again" scrolls to somebody else's step.
+  test('firstId names the first line this batch printed, not the last', () => {
+    const prior = appendUnits([], [{ kind: 'text', text: 'earlier' }], 'a', true).next;
+    const { firstId } = appendUnits(
+      prior,
+      [{ kind: 'text', text: 'opening line' }, { kind: 'text', text: 'and more' }],
+      'b',
+      true,
+    );
+    expect(firstId).toBe('b-0-1');
+  });
+
+  test('a batch that prints nothing claims no anchor of its own', () => {
+    const prior = appendUnits([], [{ kind: 'text', text: 'earlier' }], 'a', true).next;
+    const { firstId } = appendUnits(prior, [], 'b', true);
+    expect(firstId).toBeNull();
+  });
+
+  // A wipe means the earlier text is gone from the screen, so the anchor has
+  // to be whatever survived the wipe — not the line that preceded it.
+  test('a clear mid-batch moves the anchor to the first line after the wipe', () => {
+    const prior = appendUnits([], [{ kind: 'text', text: 'earlier' }], 'a', true).next;
+    const { next, firstId } = appendUnits(
+      prior,
+      [{ kind: 'text', text: 'doomed' }, { kind: 'clear' }, { kind: 'text', text: 'fresh start' }],
+      'b',
+      true,
+    );
+    expect(next).toHaveLength(1);
+    expect(firstId).toBe(next[0]!.id);
+  });
+
   test('clear wipes the scrollback only when clears are allowed', () => {
     const prior = appendUnits([], [{ kind: 'text', text: 'earlier' }], 'a', true).next;
     expect(appendUnits(prior, [{ kind: 'clear' }], 'b', true).next).toEqual([]);

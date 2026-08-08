@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState, type CSSProperties } from 'react';
-import { api, ApiError, type PackInfo } from './api';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { api, ApiError, type PackInfo, type PackNavChapter } from './api';
 import { DevPanel } from './DevPanel';
 import { FauxTerminal } from './FauxTerminal';
+import { StageRail } from './StageRail';
 import { LightboxProvider } from './Lightbox';
 import { LoginForm } from './LoginForm';
 import { ConfirmModal } from './Modal';
@@ -42,6 +43,32 @@ function readStoredSkipPauses(): boolean {
   try { return localStorage.getItem(SKIP_PAUSES_KEY) === '1'; } catch { return false; }
 }
 
+/**
+ * Where the player is in the run, for the reading menu.
+ *
+ * The session reports two different things and neither is "where I am" on its
+ * own: `currentStage` is the last stage *completed*, and `awaitingStageName`
+ * is set only while a prompt is on screen. Parked at a prompt the second one
+ * is the answer; mid-stream it is null and the answer is one past the first.
+ */
+export function readerPosition(
+  order: string[],
+  currentStage: string | null,
+  awaitingStageName: string | null,
+  finished: boolean,
+): { index: number; stage: string | null } {
+  if (finished) return { index: order.length, stage: null };
+  if (awaitingStageName) {
+    const i = order.indexOf(awaitingStageName);
+    if (i >= 0) return { index: i, stage: awaitingStageName };
+  }
+  if (currentStage === null) return { index: 0, stage: order[0] ?? null };
+  const done = order.indexOf(currentStage);
+  if (done < 0) return { index: 0, stage: order[0] ?? null };
+  const next = done + 1;
+  return { index: next, stage: order[next] ?? null };
+}
+
 export function GameApp() {
   const session = useSession();
   const [pack, setPack] = useState<PackInfo | null>(null);
@@ -54,6 +81,7 @@ export function GameApp() {
   const [autoPlayActing, setAutoPlayActing] = useState(false);
   const [autoPlayError, setAutoPlayError] = useState<string | null>(null);
   const [logoutPrompt, setLogoutPrompt] = useState(false);
+  const [nav, setNav] = useState<PackNavChapter[]>([]);
   const awaitingRef = session.awaitingVariable;
   const submitInput = session.submitInput;
   const advance = session.advance;
@@ -77,6 +105,10 @@ export function GameApp() {
   // null override → follow the server's pack speed.
   const typingSpeedMs = typingSpeedOverride ?? session.typingSpeedMs;
 
+  // Only stages still in the scrollback can be scrolled back to.
+  const stageStarts = session.stageStarts;
+  const reachableStages = useMemo(() => new Set(Object.keys(stageStarts)), [stageStarts]);
+
   // The pack names the game, so a second pack is not branded as the first.
   const gameTitle = pack?.title ?? 'ntnx infiltration game';
 
@@ -92,6 +124,21 @@ export function GameApp() {
     );
     return () => { cancelled = true; };
   }, []);
+
+  // The reading menu. Session-scoped because its titles are translated, so it
+  // is refetched when the player signs in again in another language.
+  useEffect(() => {
+    if (!session.sessionId) {
+      setNav([]);
+      return;
+    }
+    let cancelled = false;
+    api.nav(session.sessionId).then(
+      (p) => { if (!cancelled) setNav(p.chapters); },
+      () => { /* no menu is a fine outcome — the terminal is the game */ },
+    );
+    return () => { cancelled = true; };
+  }, [session.sessionId, session.locale]);
 
   const handleSubmit = useCallback(
     (v: string) => {
@@ -246,6 +293,13 @@ export function GameApp() {
   }
 
   const appStyle = { '--terminal-max-width': maxWidth } as CSSProperties;
+  const stageOrder = pack?.stages.map((s) => s.name) ?? [];
+  const position = readerPosition(
+    stageOrder,
+    session.currentStage,
+    session.awaitingStageName,
+    session.finished,
+  );
 
   return (
     <LightboxProvider>
@@ -265,8 +319,18 @@ export function GameApp() {
           </button>
         </div>
       </header>
+      <div className="app-body">
+      {nav.length > 0 && (
+        <StageRail
+          chapters={nav}
+          currentIndex={position.index}
+          activeStage={position.stage}
+          reachable={reachableStages}
+        />
+      )}
       <FauxTerminal
         items={session.items}
+        stageStarts={session.stageStarts}
         awaitingVariable={session.awaitingVariable}
         busy={session.busy || autoPlayActing}
         checkPending={session.checkPending}
@@ -282,6 +346,7 @@ export function GameApp() {
         onAdvance={handleAdvance}
         onSwitchIdentity={inIdentityCapture ? handleSwitchIdentity : undefined}
       />
+      </div>
       {session.error && <div className="app-error">{session.error}</div>}
       {autoPlayError && <div className="app-error">{autoPlayError}</div>}
       {devToolsAllowed && (

@@ -14,7 +14,9 @@ const ROOT = resolve(import.meta.dir, '../../..');
 const PACK = join(ROOT, 'packs/nkp-bootcamp');
 const FIXTURES = join(PACK, 'fixtures.json');
 
-type Manifest = { stages: string[]; supportedLocales: string[] };
+type NavItem = { stage: string; title: string; items?: NavItem[] };
+type NavChapter = { id: string; title: string; items: NavItem[] };
+type Manifest = { stages: string[]; supportedLocales: string[]; nav?: NavChapter[] };
 const manifest = JSON.parse(readFileSync(join(PACK, 'pack.json'), 'utf8')) as Manifest;
 
 type Stage = {
@@ -28,6 +30,19 @@ type Stage = {
 const stages: Stage[] = manifest.stages.map(
   (n) => JSON.parse(readFileSync(join(PACK, 'stages', `${n}.json`), 'utf8')) as Stage,
 );
+
+/** Every locale key the pack references: stage messages plus menu labels. */
+function navKeys(items: NavItem[]): string[] {
+  return items.flatMap((i) => [i.title, ...navKeys(i.items ?? [])]);
+}
+/** Menu rows in reading order, nested rows folded in where they appear. */
+function navStages(items: NavItem[]): string[] {
+  return items.flatMap((i) => [i.stage, ...navStages(i.items ?? [])]);
+}
+const messageKeys = [
+  ...stages.flatMap((s) => s.messages),
+  ...(manifest.nav ?? []).flatMap((c) => [c.title, ...navKeys(c.items)]),
+];
 
 const silentLogger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
 const noopNutanix: NutanixClient = {
@@ -92,17 +107,29 @@ describe('nkp pack structure', () => {
   });
 
   test('every message key resolves in every supported locale', () => {
-    const keys = stages.flatMap((s) => s.messages);
+    const keys = messageKeys;
     for (const locale of manifest.supportedLocales) {
       const bundle = JSON.parse(readFileSync(join(PACK, 'locales', `${locale}.json`), 'utf8')) as Record<string, string>;
       expect(`${locale}: ${keys.filter((k) => !(k in bundle)).join(', ')}`).toBe(`${locale}: `);
     }
   });
 
-  test('locales carry no keys no stage asks for', () => {
-    const keys = new Set(stages.flatMap((s) => s.messages));
+  test('locales carry no keys no stage or menu asks for', () => {
+    const keys = new Set(messageKeys);
     const en = JSON.parse(readFileSync(join(PACK, 'locales/en.json'), 'utf8')) as Record<string, string>;
     expect(Object.keys(en).filter((k) => !keys.has(k))).toEqual([]);
+  });
+
+  // The menu says where the player is by comparing its own row order against
+  // the run. Both properties below are what makes that reading true.
+  test('the menu lists every stage, once', () => {
+    const listed = (manifest.nav ?? []).flatMap((c) => navStages(c.items));
+    expect([...listed].sort()).toEqual([...manifest.stages].sort());
+  });
+
+  test('the menu runs in the same order as the pack', () => {
+    const listed = (manifest.nav ?? []).flatMap((c) => navStages(c.items));
+    expect(listed).toEqual(manifest.stages);
   });
 
   test('every image and demo poster a message references ships in the pack', () => {

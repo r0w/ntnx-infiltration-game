@@ -1,7 +1,7 @@
 {
   "id": "nkp-bootcamp",
-  "name": "NKP Bootcamp",
-  "title": "nkp bootcamp",
+  "name": "NKP Fundamentals",
+  "title": "NKP Fundamentals",
   "clusterFacts": false,
   "pauseAfterImages": true,
   "imageCaptions": true,
@@ -39,6 +39,160 @@
     "expose-service",
     "loadbalancer",
     "ingress"
+  ],
+  "nav": [
+    {
+      "id": "start",
+      "title": "nkp.nav.chapter.start",
+      "items": [
+        {
+          "stage": "welcome",
+          "title": "nkp.nav.welcome"
+        }
+      ]
+    },
+    {
+      "id": "fundamentals",
+      "title": "nkp.nav.chapter.fundamentals",
+      "items": [
+        {
+          "stage": "quick-tour",
+          "title": "nkp.nav.quick-tour"
+        },
+        {
+          "stage": "access",
+          "title": "nkp.nav.access"
+        },
+        {
+          "stage": "multitenancy",
+          "title": "nkp.nav.multitenancy",
+          "items": [
+            {
+              "stage": "workspaces",
+              "title": "nkp.nav.workspaces"
+            },
+            {
+              "stage": "create-project",
+              "title": "nkp.nav.create-project"
+            }
+          ]
+        },
+        {
+          "stage": "storage-intro",
+          "title": "nkp.nav.storage-intro",
+          "items": [
+            {
+              "stage": "storage-classes",
+              "title": "nkp.nav.storage-classes"
+            },
+            {
+              "stage": "block-storage",
+              "title": "nkp.nav.block-storage"
+            },
+            {
+              "stage": "file-storage",
+              "title": "nkp.nav.file-storage"
+            },
+            {
+              "stage": "wordpress-ingress",
+              "title": "nkp.nav.wordpress-ingress"
+            }
+          ]
+        },
+        {
+          "stage": "fundamentals-recap",
+          "title": "nkp.nav.takeaways"
+        }
+      ]
+    },
+    {
+      "id": "observability",
+      "title": "nkp.nav.chapter.observability",
+      "items": [
+        {
+          "stage": "metrics",
+          "title": "nkp.nav.metrics"
+        },
+        {
+          "stage": "insights",
+          "title": "nkp.nav.insights"
+        },
+        {
+          "stage": "cost",
+          "title": "nkp.nav.cost"
+        },
+        {
+          "stage": "observability-recap",
+          "title": "nkp.nav.takeaways"
+        }
+      ]
+    },
+    {
+      "id": "automation",
+      "title": "nkp.nav.chapter.automation",
+      "items": [
+        {
+          "stage": "gitops-source",
+          "title": "nkp.nav.gitops-source"
+        },
+        {
+          "stage": "gitops-app",
+          "title": "nkp.nav.gitops-app"
+        },
+        {
+          "stage": "dynamic-gitops",
+          "title": "nkp.nav.dynamic-gitops"
+        }
+      ]
+    },
+    {
+      "id": "conclusion",
+      "title": "nkp.nav.chapter.conclusion",
+      "items": [
+        {
+          "stage": "conclusion",
+          "title": "nkp.nav.takeaways"
+        },
+        {
+          "stage": "ndk",
+          "title": "nkp.nav.ndk"
+        }
+      ]
+    },
+    {
+      "id": "deploy-app",
+      "title": "nkp.nav.chapter.deploy-app",
+      "optional": true,
+      "items": [
+        {
+          "stage": "web-ide",
+          "title": "nkp.nav.web-ide"
+        },
+        {
+          "stage": "deploy-app",
+          "title": "nkp.nav.deploy-app"
+        },
+        {
+          "stage": "expose-service",
+          "title": "nkp.nav.expose-service"
+        }
+      ]
+    },
+    {
+      "id": "expose-prod",
+      "title": "nkp.nav.chapter.expose-prod",
+      "optional": true,
+      "items": [
+        {
+          "stage": "loadbalancer",
+          "title": "nkp.nav.loadbalancer"
+        },
+        {
+          "stage": "ingress",
+          "title": "nkp.nav.ingress"
+        }
+      ]
+    }
   ],
   "locales": "./locales",
   "defaultLocale": "en",

@@ -67,6 +67,26 @@ display and boot switches, all defaulting to the infiltration game's behaviour:
 | `imageCaptions` | Print each image's alt text under it, not just in the lightbox |
 | `title` | The name players see, so a second pack is not branded as the first |
 | `clusterFacts` (false) | Skip the two Prism boot probes a pack that reads no cluster facts does not need |
+| `nav` | A contents menu down the side of the terminal, in the source material's chapters |
+
+### The contents menu
+
+The infiltration game is a story played forward and has no menu. A bootcamp is a
+course someone came to learn from, and a learner re-reads: `nav` in the manifest
+gives that pack a table of contents, chapters and one level of nesting, with
+locale keys for the labels so the menu translates like everything else.
+
+Two rules keep it honest. It never advances the game: the only thing a row does
+is scroll the transcript back to where that stage began, so a menu can never
+skip a lab. And a row is clickable only while its opening line is still in the
+scrollback, which after a reload is nothing — the transcript lives in the
+browser, so the menu offers exactly what the terminal can still show. A stage's
+run position is read from `pack.stages`, not restated in `nav`; the pack test
+locks the two orders together (`packages/server/test/nkp-pack.test.ts`).
+
+The wiring between menu and terminal is a DOM contract, like the scroll pin's
+`data-page-break` and the lightbox's `data-primary-input`: the terminal stamps
+`data-stage` in front of each stage's first line and `stage-anchors.ts` finds it.
 
 ## Two transports, one shape
 

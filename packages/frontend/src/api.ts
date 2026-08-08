@@ -149,6 +149,28 @@ export interface PackInfo {
   }>;
 }
 
+/** One row of the pack's reading menu. Nests one level, like the bootcamp. */
+export interface PackNavItem {
+  stage: string;
+  title: string;
+  /** Position in pack order — compared against the player's own position. */
+  index: number;
+  /** Validated against the cluster, so the menu marks it as a lab. */
+  hasCheck: boolean;
+  items: PackNavItem[];
+}
+
+export interface PackNavChapter {
+  id: string;
+  title: string;
+  optional: boolean;
+  items: PackNavItem[];
+}
+
+export interface PackNavPayload {
+  chapters: PackNavChapter[];
+}
+
 export interface ScoreboardEntry {
   rank: number;
   sessionId: string;
@@ -418,6 +440,9 @@ export const api = {
     post<{ ok: boolean; variable: string; value?: string; error?: string }>(
       `/session/${id}/auto-fill-current`,
     ),
+  /** The pack's reading menu, titles already in the session's language.
+   *  `chapters: []` for a pack that ships no menu. */
+  nav: (id: string) => get<PackNavPayload>(`/session/${id}/nav`),
   pack: () => get<PackInfo>('/pack'),
   scoreboard: () => get<ScoreboardPayload>('/scoreboard'),
   combinedScoreboard: () => get<CombinedScoreboardPayload>('/scoreboard/combined'),

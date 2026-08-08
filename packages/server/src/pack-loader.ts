@@ -17,6 +17,25 @@ import {
   CleanupRegistry,
 } from '@ntnx-game/engine';
 
+/**
+ * One row in a pack's reading menu. `stage` names a stage in `stages`;
+ * `title` is a locale key, resolved per session. Rows nest one level, which
+ * is as deep as the NKP bootcamp's own sidebar goes.
+ */
+export interface PackNavItem {
+  stage: string;
+  title: string;
+  items?: PackNavItem[];
+}
+
+export interface PackNavChapter {
+  id: string;
+  title: string;
+  /** A chapter the run reaches but nobody has to finish (the trailing labs). */
+  optional?: boolean;
+  items: PackNavItem[];
+}
+
 export interface PackManifest {
   id: string;
   name: string;
@@ -58,6 +77,17 @@ export interface PackManifest {
    * visible; one that uses them as atmosphere does not. Off by default.
    */
   imageCaptions?: boolean;
+  /**
+   * A reading menu down the side of the terminal: chapters, the stages under
+   * them, and the order they were taught in. Present only for packs whose
+   * source material had a table of contents worth keeping — the infiltration
+   * game is a story you play forward, and has none.
+   *
+   * The menu is a map, not a controller. It never unlocks anything: lock state
+   * is read from where the player has actually got to, and the order here must
+   * match `stages` for that reading to hold.
+   */
+  nav?: PackNavChapter[];
   checks: string;
   actions?: string;
   /**
