@@ -1,16 +1,16 @@
 {
-  "id": "nkp-024",
-  "name": "loadbalancer",
+  "id": "nkp-017",
+  "name": "gitops-app",
   "active": true,
   "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
-    "nkp.lb.intro",
-    "nkp.lb.cmd",
-    "nkp.lb.prompt"
+    "nkp.boutique.intro",
+    "nkp.boutique.explore",
+    "nkp.boutique.prompt"
   ],
   "check": {
-    "fn": "CheckLoadBalancer"
+    "fn": "CheckBoutiqueRunning"
   },
   "captures": [
     "Ok"

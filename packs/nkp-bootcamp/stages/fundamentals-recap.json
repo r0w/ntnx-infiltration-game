@@ -1,13 +1,11 @@
 {
-  "id": "nkp-007",
-  "name": "storage-classes",
+  "id": "nkp-011",
+  "name": "fundamentals-recap",
   "active": true,
   "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
-    "nkp.sc.intro",
-    "nkp.sc.namespace",
-    "nkp.sc.classes"
+    "nkp.recap.fundamentals"
   ],
   "needs": [
     "UserNum"

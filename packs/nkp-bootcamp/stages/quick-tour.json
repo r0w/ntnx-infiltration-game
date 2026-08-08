@@ -1,11 +1,12 @@
 {
-  "id": "nkp-002",
-  "name": "access",
+  "id": "nkp-001",
+  "name": "quick-tour",
   "active": true,
   "prompt": "system",
   "defaultColor": "cyan",
   "messages": [
-    "nkp.access.console"
+    "nkp.tour.intro",
+    "nkp.tour.demo"
   ],
   "needs": [
     "UserNum"

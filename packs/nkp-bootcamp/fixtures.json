@@ -1,25 +1,830 @@
 {
   "kube": {
-    "v1/persistentvolumeclaims": [
-      {
-        "metadata": { "name": "mysql-pv-claim", "namespace": "user{UserNum}", "labels": { "app": "wordpress" } },
-        "spec": {
-          "accessModes": ["ReadWriteOnce"],
-          "resources": { "requests": { "storage": "20Gi" } },
-          "storageClassName": "nutanix-volume"
+    "management": {
+      "workspaces.kommander.mesosphere.io/v1alpha1/projects": [
+        {
+          "metadata": {
+            "name": "user{UserNum}",
+            "namespace": "kommander-default-workspace"
+          },
+          "spec": {
+            "namespaceName": "user{UserNum}",
+            "placement": {
+              "clusterSelector": {
+                "matchLabels": {
+                  "infraId": "pc"
+                }
+              }
+            }
+          },
+          "status": {
+            "namespaceRef": {
+              "name": "user{UserNum}"
+            }
+          }
+        }
+      ],
+      "source.toolkit.fluxcd.io/v1/gitrepositories": [
+        {
+          "metadata": {
+            "name": "online-boutique",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "url": "https://github.com/nutanixdev/nkp-microservices-demo.git",
+            "ref": {
+              "branch": "main"
+            }
+          },
+          "status": {
+            "conditions": [
+              {
+                "type": "Ready",
+                "status": "True",
+                "message": "stored artifact for revision main"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "workload01": {
+      "v1/namespaces": [
+        {
+          "metadata": {
+            "name": "user{UserNum}"
+          }
+        }
+      ],
+      "v1/persistentvolumeclaims": [
+        {
+          "metadata": {
+            "name": "mysql-pv-claim",
+            "namespace": "user{UserNum}",
+            "labels": {
+              "app": "wordpress"
+            }
+          },
+          "spec": {
+            "accessModes": [
+              "ReadWriteOnce"
+            ],
+            "resources": {
+              "requests": {
+                "storage": "20Gi"
+              }
+            },
+            "storageClassName": "nutanix-volume"
+          },
+          "status": {
+            "phase": "Bound"
+          }
         },
-        "status": { "phase": "Bound" }
-      }
-    ],
-    "apps/v1/deployments": [
-      {
-        "metadata": { "name": "wordpress-mysql", "namespace": "user{UserNum}", "labels": { "app": "wordpress" } },
-        "spec": {
-          "strategy": { "type": "Recreate" },
-          "template": { "spec": { "containers": [{ "name": "mysql", "image": "mysql:8.0" }] } }
+        {
+          "metadata": {
+            "name": "wp-pv-claim",
+            "namespace": "user{UserNum}",
+            "labels": {
+              "app": "wordpress"
+            }
+          },
+          "spec": {
+            "accessModes": [
+              "ReadWriteMany"
+            ],
+            "resources": {
+              "requests": {
+                "storage": "20Gi"
+              }
+            },
+            "storageClassName": "nutanix-files"
+          },
+          "status": {
+            "phase": "Bound"
+          }
+        }
+      ],
+      "apps/v1/deployments": [
+        {
+          "metadata": {
+            "name": "wordpress-mysql",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "strategy": {
+              "type": "Recreate"
+            },
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "mysql",
+                    "image": "mysql:8.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
         },
-        "status": { "availableReplicas": 1 }
-      }
-    ]
+        {
+          "metadata": {
+            "name": "wordpress",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 2,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "wordpress",
+                    "image": "wordpress:apache"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 2
+          }
+        },
+        {
+          "metadata": {
+            "name": "user{UserNum}-nkp-simple-app",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "user{UserNum}-nkp-simple-app",
+                    "image": "nginx:1.27"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "adservice",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "adservice",
+                    "image": "gcr.io/google-samples/microservices-demo/adservice:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "cartservice",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "cartservice",
+                    "image": "gcr.io/google-samples/microservices-demo/cartservice:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "checkoutservice",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "checkoutservice",
+                    "image": "gcr.io/google-samples/microservices-demo/checkoutservice:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "currencyservice",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "currencyservice",
+                    "image": "gcr.io/google-samples/microservices-demo/currencyservice:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "emailservice",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "emailservice",
+                    "image": "gcr.io/google-samples/microservices-demo/emailservice:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "frontend",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "frontend",
+                    "image": "gcr.io/google-samples/microservices-demo/frontend:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "loadgenerator",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "loadgenerator",
+                    "image": "gcr.io/google-samples/microservices-demo/loadgenerator:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "paymentservice",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "paymentservice",
+                    "image": "gcr.io/google-samples/microservices-demo/paymentservice:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "productcatalogservice",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "productcatalogservice",
+                    "image": "gcr.io/google-samples/microservices-demo/productcatalogservice:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "recommendationservice",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "recommendationservice",
+                    "image": "gcr.io/google-samples/microservices-demo/recommendationservice:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "shippingservice",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "shippingservice",
+                    "image": "gcr.io/google-samples/microservices-demo/shippingservice:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "redis-cart",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "redis-cart",
+                    "image": "gcr.io/google-samples/microservices-demo/redis-cart:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        }
+      ],
+      "v1/services": [
+        {
+          "metadata": {
+            "name": "frontend-external",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "type": "LoadBalancer",
+            "ports": [
+              {
+                "port": 80
+              }
+            ]
+          },
+          "status": {
+            "loadBalancer": {
+              "ingress": [
+                {
+                  "ip": "10.54.30.40"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "metadata": {
+            "name": "user{UserNum}-nkp-simple-app",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "type": "LoadBalancer",
+            "ports": [
+              {
+                "port": 80,
+                "nodePort": 31347
+              }
+            ]
+          },
+          "status": {
+            "loadBalancer": {
+              "ingress": [
+                {
+                  "ip": "10.54.30.41"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "networking.k8s.io/v1/ingresses": [
+        {
+          "metadata": {
+            "name": "wordpress",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "ingressClassName": "kommander-traefik",
+            "rules": [
+              {
+                "host": "wordpress{UserNum}.10.54.30.19.sslip.io",
+                "http": {
+                  "paths": [
+                    {
+                      "path": "/",
+                      "pathType": "Prefix",
+                      "backend": {
+                        "service": {
+                          "name": "wordpress",
+                          "port": {
+                            "number": 80
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "metadata": {
+            "name": "user{UserNum}-nkp-simple-app",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "ingressClassName": "kommander-traefik",
+            "rules": [
+              {
+                "host": "user{UserNum}.10.54.30.16.sslip.io",
+                "http": {
+                  "paths": [
+                    {
+                      "path": "/",
+                      "pathType": "Prefix",
+                      "backend": {
+                        "service": {
+                          "name": "user{UserNum}-nkp-simple-app",
+                          "port": {
+                            "number": 80
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "workload02": {
+      "v1/namespaces": [
+        {
+          "metadata": {
+            "name": "user{UserNum}"
+          }
+        }
+      ],
+      "apps/v1/deployments": [
+        {
+          "metadata": {
+            "name": "adservice",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "adservice",
+                    "image": "gcr.io/google-samples/microservices-demo/adservice:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "cartservice",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "cartservice",
+                    "image": "gcr.io/google-samples/microservices-demo/cartservice:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "checkoutservice",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "checkoutservice",
+                    "image": "gcr.io/google-samples/microservices-demo/checkoutservice:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "currencyservice",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "currencyservice",
+                    "image": "gcr.io/google-samples/microservices-demo/currencyservice:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "emailservice",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "emailservice",
+                    "image": "gcr.io/google-samples/microservices-demo/emailservice:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "frontend",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "frontend",
+                    "image": "gcr.io/google-samples/microservices-demo/frontend:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "loadgenerator",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "loadgenerator",
+                    "image": "gcr.io/google-samples/microservices-demo/loadgenerator:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "paymentservice",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "paymentservice",
+                    "image": "gcr.io/google-samples/microservices-demo/paymentservice:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "productcatalogservice",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "productcatalogservice",
+                    "image": "gcr.io/google-samples/microservices-demo/productcatalogservice:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "recommendationservice",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "recommendationservice",
+                    "image": "gcr.io/google-samples/microservices-demo/recommendationservice:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "shippingservice",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "shippingservice",
+                    "image": "gcr.io/google-samples/microservices-demo/shippingservice:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        },
+        {
+          "metadata": {
+            "name": "redis-cart",
+            "namespace": "user{UserNum}"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "redis-cart",
+                    "image": "gcr.io/google-samples/microservices-demo/redis-cart:v0.10.0"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        }
+      ]
+    }
   }
 }

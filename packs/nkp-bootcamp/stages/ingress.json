@@ -1,5 +1,5 @@
 {
-  "id": "nkp-004",
+  "id": "nkp-025",
   "name": "ingress",
   "active": true,
   "prompt": "tank",
@@ -7,7 +7,13 @@
   "messages": [
     "nkp.ingress.intro",
     "nkp.ingress.yaml",
-    "nkp.ingress.apply"
+    "nkp.ingress.prompt"
+  ],
+  "check": {
+    "fn": "CheckSimpleAppIngress"
+  },
+  "captures": [
+    "Ok"
   ],
   "needs": [
     "UserNum"

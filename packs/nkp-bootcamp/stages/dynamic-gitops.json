@@ -1,16 +1,16 @@
 {
-  "id": "nkp-024",
-  "name": "loadbalancer",
+  "id": "nkp-018",
+  "name": "dynamic-gitops",
   "active": true,
   "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
-    "nkp.lb.intro",
-    "nkp.lb.cmd",
-    "nkp.lb.prompt"
+    "nkp.dyn.intro",
+    "nkp.dyn.edit",
+    "nkp.dyn.prompt"
   ],
   "check": {
-    "fn": "CheckLoadBalancer"
+    "fn": "CheckDynamicProject"
   },
   "captures": [
     "Ok"

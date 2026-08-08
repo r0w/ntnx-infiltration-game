@@ -269,12 +269,22 @@ export interface KubeResourceRef {
   plural: string;
   /** Namespace to scope to; omit for cluster-scoped or all-namespaces. */
   namespace?: string;
+  /**
+   * Which cluster to read, by NKP name (`workload01`, `workload02`). Omit for
+   * the management cluster. An NKP fleet is several clusters and the same
+   * lab spans them: the learner's Project and GitOps source are management
+   * objects, while the namespace they federate into lives on a workload
+   * cluster. A check names the cluster it means; the transport routes.
+   */
+  cluster?: string;
 }
 
 export interface KubeClient {
   readonly mode: 'mock' | 'live';
   /** List resources of a kind, returning the `.items` array (empty if none). */
   list(ref: KubeResourceRef): Promise<Array<Record<string, unknown>>>;
+  /** Cluster names this client can reach, management first. For diagnostics. */
+  readonly clusters: readonly string[];
 }
 
 export interface CheckContext {

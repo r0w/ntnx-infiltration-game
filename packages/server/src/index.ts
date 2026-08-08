@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createNutanixClient, probeCapabilities } from '@ntnx-game/nutanix';
-import { createKubeClient, createLiveKubeFromKubeconfig } from '@ntnx-game/kube-transport';
+import { createKubeClient, createLiveKubeFleet } from '@ntnx-game/kube-transport';
 import { loadConfig } from './config';
 import { consoleLogger } from './logger';
 import { openDatabase } from './db/database';
@@ -70,16 +70,21 @@ async function main() {
   });
 
   // Read-only k8s transport for the NKP pack. In mock mode it reads the pack's
-  // fixtures.json (`kube` section), no cluster. In live/test mode, if a
-  // kubeconfig path is provided (NKP_KUBECONFIG), read the real cluster with it.
+  // fixtures.json (`kube` section), no cluster. In live/test mode, NKP_KUBECONFIG
+  // points at the *management* kubeconfig; the workload clusters come from the
+  // CAPI kubeconfig secrets on that cluster, so the operator supplies one file
+  // and the whole fleet is readable.
   // NCP packs never touch ctx.kube, so this stays undefined for them.
   let kube;
   if (transportMode === 'mock') {
     kube = createKubeClient({ mode: 'mock', fixtures: fixturesPath });
   } else if (process.env.NKP_KUBECONFIG) {
     const { readFileSync } = await import('node:fs');
-    kube = createLiveKubeFromKubeconfig(readFileSync(process.env.NKP_KUBECONFIG, 'utf8'));
-    consoleLogger.info('kube transport ready (live)', { kubeconfig: process.env.NKP_KUBECONFIG });
+    kube = await createLiveKubeFleet(readFileSync(process.env.NKP_KUBECONFIG, 'utf8'));
+    consoleLogger.info('kube transport ready (live)', {
+      kubeconfig: process.env.NKP_KUBECONFIG,
+      clusters: kube.clusters.join(', '),
+    });
   }
 
   const probe = await probeCapabilities({ nutanix, logger: consoleLogger });

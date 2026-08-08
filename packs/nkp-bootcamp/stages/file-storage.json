@@ -1,16 +1,17 @@
 {
-  "id": "nkp-024",
-  "name": "loadbalancer",
+  "id": "nkp-009",
+  "name": "file-storage",
   "active": true,
   "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
-    "nkp.lb.intro",
-    "nkp.lb.cmd",
-    "nkp.lb.prompt"
+    "nkp.file.intro",
+    "nkp.file.manifest",
+    "nkp.file.apply",
+    "nkp.file.prompt"
   ],
   "check": {
-    "fn": "CheckLoadBalancer"
+    "fn": "CheckFileStorage"
   },
   "captures": [
     "Ok"

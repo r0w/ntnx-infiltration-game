@@ -1,5 +1,5 @@
 {
-  "id": "nkp-007",
+  "id": "nkp-005",
   "name": "create-project",
   "active": true,
   "prompt": "tank",
@@ -7,7 +7,13 @@
   "messages": [
     "nkp.project.intro",
     "nkp.project.form",
-    "nkp.project.done"
+    "nkp.project.prompt"
+  ],
+  "check": {
+    "fn": "CheckProject"
+  },
+  "captures": [
+    "Ok"
   ],
   "needs": [
     "UserNum"

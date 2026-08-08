@@ -1,5 +1,5 @@
 {
-  "id": "nkp-002",
+  "id": "nkp-022",
   "name": "deploy-app",
   "active": true,
   "prompt": "tank",
@@ -7,7 +7,13 @@
   "messages": [
     "nkp.deploy.intro",
     "nkp.deploy.cmd",
-    "nkp.deploy.result"
+    "nkp.deploy.prompt"
+  ],
+  "check": {
+    "fn": "CheckSimpleApp"
+  },
+  "captures": [
+    "Ok"
   ],
   "needs": [
     "UserNum"

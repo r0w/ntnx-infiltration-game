@@ -1,13 +1,12 @@
 {
-  "id": "nkp-007",
-  "name": "storage-classes",
+  "id": "nkp-014",
+  "name": "cost",
   "active": true,
   "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
-    "nkp.sc.intro",
-    "nkp.sc.namespace",
-    "nkp.sc.classes"
+    "nkp.cost.intro",
+    "nkp.cost.explore"
   ],
   "needs": [
     "UserNum"

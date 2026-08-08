@@ -1,16 +1,16 @@
 {
-  "id": "nkp-024",
-  "name": "loadbalancer",
+  "id": "nkp-010",
+  "name": "wordpress-ingress",
   "active": true,
   "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
-    "nkp.lb.intro",
-    "nkp.lb.cmd",
-    "nkp.lb.prompt"
+    "nkp.wping.intro",
+    "nkp.wping.manifest",
+    "nkp.wping.prompt"
   ],
   "check": {
-    "fn": "CheckLoadBalancer"
+    "fn": "CheckWordpressIngress"
   },
   "captures": [
     "Ok"

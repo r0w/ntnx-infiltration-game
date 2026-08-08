@@ -1,13 +1,12 @@
 {
-  "id": "nkp-007",
-  "name": "storage-classes",
+  "id": "nkp-021",
+  "name": "web-ide",
   "active": true,
   "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
-    "nkp.sc.intro",
-    "nkp.sc.namespace",
-    "nkp.sc.classes"
+    "nkp.ide.intro",
+    "nkp.ide.terminal"
   ],
   "needs": [
     "UserNum"

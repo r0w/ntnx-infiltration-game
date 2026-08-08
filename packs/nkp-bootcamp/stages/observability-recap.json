@@ -1,13 +1,11 @@
 {
-  "id": "nkp-007",
-  "name": "storage-classes",
+  "id": "nkp-015",
+  "name": "observability-recap",
   "active": true,
   "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
-    "nkp.sc.intro",
-    "nkp.sc.namespace",
-    "nkp.sc.classes"
+    "nkp.recap.observability"
   ],
   "needs": [
     "UserNum"

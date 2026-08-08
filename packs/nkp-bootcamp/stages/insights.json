@@ -1,13 +1,12 @@
 {
-  "id": "nkp-007",
-  "name": "storage-classes",
+  "id": "nkp-013",
+  "name": "insights",
   "active": true,
   "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
-    "nkp.sc.intro",
-    "nkp.sc.namespace",
-    "nkp.sc.classes"
+    "nkp.insights.intro",
+    "nkp.insights.explore"
   ],
   "needs": [
     "UserNum"

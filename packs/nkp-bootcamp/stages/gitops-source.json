@@ -1,16 +1,16 @@
 {
-  "id": "nkp-024",
-  "name": "loadbalancer",
+  "id": "nkp-016",
+  "name": "gitops-source",
   "active": true,
   "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
-    "nkp.lb.intro",
-    "nkp.lb.cmd",
-    "nkp.lb.prompt"
+    "nkp.gitops.intro",
+    "nkp.gitops.source",
+    "nkp.gitops.prompt"
   ],
   "check": {
-    "fn": "CheckLoadBalancer"
+    "fn": "CheckGitOpsSource"
   },
   "captures": [
     "Ok"
