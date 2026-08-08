@@ -137,6 +137,9 @@ def disable_one(ctr):
     name = ctr.get('name')
     body, etag = get_container(ext_id)
     body['erasureCode'] = 'OFF'
+    # AOS rejects a delay on a non-EC container (CLU-30101). The Objects
+    # containers carry one; the Files container doesn't.
+    body.pop('erasureCodeDelaySecs', None)
 
     headers = dict(HEADERS)
     headers['Ntnx-Request-Id'] = str(uuid.uuid4())
