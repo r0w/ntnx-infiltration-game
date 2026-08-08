@@ -17,6 +17,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 - The Pack tab can export the stage setup as one string, import it on another
   instance, and reset every stage back to the pack defaults.
+- The Pack tab says at a glance how many stages differ from the pack defaults.
 
 ### Changed
 

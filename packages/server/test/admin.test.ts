@@ -790,7 +790,7 @@ describe('pack config export / import / reset', () => {
     ).json()) as AdminPackPayload;
     expect(view.stages.find((s) => s.stageName === 'mk-project')?.active).toBe(false);
     expect(view.stages.find((s) => s.stageName === 'standalone')?.adminGate).toBe(true);
-    // Re-exporting the same setup yields the same string — configs are
+    // Re-exporting the same setup yields the same string, so configs are
     // comparable by eye.
     expect((await exportConfig(target.r)).config).toBe(exported.config);
   });

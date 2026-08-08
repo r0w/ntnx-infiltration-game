@@ -1,32 +1,36 @@
 /**
- * Portable stage configuration — the operator's pack overlay (which stages
+ * Portable stage configuration: the operator's pack overlay (which stages
  * are on/off, which are gated) squeezed into one string they can copy out
  * of one instance and paste into another.
  *
- * Shape, before encoding:
+ * Payload, before compression:
  *   {
  *     v: 1,
- *     pack: "<pack id>",
- *     stages: ["<every stage the source pack had, in order>"],
- *     overrides: { "<stage>": { active?, adminGate? } }
+ *     p: "<pack id>",
+ *     s: ["<every stage the source pack had, in order>"],
+ *     o: { "<stage>": { active?, adminGate? } }
  *   }
  *
- * Only overridden fields are carried, so a config exported from a default
- * pack stays small and readable once decoded. The full stage roster rides
- * along because packs gain and lose stages between versions: without it,
- * import can spot a stage that vanished (it appears in `overrides`) but not
- * one that was added, and the operator would never be told a new stage was
- * left at its default. Encoding is deterministic (stages sorted, fields in
- * a fixed order), so the same setup always produces the same string and two
- * operators can compare configs by eye.
+ * Only overridden fields are carried. The full stage roster rides along
+ * because packs gain and lose stages between versions: without it, import
+ * can spot a stage that vanished (it shows up in `o`) but not one that was
+ * added, so the operator would never be told a new stage sits at its
+ * default. The roster is most of the bytes, hence the deflate pass, which
+ * roughly halves the string. Encoding is deterministic (stages sorted,
+ * fields in a fixed order), so the same setup always produces the same
+ * string and two operators can compare configs by eye.
  */
+import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import type { PackOverlayRow } from './db/queries';
 
 /** Marks the payload as ours and pins the format version. */
 export const PACK_CONFIG_PREFIX = 'NIG1.';
 
-/** Rejected beyond this many characters — a paste that big is not a config. */
+/** Rejected beyond this many characters: a paste that big is not a config. */
 const MAX_CONFIG_CHARS = 64 * 1024;
+
+/** Guards the decoder against a small string that inflates to a huge one. */
+const MAX_PAYLOAD_BYTES = 1024 * 1024;
 
 export interface PackConfigOverride {
   active?: boolean;
@@ -36,8 +40,8 @@ export interface PackConfigOverride {
 export interface DecodedPackConfig {
   packId: string;
   /** Stage roster of the pack this config was exported from. `null` when
-   *  the string omits it (hand-written configs are allowed to) — import
-   *  then can't report stages added since. */
+   *  the string omits it (hand-written configs are allowed to), in which
+   *  case import can't report the stages added since. */
   stages: string[] | null;
   overrides: Record<string, PackConfigOverride>;
 }
@@ -45,12 +49,14 @@ export interface DecodedPackConfig {
 /** Thrown for anything an operator could plausibly paste and get wrong. */
 export class PackConfigError extends Error {}
 
-function toBase64Url(s: string): string {
-  return Buffer.from(s, 'utf8').toString('base64url');
+function pack(json: string): string {
+  return deflateRawSync(Buffer.from(json, 'utf8'), { level: 9 }).toString('base64url');
 }
 
-function fromBase64Url(s: string): string {
-  return Buffer.from(s, 'base64url').toString('utf8');
+function unpack(body: string): string {
+  return inflateRawSync(Buffer.from(body, 'base64url'), {
+    maxOutputLength: MAX_PAYLOAD_BYTES,
+  }).toString('utf8');
 }
 
 /**
@@ -88,7 +94,7 @@ export function encodePackConfig(
   }
   return (
     PACK_CONFIG_PREFIX +
-    toBase64Url(JSON.stringify({ v: 1, pack: packId, stages: packStageNames, overrides }))
+    pack(JSON.stringify({ v: 1, p: packId, s: packStageNames, o: overrides }))
   );
 }
 
@@ -110,26 +116,26 @@ export function decodePackConfig(input: string): DecodedPackConfig {
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(fromBase64Url(body));
+    parsed = JSON.parse(unpack(body));
   } catch {
-    throw new PackConfigError('config string is corrupt (not valid encoded JSON)');
+    throw new PackConfigError('config string is corrupt (not a valid encoded config)');
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new PackConfigError('config payload must be an object');
   }
   const obj = parsed as Record<string, unknown>;
   if (obj.v !== 1) throw new PackConfigError(`unsupported config version: ${String(obj.v)}`);
-  if (typeof obj.pack !== 'string' || obj.pack === '') {
+  if (typeof obj.p !== 'string' || obj.p === '') {
     throw new PackConfigError('config payload has no pack id');
   }
   let stages: string[] | null = null;
-  if (obj.stages !== undefined && obj.stages !== null) {
-    if (!Array.isArray(obj.stages) || obj.stages.some((s) => typeof s !== 'string')) {
-      throw new PackConfigError('config payload `stages` must be an array of stage names');
+  if (obj.s !== undefined && obj.s !== null) {
+    if (!Array.isArray(obj.s) || obj.s.some((s) => typeof s !== 'string')) {
+      throw new PackConfigError('config payload stage roster must be an array of stage names');
     }
-    stages = obj.stages as string[];
+    stages = obj.s as string[];
   }
-  const rawOverrides = obj.overrides;
+  const rawOverrides = obj.o;
   if (typeof rawOverrides !== 'object' || rawOverrides === null || Array.isArray(rawOverrides)) {
     throw new PackConfigError('config payload has no overrides object');
   }
@@ -151,7 +157,7 @@ export function decodePackConfig(input: string): DecodedPackConfig {
     }
     if (Object.keys(o).length > 0) overrides[stageName] = o;
   }
-  return { packId: obj.pack, stages, overrides };
+  return { packId: obj.p, stages, overrides };
 }
 
 export interface PackConfigPlan {
@@ -161,7 +167,7 @@ export interface PackConfigPlan {
    *  the config was exported. Their override is dropped. */
   missingStages: string[];
   /** Stages the local pack has that the config's pack didn't: added since
-   *  the export. They keep their JSON default — the operator has to decide
+   *  the export. They keep their JSON default, so the operator has to decide
    *  what to do with them, so the UI says so out loud. */
   newStages: string[];
 }
@@ -172,7 +178,7 @@ export interface PackConfigPlan {
  * Packs gain and lose stages between versions, so stage drift is reported,
  * never fatal: an operator importing a config exported before a stage was
  * added or removed still gets every stage the two packs share. A pack-id
- * mismatch IS fatal — two different packs share no stage vocabulary, so the
+ * mismatch IS fatal: two different packs share no stage vocabulary, so the
  * import would silently wipe the operator's setup and apply nothing.
  */
 export function planPackConfigImport(

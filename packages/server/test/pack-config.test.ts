@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { deflateRawSync } from 'node:zlib';
 import {
   decodePackConfig,
   encodePackConfig,
@@ -20,9 +21,13 @@ function row(
 }
 
 /** Hand-build a config string so tests can forge payloads the encoder
- *  would never produce (wrong pack, unknown stages, bad types). */
+ *  would never produce (wrong version, missing keys, bad types). Mirrors
+ *  the encoder's compression so these exercise the real decode path. */
 function forge(payload: unknown): string {
-  return PACK_CONFIG_PREFIX + Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  return (
+    PACK_CONFIG_PREFIX +
+    deflateRawSync(Buffer.from(JSON.stringify(payload), 'utf8'), { level: 9 }).toString('base64url')
+  );
 }
 
 describe('encodePackConfig / decodePackConfig', () => {
@@ -79,6 +84,16 @@ describe('encodePackConfig / decodePackConfig', () => {
     expect(a).toBe(b);
   });
 
+  // The roster is most of the payload, so the string has to stay well
+  // under the raw JSON it encodes or the operator gets a wall of text.
+  test('compresses: a realistic 40-stage pack stays under half the raw JSON', () => {
+    const many = Array.from({ length: 40 }, (_, i) => `create-some-resource-${i}`);
+    const s = encodePackConfig(PACK, many, [row(many[3], false, null)]);
+    const raw = JSON.stringify({ v: 1, p: PACK, s: many, o: { [many[3]]: { active: false } } });
+    expect(s.length).toBeLessThan(raw.length / 2);
+    expect(decodePackConfig(s).stages).toEqual(many);
+  });
+
   test('tolerates the whitespace a chat client wraps into a long token', () => {
     const s = encodePackConfig(PACK, STAGES, [row('intro', false, null)]);
     const mangled = `  ${s.slice(0, 12)}\n${s.slice(12, 30)} ${s.slice(30)}\t`;
@@ -96,31 +111,31 @@ describe('encodePackConfig / decodePackConfig', () => {
   });
 
   test('rejects a future format version', () => {
-    expect(() => decodePackConfig(forge({ v: 2, pack: PACK, overrides: {} }))).toThrow(
+    expect(() => decodePackConfig(forge({ v: 2, p: PACK, o: {} }))).toThrow(
       /unsupported config version/,
     );
   });
 
   test('rejects a payload with no pack id or no overrides object', () => {
-    expect(() => decodePackConfig(forge({ v: 1, overrides: {} }))).toThrow(/no pack id/);
-    expect(() => decodePackConfig(forge({ v: 1, pack: PACK }))).toThrow(/no overrides object/);
-    expect(() => decodePackConfig(forge({ v: 1, pack: PACK, overrides: [] }))).toThrow(
+    expect(() => decodePackConfig(forge({ v: 1, o: {} }))).toThrow(/no pack id/);
+    expect(() => decodePackConfig(forge({ v: 1, p: PACK }))).toThrow(/no overrides object/);
+    expect(() => decodePackConfig(forge({ v: 1, p: PACK, o: [] }))).toThrow(
       /no overrides object/,
     );
   });
 
   test('rejects non-boolean override values', () => {
     expect(() =>
-      decodePackConfig(forge({ v: 1, pack: PACK, overrides: { intro: { active: 'yes' } } })),
+      decodePackConfig(forge({ v: 1, p: PACK, o: { intro: { active: 'yes' } } })),
     ).toThrow(/must be a boolean/);
     expect(() =>
-      decodePackConfig(forge({ v: 1, pack: PACK, overrides: { intro: 'off' } })),
+      decodePackConfig(forge({ v: 1, p: PACK, o: { intro: 'off' } })),
     ).toThrow(/must be an object/);
   });
 
   test('accepts a hand-written config with no stage roster', () => {
     const decoded = decodePackConfig(
-      forge({ v: 1, pack: PACK, overrides: { intro: { active: false } } }),
+      forge({ v: 1, p: PACK, o: { intro: { active: false } } }),
     );
     expect(decoded.stages).toBeNull();
     expect(decoded.overrides).toEqual({ intro: { active: false } });
@@ -128,7 +143,7 @@ describe('encodePackConfig / decodePackConfig', () => {
 
   test('rejects a stage roster that is not an array of names', () => {
     expect(() =>
-      decodePackConfig(forge({ v: 1, pack: PACK, stages: [1, 2], overrides: {} })),
+      decodePackConfig(forge({ v: 1, p: PACK, s: [1, 2], o: {} })),
     ).toThrow(/array of stage names/);
   });
 });
@@ -154,7 +169,7 @@ describe('planPackConfigImport', () => {
     );
   });
 
-  // The pack evolves between versions — an import from either side of a
+  // The pack evolves between versions, so an import from either side of a
   // stage add/remove has to land the stages the two packs still share.
   test('a stage deleted since the export is reported, not fatal', () => {
     const cfg = decodePackConfig(
@@ -173,7 +188,7 @@ describe('planPackConfigImport', () => {
     const plan = planPackConfigImport(cfg, PACK, [...STAGES, 'brand-new']);
     expect(plan.applied.map((a) => a.stageName)).toEqual(['intro']);
     expect(plan.newStages).toEqual(['brand-new']);
-    // Left out of `applied` entirely — a replace-all write drops any local
+    // Left out of `applied` entirely: a replace-all write drops any local
     // override on it, which IS the pack default.
     expect(plan.applied.some((a) => a.stageName === 'brand-new')).toBe(false);
   });
@@ -190,7 +205,7 @@ describe('planPackConfigImport', () => {
 
   test('without a roster, no stage is claimed to be new', () => {
     const cfg = decodePackConfig(
-      forge({ v: 1, pack: PACK, overrides: { intro: { active: false } } }),
+      forge({ v: 1, p: PACK, o: { intro: { active: false } } }),
     );
     const plan = planPackConfigImport(cfg, PACK, [...STAGES, 'brand-new']);
     expect(plan.newStages).toEqual([]);

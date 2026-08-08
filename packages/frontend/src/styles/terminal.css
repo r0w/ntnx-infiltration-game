@@ -2331,8 +2331,8 @@ a.terminal-link:visited {
   font-size: 12px;
   margin: 0 0 8px 0;
 }
-/* Export / import / reset row above the stage table. Wraps on narrow
-   viewports so the hint drops under the buttons instead of squeezing them. */
+/* Drift badge + export / import / reset row above the stage table. Wraps
+   on narrow viewports rather than squeezing the buttons. */
 .admin-pack-config {
   display: flex;
   flex-wrap: wrap;
@@ -2340,19 +2340,81 @@ a.terminal-link:visited {
   gap: 8px;
   margin: 0 0 12px 0;
 }
-.admin-pack-config-hint { font-size: 11px; }
-/* The config string is one long unbroken token — wrap it inside the box
-   rather than let it scroll off, so the operator can select all of it. */
-.admin-pack-config-box {
-  width: 100%;
+.admin-pack-config-sep {
+  width: 1px;
+  align-self: stretch;
+  background: #1f2937;
+  margin: 0 2px;
+}
+/* Says at a glance whether the live setup still matches the pack files.
+   Dim + hollow dot when it does, yellow + filled when it doesn't. */
+.pack-drift {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+.pack-drift-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+}
+.pack-drift-on { color: var(--yellow); }
+.pack-drift-on .pack-drift-dot { background: currentColor; }
+/* The config string is one long unbroken token, so wrap it inside the box
+   rather than let it scroll sideways: the operator selects all of it. */
+.admin-pack-config-box {
+  display: block;
+  width: 100%;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #e6edf3;
+  background: rgba(124, 220, 254, 0.03);
+  border: 1px solid #1b232b;
+  border-radius: 4px;
+  padding: 8px 10px;
+  resize: vertical;
   word-break: break-all;
 }
-.admin-pack-config-result {
+.admin-pack-config-box:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.admin-pack-config-lede {
+  margin: 0 0 10px;
+  color: var(--dim);
+}
+.admin-pack-config-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 8px;
+  font-size: 11px;
+}
+.admin-pack-config-error { margin: 10px 0 0; }
+/* Import summary: a label column of verdicts against what each one hit. */
+.admin-pack-config-report {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 14px;
   margin: 0;
-  padding-left: 18px;
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 1.5;
+}
+.admin-pack-config-report dt {
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  padding-top: 2px;
+}
+.admin-pack-config-report dd {
+  margin: 0;
+  word-break: break-word;
 }
 .pack-toggle {
   background: transparent;
@@ -2532,6 +2594,7 @@ a.terminal-link:visited {
     0 0 0 1px rgba(124, 220, 254, 0.04) inset;
   animation: modal-pop 140ms ease-out;
 }
+.modal-card-wide { width: min(660px, 100%); }
 .modal-title {
   margin: 0 0 14px;
   font-size: 14px;

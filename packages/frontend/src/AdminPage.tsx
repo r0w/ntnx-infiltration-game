@@ -328,6 +328,14 @@ function AdminDashboard({
     }
   };
 
+  // Stages whose live value differs from what their pack file declares.
+  // Counts real drift, not overlay rows: an override that happens to match
+  // the default is invisible to the operator, so it must not raise a flag.
+  const packDriftCount =
+    packStages === null
+      ? null
+      : packStages.filter((s) => s.activeOverridden || s.adminGateOverridden).length;
+
   const togglePackField = async (
     stage: AdminPackStageEntry,
     field: 'active' | 'adminGate',
@@ -903,7 +911,11 @@ function AdminDashboard({
       {tab === 'pack' && (
         <section className="admin-panel">
           <PanelHead eyebrow="mission plan" title="Stages" />
-          <PackConfigBar password={password} onChanged={() => void refresh()} />
+          <PackConfigBar
+            password={password}
+            driftCount={packDriftCount}
+            onChanged={() => void refresh()}
+          />
           <PackEditor
             stages={packStages}
             meta={packMeta}
@@ -1145,17 +1157,23 @@ function AdminDashboard({
 }
 
 /**
- * Export / import / reset for the operator's stage setup. The export is one
- * string carrying every on-off and gate override, so a curated workshop
- * config can be reproduced on another instance by pasting it. Import
- * replaces the whole setup (it doesn't merge) and reports stage drift both
- * ways, since packs gain and lose stages between game versions.
+ * Stage-setup toolbar: the drift badge plus export / import / reset.
+ *
+ * The export is one string carrying every on-off and gate override, so a
+ * curated workshop setup can be reproduced on another instance by pasting
+ * it. Import replaces the whole setup rather than merging into it, and
+ * reports stage drift both ways, since packs gain and lose stages between
+ * game versions.
  */
 function PackConfigBar({
   password,
+  driftCount,
   onChanged,
 }: {
   password: string;
+  /** Stages whose live value differs from the pack JSON. `null` while the
+   *  pack list is still loading. */
+  driftCount: number | null;
   onChanged: () => void;
 }) {
   const [dialog, setDialog] = useState<'export' | 'import' | 'reset' | null>(null);
@@ -1196,9 +1214,9 @@ function PackConfigBar({
       await navigator.clipboard.writeText(exported.config);
       setCopied(true);
     } catch {
-      // Clipboard is blocked over plain http on some browsers, and the
-      // game is served over http. The textarea is selectable — say so.
-      setError('clipboard blocked by the browser — select the text and copy manually');
+      // Clipboard is blocked over plain http on some browsers, and the game
+      // is served over http. The box is selectable, so say that instead.
+      setError('clipboard blocked by the browser, select the text and copy manually');
     }
   };
 
@@ -1228,50 +1246,72 @@ function PackConfigBar({
     }
   };
 
+  const drifted = driftCount !== null && driftCount > 0;
   return (
     <>
       <div className="admin-pack-config">
+        <span
+          className={`pack-drift ${drifted ? 'pack-drift-on' : ''}`}
+          title={
+            drifted
+              ? 'the live setup differs from the stage files shipped with the pack'
+              : 'every stage is at the value its pack file declares'
+          }
+        >
+          <span className="pack-drift-dot" aria-hidden="true" />
+          {driftCount === null
+            ? 'reading setup…'
+            : drifted
+            ? `${driftCount} stage${driftCount > 1 ? 's' : ''} changed from pack default`
+            : 'pack default'}
+        </span>
+        <span className="admin-pack-config-sep" aria-hidden="true" />
         <button type="button" className="app-reset" onClick={() => void openExport()}>
-          export config
+          export
         </button>
         <button type="button" className="app-reset" onClick={() => setDialog('import')}>
-          import config
+          import
         </button>
+        {/* Never disabled on driftCount alone: an override that matches the
+            default counts as no drift but is still a row worth clearing. */}
         <button
           type="button"
           className="app-reset"
+          title="drop every override and go back to the pack defaults"
           onClick={() => setDialog('reset')}
-          title="drop every operator override and go back to the pack defaults"
         >
-          reset to defaults
+          reset
         </button>
-        <span className="c-dim admin-pack-config-hint">
-          one string carrying the on/off + gate setup — paste it into another instance to
-          reproduce it
-        </span>
       </div>
 
       {dialog === 'export' && (
-        <Modal title="export stage config" onClose={close}>
+        <Modal title="export stage config" onClose={close} wide>
           <div className="modal-body">
-            {busy && <p className="c-dim">reading config…</p>}
-            {error && <p className="c-red">{error}</p>}
+            <p className="admin-pack-config-lede">
+              Paste this into another instance to give it the same setup.
+            </p>
+            {busy && <p className="c-dim">reading setup…</p>}
             {exported && (
               <>
-                <p className="c-dim">
-                  {exported.overriddenCount === 0
-                    ? 'no stage is overridden — this config restores the pack defaults.'
-                    : `${exported.overriddenCount} stage(s) overridden.`}
-                </p>
                 <textarea
-                  className="admin-cluster-input admin-pack-config-box"
+                  className="admin-pack-config-box"
                   readOnly
-                  rows={4}
+                  rows={7}
                   value={exported.config}
                   onFocus={(ev) => ev.currentTarget.select()}
                 />
+                <div className="admin-pack-config-meta c-dim">
+                  <span>pack {exported.packId}</span>
+                  <span>
+                    {exported.overriddenCount === 0
+                      ? 'no override, restores the pack defaults'
+                      : `${exported.overriddenCount} override${exported.overriddenCount > 1 ? 's' : ''}`}
+                  </span>
+                  <span>{exported.config.length} chars</span>
+                </div>
               </>
             )}
+            {error && <p className="c-red admin-pack-config-error">{error}</p>}
           </div>
           <div className="modal-actions">
             <button type="button" className="modal-btn" onClick={close}>
@@ -1290,48 +1330,59 @@ function PackConfigBar({
       )}
 
       {dialog === 'import' && (
-        <Modal title="import stage config" onClose={close} busy={busy}>
+        <Modal title="import stage config" onClose={close} busy={busy} wide>
           <div className="modal-body">
             {result === null ? (
               <>
-                <p className="c-dim">
-                  Paste a config string. It <strong>replaces</strong> the current setup, so
-                  anything you flipped by hand and the config doesn't set goes back to its
-                  pack default.
+                <p className="admin-pack-config-lede">
+                  This <strong>replaces</strong> the current setup. Any stage the config
+                  does not set goes back to its pack default.
                 </p>
                 <textarea
-                  className="admin-cluster-input admin-pack-config-box"
-                  rows={4}
+                  className="admin-pack-config-box"
+                  rows={7}
                   autoFocus
+                  spellCheck={false}
                   placeholder="NIG1.…"
                   value={pasted}
                   onChange={(ev) => setPasted(ev.target.value)}
                 />
               </>
             ) : (
-              <ul className="admin-pack-config-result">
-                <li className="c-green">
-                  applied {result.applied.length} override(s)
-                  {result.applied.length > 0 && `: ${result.applied.join(', ')}`}
-                </li>
+              <dl className="admin-pack-config-report">
+                <dt className="c-green">applied</dt>
+                <dd>
+                  {result.applied.length === 0
+                    ? 'nothing, this config carries no override'
+                    : `${result.applied.length} stage${result.applied.length > 1 ? 's' : ''}: ${result.applied.join(', ')}`}
+                </dd>
                 {result.clearedStages.length > 0 && (
-                  <li className="c-dim">
-                    reset to default (not in the config): {result.clearedStages.join(', ')}
-                  </li>
+                  <>
+                    <dt className="c-dim">back to default</dt>
+                    <dd className="c-dim">{result.clearedStages.join(', ')}</dd>
+                  </>
                 )}
                 {result.newStages.length > 0 && (
-                  <li className="c-yellow">
-                    new since that config, left at default: {result.newStages.join(', ')}
-                  </li>
+                  <>
+                    <dt className="c-yellow">new stage</dt>
+                    <dd>
+                      added since that config was made, left at its default:{' '}
+                      {result.newStages.join(', ')}
+                    </dd>
+                  </>
                 )}
                 {result.missingStages.length > 0 && (
-                  <li className="c-yellow">
-                    gone from this pack, ignored: {result.missingStages.join(', ')}
-                  </li>
+                  <>
+                    <dt className="c-yellow">unknown</dt>
+                    <dd>
+                      gone from this version of the pack, ignored:{' '}
+                      {result.missingStages.join(', ')}
+                    </dd>
+                  </>
                 )}
-              </ul>
+              </dl>
             )}
-            {error && <p className="c-red">{error}</p>}
+            {error && <p className="c-red admin-pack-config-error">{error}</p>}
           </div>
           <div className="modal-actions">
             <button type="button" className="modal-btn" disabled={busy} onClick={close}>
@@ -1356,17 +1407,17 @@ function PackConfigBar({
           <div className="modal-body">
             {resetCount === null ? (
               <p>
-                Drop every operator override and go back to the pack defaults. Player
-                progress and gate unlocks are untouched.
+                Drop every override and put all stages back to the value their pack file
+                declares. Player progress, gate unlocks and the lunch lock are untouched.
               </p>
             ) : (
               <p className="c-green">
                 {resetCount === 0
-                  ? 'nothing to clear — the pack was already at its defaults.'
-                  : `cleared ${resetCount} override(s).`}
+                  ? 'nothing to clear, the pack was already at its defaults.'
+                  : `cleared ${resetCount} override${resetCount > 1 ? 's' : ''}.`}
               </p>
             )}
-            {error && <p className="c-red">{error}</p>}
+            {error && <p className="c-red admin-pack-config-error">{error}</p>}
           </div>
           <div className="modal-actions">
             <button type="button" className="modal-btn" disabled={busy} onClick={close}>
