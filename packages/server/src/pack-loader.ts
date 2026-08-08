@@ -30,6 +30,15 @@ export interface PackManifest {
   title?: string;
   version: string;
   description?: string;
+  /**
+   * Whether to run the Nutanix capability probe at boot. It decides which
+   * stages a cluster can play (NCM present? spare node? Intelligent Operations
+   * on?), which only matters to a pack that gates stages on those flags. Set
+   * `false` in a pack that gates on none of them: the probe is a long series of
+   * Prism queries, and a slow answer to one of them delays the server.
+   * Defaults to true, so existing packs are untouched.
+   */
+  capabilities?: boolean;
   checks: string;
   actions?: string;
   /**

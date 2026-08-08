@@ -87,7 +87,19 @@ async function main() {
     });
   }
 
-  const probe = await probeCapabilities({ nutanix, logger: consoleLogger });
+  // The capability probe asks Prism Central a long series of questions about
+  // NCM, Intelligent Operations, spare nodes and the like, to decide which
+  // stages a cluster can play. A pack whose stages gate on none of that pays
+  // the whole cost for nothing, and on a cluster that answers some of those
+  // questions slowly it can hold the server short of listening. Packs opt out
+  // with `"capabilities": false` in pack.json.
+  const wantsCapabilities = pack.manifest.capabilities !== false;
+  const probe = wantsCapabilities
+    ? await probeCapabilities({ nutanix, logger: consoleLogger })
+    : { flags: [], unreachable: false, details: [] };
+  if (!wantsCapabilities) {
+    consoleLogger.info('capability probe skipped', { pack: pack.manifest.id });
+  }
 
   // Loud aggregate diagnostic when the cluster is fully unreachable in
   // a real-PC mode. Boot continues — server keeps running on mock-ish
