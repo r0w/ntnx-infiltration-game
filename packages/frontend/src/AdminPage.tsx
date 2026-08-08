@@ -1440,6 +1440,57 @@ function PackConfigBar({
   );
 }
 
+/**
+ * What a stage will actually do for the next player who reaches it, in
+ * precedence order. `off` and `skipped` never run at all, so they outrank
+ * `broken`: a stage the engine skips cannot fail a player. `gated` runs but
+ * parks the room until the operator unlocks it.
+ */
+type StageState = 'off' | 'skipped' | 'broken' | 'gated' | 'playable';
+
+const STATE_ORDER: StageState[] = ['playable', 'gated', 'skipped', 'off', 'broken'];
+
+function stageState(s: AdminPackStageEntry, filtersHpocOnly: boolean): StageState {
+  if (!s.active) return 'off';
+  if (s.missingCapabilities.length > 0 || (filtersHpocOnly && s.impact === 'hpoc-only')) {
+    return 'skipped';
+  }
+  if (s.brokenMissingVars.length > 0) return 'broken';
+  if (s.adminGate) return 'gated';
+  return 'playable';
+}
+
+/** One line saying why a stage is not simply playable. Null when it is. */
+function stateNote(
+  s: AdminPackStageEntry,
+  state: StageState,
+  profile: 'hpoc' | 'other' | null,
+): string | null {
+  switch (state) {
+    case 'off':
+      return s.activeOverridden ? 'you turned this off' : 'off in the pack files';
+    case 'skipped':
+      return s.missingCapabilities.length > 0
+        ? `this cluster has no ${s.missingCapabilities.join(', ')}`
+        : `hpoc-only, and this cluster is ${profile ?? 'shared'}`;
+    case 'broken':
+      return `nothing left produces ${s.brokenMissingVars.join(', ')}`;
+    case 'gated':
+      return 'players wait here until you unlock';
+    default:
+      return null;
+  }
+}
+
+/**
+ * The Pack tab: the run sheet for the night.
+ *
+ * The strip along the top is the whole mission in play order, one cell per
+ * stage, coloured by what that stage will actually do. Order is real
+ * information here (players walk it front to back), so the sequence is the
+ * primary view and the table is the detail behind it. The counts under the
+ * strip double as filters, which is why there is no separate legend.
+ */
 function PackEditor({
   stages,
   meta,
@@ -1457,140 +1508,231 @@ function PackEditor({
   ) => void;
   onRequestDisable: (s: AdminPackStageEntry) => void;
 }) {
+  const [filter, setFilter] = useState<StageState | 'all'>('all');
+  const [query, setQuery] = useState('');
+  const [flash, setFlash] = useState<string | null>(null);
+  // Set by a strip click, consumed by the effect below once the row it names
+  // is on screen. Going through state rather than scrolling inside the click
+  // handler is what makes dropping the filters first safe.
+  const [jumpTarget, setJumpTarget] = useState<string | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLTableRowElement | null>());
+  const flashTimer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
+    },
+    [],
+  );
+  useEffect(() => {
+    if (jumpTarget === null) return;
+    // Instant, not smooth: a glide is a no-op whenever the browser isn't
+    // painting the tab, and the flash below is the orientation cue anyway.
+    rowRefs.current.get(jumpTarget)?.scrollIntoView({ block: 'center' });
+    setFlash(jumpTarget);
+    setJumpTarget(null);
+    if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setFlash(null), 1400);
+  }, [jumpTarget]);
+
+  // A stage is filtered at session-creation time when it's hpoc-only AND the
+  // runtime cluster profile is `other`. Mock bypasses that gate (the profile
+  // is forced to `hpoc` at boot), so nothing is marked skipped there.
+  const filtersHpocOnly = meta !== null && meta.clusterProfile === 'other';
+  const rows = (stages ?? []).map((s, idx) => {
+    const state = stageState(s, filtersHpocOnly);
+    return { s, idx, state, note: stateNote(s, state, meta?.clusterProfile ?? null) };
+  });
+
+  const counts = STATE_ORDER.reduce(
+    (acc, st) => ({ ...acc, [st]: rows.filter((r) => r.state === st).length }),
+    {} as Record<StageState, number>,
+  );
+
+  // Clicking a cell in the strip walks the operator to that row. Filters are
+  // dropped first, otherwise the target row may not be rendered to scroll to.
+  const jumpTo = (stageName: string) => {
+    setFilter('all');
+    setQuery('');
+    setJumpTarget(stageName);
+  };
+
   if (stages === null) return <div className="admin-empty">loading pack…</div>;
   if (stages.length === 0) return <div className="admin-empty">empty pack.</div>;
-  // A stage is filtered at session-creation time when it's hpoc-only AND
-  // the runtime cluster profile is `other`. In mock mode the hpoc-only
-  // gate is bypassed (cluster profile forced to `hpoc` at boot), so don't
-  // mark anything filtered there — operator would otherwise wonder why the
-  // tag is on stages that all play through.
-  const filtersHpocOnly = meta !== null && meta.clusterProfile === 'other';
+
+  const q = query.trim().toLowerCase();
+  const visible = rows.filter(
+    (r) =>
+      (filter === 'all' || r.state === filter) &&
+      (q === '' || r.s.stageName.toLowerCase().includes(q)),
+  );
+
   return (
-    <div className="admin-table-wrap">
+    <div className="pack">
       {meta && (
-        <div className="admin-pack-meta c-dim">
-          mode: <span className={meta.mode === 'mock' ? 'c-yellow' : meta.mode === 'test' ? 'c-cyan' : 'c-green'}>{meta.mode}</span>
+        <p className="pack-run-caption c-dim">
+          <span className={meta.mode === 'mock' ? 'c-yellow' : meta.mode === 'test' ? 'c-cyan' : 'c-green'}>
+            {meta.mode}
+          </span>
           {' · '}
-          clusterProfile: <span className={meta.clusterProfile === 'hpoc' ? 'c-green' : 'c-yellow'}>{meta.clusterProfile}</span>
-          {filtersHpocOnly && (
-            <>
-              {' · '}
-              <span className="c-yellow">hpoc-only stages skipped at session start</span>
-            </>
-          )}
-        </div>
+          {meta.clusterProfile} cluster
+        </p>
       )}
-      <table className="admin-table admin-pack-table">
-        <thead>
-          <tr>
-            <th aria-label="order">#</th>
-            <th>name</th>
-            <th>impact</th>
-            <th>active</th>
-            <th>gate</th>
-            <th>needs</th>
-            <th>captures</th>
-            <th>status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {stages.map((s, idx) => {
-            const broken = s.brokenMissingVars.length > 0;
-            const inactive = !s.active;
-            const hpocOnlySkipped = filtersHpocOnly && s.impact === 'hpoc-only';
-            const capsMissing = s.missingCapabilities.length > 0;
-            const busy = busyId === s.stageName;
-            const rowSkipped = hpocOnlySkipped || capsMissing;
-            return (
-              <tr
-                key={s.stageName}
-                className={`pack-row ${inactive ? 'pack-row-off' : ''} ${broken ? 'pack-row-broken' : ''} ${rowSkipped ? 'pack-row-skipped' : ''}`}
-              >
-                <td className="pack-td-id c-dim">{idx + 1}</td>
-                <td className="pack-td-name">{s.stageName}</td>
-                <td>
-                  {s.impact === 'hpoc-only' ? (
-                    <span className="c-yellow" title="impact='hpoc-only' in pack JSON; filtered when clusterProfile === 'other'">
-                      hpoc-only
-                    </span>
-                  ) : (
-                    <span className="c-dim">safe</span>
-                  )}
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    className={`pack-toggle ${s.active ? 'pack-toggle-on' : 'pack-toggle-off'} ${(hpocOnlySkipped || capsMissing) ? 'pack-toggle-filtered' : ''}`}
-                    disabled={busy}
-                    title={
-                      capsMissing
-                        ? `active in pack but engine will skip — caps not detected on this cluster: ${s.missingCapabilities.join(', ')}`
-                        : hpocOnlySkipped
-                        ? `active in pack (JSON default), but engine filters this stage for sessions with clusterProfile='${meta?.clusterProfile}' because impact='hpoc-only'`
-                        : (s.activeOverridden ? 'overridden by operator (click to flip)' : 'using JSON default')
-                    }
-                    onClick={() =>
-                      s.active ? onRequestDisable(s) : onTogglePackField(s, 'active', true)
-                    }
-                  >
-                    {s.active ? 'on' : 'off'}
-                    {s.activeOverridden && <span className="pack-toggle-mark">·</span>}
-                  </button>
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    className={`pack-toggle ${s.adminGate ? 'pack-toggle-on' : 'pack-toggle-off'}`}
-                    disabled={busy}
-                    title={s.adminGateOverridden ? 'overridden by operator (click to flip)' : 'using JSON default'}
-                    onClick={() => onTogglePackField(s, 'adminGate', !s.adminGate)}
-                  >
-                    {s.adminGate ? 'gated' : 'open'}
-                    {s.adminGateOverridden && <span className="pack-toggle-mark">·</span>}
-                  </button>
-                </td>
-                <td className="pack-td-vars c-dim">
-                  {s.needs.length === 0 ? '—' : s.needs.join(', ')}
-                </td>
-                <td className="pack-td-vars c-dim">
-                  {s.captures.length === 0 ? '—' : s.captures.join(', ')}
-                </td>
-                <td>
-                  {broken ? (
-                    <span className="c-red" title={`missing: ${s.brokenMissingVars.join(', ')}`}>
-                      broken: {s.brokenMissingVars.join(', ')}
-                    </span>
-                  ) : inactive ? (
-                    <span
-                      className="c-dim"
+
+      <ol className="pack-run" aria-label="the run, in play order">
+        {rows.map((r, idx) => (
+          <li key={r.s.stageName}>
+            <button
+              type="button"
+              className={`pack-cell pack-cell-${r.state} ${flash === r.s.stageName ? 'pack-cell-flash' : ''}`}
+              style={{ animationDelay: `${Math.min(idx * 12, 480)}ms` }}
+              title={`${idx + 1}. ${r.s.stageName} · ${r.state}${r.note ? `: ${r.note}` : ''}`}
+              aria-label={`stage ${idx + 1}, ${r.s.stageName}, ${r.state}`}
+              onClick={() => jumpTo(r.s.stageName)}
+            />
+          </li>
+        ))}
+      </ol>
+
+      <div className="pack-controls">
+        <div className="pack-chips" role="group" aria-label="filter stages by state">
+          <button
+            type="button"
+            className={`pack-chip ${filter === 'all' ? 'pack-chip-on' : ''}`}
+            aria-pressed={filter === 'all'}
+            onClick={() => setFilter('all')}
+          >
+            all <b>{rows.length}</b>
+          </button>
+          {STATE_ORDER.map((st) => (
+            <button
+              key={st}
+              type="button"
+              className={`pack-chip pack-chip-${st} ${filter === st ? 'pack-chip-on' : ''}`}
+              aria-pressed={filter === st}
+              disabled={counts[st] === 0}
+              onClick={() => setFilter(st)}
+            >
+              <span className="pack-chip-dot" aria-hidden="true" />
+              {st} <b>{counts[st]}</b>
+            </button>
+          ))}
+        </div>
+        <input
+          type="search"
+          className="pack-search"
+          placeholder="find a stage"
+          aria-label="find a stage by name"
+          value={query}
+          onChange={(ev) => setQuery(ev.target.value)}
+        />
+      </div>
+
+      <div className="admin-table-wrap">
+        <table className="admin-table admin-pack-table">
+          <thead>
+            <tr>
+              <th aria-label="play order">#</th>
+              <th>stage</th>
+              <th>active</th>
+              <th>gate</th>
+              <th>vars</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map(({ s, idx, state, note }) => {
+              const busy = busyId === s.stageName;
+              return (
+                <tr
+                  key={s.stageName}
+                  ref={(el) => {
+                    rowRefs.current.set(s.stageName, el);
+                  }}
+                  className={`pack-row pack-row-${state} ${flash === s.stageName ? 'pack-row-flash' : ''}`}
+                >
+                  <td className="pack-td-id c-dim">{String(idx + 1).padStart(2, '0')}</td>
+                  <td className="pack-td-name">
+                    <span className="pack-name">{s.stageName}</span>
+                    {/* Destructive stages stay worth flagging even where they
+                        run fine: on an hpoc cluster nothing else says so. */}
+                    {s.impact === 'hpoc-only' && (
+                      <span className="pack-tag" title="reshapes the cluster, so it only runs on a dedicated hpoc">
+                        hpoc-only
+                      </span>
+                    )}
+                    {/* Saying "playable" on every healthy row would print the
+                        same word 30-odd times: the state only speaks up when
+                        it has something to report. */}
+                    {state !== 'playable' && (
+                      <span className={`pack-note pack-note-${state}`}>
+                        <span className="pack-state-dot" aria-hidden="true" />
+                        <b>{state}</b>
+                        {note && <span className="pack-note-why">{note}</span>}
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className={`pack-toggle ${s.active ? 'pack-toggle-on' : 'pack-toggle-off'}`}
+                      disabled={busy}
                       title={
                         s.activeOverridden
-                          ? 'turned off via the admin pack toggle (click the on/off button to flip back)'
-                          : 'inactive in pack JSON (active: false in the stage file)'
+                          ? 'you changed this, click to flip it back'
+                          : 'as declared in the pack files'
+                      }
+                      onClick={() =>
+                        s.active ? onRequestDisable(s) : onTogglePackField(s, 'active', true)
                       }
                     >
-                      disabled ({s.activeOverridden ? 'operator override' : 'off in pack'})
-                    </span>
-                  ) : capsMissing ? (
-                    <span
-                      className="c-yellow"
-                      title={`engine will skip — caps not detected on this cluster: ${s.missingCapabilities.join(', ')}`}
+                      {s.active ? 'on' : 'off'}
+                      {s.activeOverridden && <span className="pack-toggle-mark">·</span>}
+                    </button>
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className={`pack-toggle ${s.adminGate ? 'pack-toggle-gate' : 'pack-toggle-off'}`}
+                      disabled={busy}
+                      title={
+                        s.adminGateOverridden
+                          ? 'you changed this, click to flip it back'
+                          : 'as declared in the pack files'
+                      }
+                      onClick={() => onTogglePackField(s, 'adminGate', !s.adminGate)}
                     >
-                      skipped (needs {s.missingCapabilities.join(', ')})
-                    </span>
-                  ) : hpocOnlySkipped ? (
-                    <span className="c-yellow" title="impact='hpoc-only' + clusterProfile='other' → engine skips this stage at session-create">
-                      skipped (hpoc-only)
-                    </span>
-                  ) : (
-                    <span className="c-green">ok</span>
-                  )}
+                      {s.adminGate ? 'gated' : 'open'}
+                      {s.adminGateOverridden && <span className="pack-toggle-mark">·</span>}
+                    </button>
+                  </td>
+                  <td className="pack-vars c-dim">
+                    {s.needs.length === 0 && s.captures.length === 0 ? (
+                      <span className="pack-vars-none">—</span>
+                    ) : (
+                      <>
+                        {s.needs.length > 0 && (
+                          <span title={`needs: ${s.needs.join(', ')}`}>↓ {s.needs.join(', ')}</span>
+                        )}
+                        {s.captures.length > 0 && (
+                          <span title={`captures: ${s.captures.join(', ')}`}>
+                            ↑ {s.captures.join(', ')}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {visible.length === 0 && (
+              <tr>
+                <td colSpan={5} className="pack-empty">
+                  no stage matches. <button type="button" className="app-reset" onClick={() => { setFilter('all'); setQuery(''); }}>show all {rows.length}</button>
                 </td>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

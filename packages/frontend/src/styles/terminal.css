@@ -550,7 +550,7 @@ a.terminal-link:visited {
   align-items: center;
   justify-content: center;
   width: 26px;
-  height: 26px;
+  height: 22px;
   padding: 0;
   color: var(--dim);
   background: rgba(0, 0, 0, 0.4);
@@ -2314,22 +2314,214 @@ a.terminal-link:visited {
 }
 
 /* ─── /admin pack tab ─────────────────────────────────────────────── */
+/* One state colour used everywhere it appears: strip cell, filter dot,
+   row chip. The operator learns five colours once and reads them in three
+   places. Playable is the app's pass green, gated borrows the prompt amber
+   (the room is waiting on the operator), skipped is blue because the
+   cluster decided it and not the operator, broken is the fail red. */
+.pack {
+  --st-playable: var(--green);
+  --st-gated: var(--prompt);
+  --st-skipped: var(--blue);
+  --st-off: #3c4a55;
+  --st-broken: var(--red);
+}
+/* Also used by the Languages panel for its mode caption. */
+.admin-pack-meta {
+  font-size: 12px;
+  margin: 0 0 8px 0;
+}
+.pack-run-caption {
+  margin: 0 0 6px;
+  font-size: 11px;
+  text-align: right;
+  letter-spacing: 0.04em;
+}
+
+/* The run: every stage in play order, one cell each. The whole mission is
+   one glance wide, so a red cell or a block of blue at the end is visible
+   before you read a single row. */
+.pack-run {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14px, 1fr));
+  gap: 3px;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+.pack-run li { display: flex; }
+.pack-cell {
+  flex: 1;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  cursor: pointer;
+  background: var(--cell, var(--st-off));
+  opacity: 0.72;
+  transition: opacity 120ms ease, transform 120ms ease;
+  animation: pack-cell-in 260ms ease-out backwards;
+}
+.pack-cell:hover,
+.pack-cell:focus-visible {
+  opacity: 1;
+  transform: translateY(-2px);
+  outline: none;
+  border-color: var(--fg);
+}
+.pack-cell-playable { --cell: var(--st-playable); }
+.pack-cell-gated    { --cell: var(--st-gated); }
+.pack-cell-skipped  { --cell: var(--st-skipped); }
+.pack-cell-broken   { --cell: var(--st-broken); }
+/* Off reads as a gap in the run rather than a colour: the stage is not
+   there tonight, so it should look like absence, not like a state. */
+.pack-cell-off {
+  background: transparent;
+  border: 1px dashed var(--st-off);
+  opacity: 1;
+}
+@keyframes pack-cell-in {
+  from { opacity: 0; transform: translateY(4px); }
+}
+
+/* Filter chips carry the counts, so they are the legend and the summary
+   too: one row instead of three. */
+.pack-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.pack-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.pack-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid #1f2937;
+  border-radius: 3px;
+  padding: 4px 9px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  color: var(--dim);
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.pack-chip:hover:not(:disabled) { color: var(--fg); border-color: #33414d; }
+.pack-chip:focus-visible { outline: none; border-color: var(--accent); color: var(--accent); }
+.pack-chip:disabled { opacity: 0.35; cursor: default; }
+.pack-chip b {
+  color: var(--fg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.pack-chip-on {
+  color: var(--fg);
+  border-color: #46586a;
+  background: rgba(124, 220, 254, 0.05);
+}
+.pack-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--cell, var(--st-off));
+}
+.pack-chip-playable { --cell: var(--st-playable); }
+.pack-chip-gated    { --cell: var(--st-gated); }
+.pack-chip-skipped  { --cell: var(--st-skipped); }
+.pack-chip-broken   { --cell: var(--st-broken); }
+.pack-chip-off .pack-chip-dot { background: transparent; border: 1px dashed var(--st-off); }
+
+.pack-search {
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  background: rgba(124, 220, 254, 0.03);
+  border: 1px solid #1b232b;
+  border-radius: 3px;
+  padding: 5px 9px;
+  width: 180px;
+}
+.pack-search:focus { outline: none; border-color: var(--accent); }
+.pack-search::placeholder { color: var(--dim); }
+
+/* Rows carry their state on a left edge, so scanning the table reads the
+   same way as scanning the strip. */
 .admin-pack-table .pack-td-id {
   font-variant-numeric: tabular-nums;
   width: 40px;
 }
-.admin-pack-table .pack-td-name { font-weight: 500; }
-.admin-pack-table .pack-td-vars {
+/* The controls belong next to the name they act on, so the stage column
+   sizes to its content and the last column soaks up the slack. */
+.admin-pack-table th:last-child,
+.admin-pack-table td:last-child { width: 100%; }
+.pack-name { font-weight: 500; }
+/* A property of the stage, not a state: it stays neutral so the five state
+   colours keep their meaning. */
+.pack-tag {
+  margin-left: 8px;
+  padding: 1px 5px;
+  border: 1px solid #2a3540;
+  border-radius: 2px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+  white-space: nowrap;
+}
+/* Second line under a stage name, present only when the stage is not
+   simply playable: the verdict, then why. */
+.pack-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
-  max-width: 180px;
+  color: var(--dim);
+  margin-top: 3px;
+}
+.pack-note b { font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.pack-note-why { color: var(--dim); }
+.pack-note-gated   { color: var(--st-gated); --cell: var(--st-gated); }
+.pack-note-skipped { color: var(--st-skipped); --cell: var(--st-skipped); }
+.pack-note-broken  { color: var(--st-broken); --cell: var(--st-broken); }
+.pack-note-off     { color: var(--dim); }
+.pack-note-off .pack-state-dot { background: transparent; border: 1px dashed var(--st-off); }
+.pack-row td:first-child { border-left: 2px solid transparent; }
+.pack-row-gated td:first-child   { border-left-color: var(--st-gated); }
+.pack-row-skipped td:first-child { border-left-color: var(--st-skipped); }
+.pack-row-broken td:first-child  { border-left-color: var(--st-broken); }
+.pack-row-off td { opacity: 0.5; }
+.pack-row-off .pack-name { text-decoration: line-through; }
+.pack-row-broken td { background: rgba(255, 107, 107, 0.05); }
+.pack-row-flash td { background: rgba(124, 220, 254, 0.09); }
+
+.pack-state-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  flex: none;
+  background: var(--cell, var(--st-off));
+}
+
+/* needs (↓) above captures (↑): what the stage consumes, then what it
+   leaves behind for the stages after it. */
+.pack-vars {
+  font-size: 11px;
+  max-width: 220px;
   white-space: normal;
 }
-.pack-row-off td { opacity: 0.45; }
-.pack-row-broken td { background: rgba(255, 107, 107, 0.04); }
-.pack-row-skipped td { background: rgba(255, 196, 0, 0.04); }
-.admin-pack-meta {
-  font-size: 12px;
-  margin: 0 0 8px 0;
+.pack-vars span { display: block; }
+.pack-vars-none { opacity: 0.5; }
+.pack-empty { padding: 18px 10px; color: var(--dim); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pack-cell {
+    animation: none;
+    transition: none;
+  }
+  .pack-cell:hover,
+  .pack-cell:focus-visible { transform: none; }
 }
 /* Drift badge + export / import / reset row above the stage table. Wraps
    on narrow viewports rather than squeezing the buttons. */
@@ -2433,16 +2625,9 @@ a.terminal-link:visited {
 .pack-toggle:hover:not(:disabled) { border-color: #3a4854; }
 .pack-toggle-on  { color: var(--green); border-color: rgba(124, 220, 124, 0.3); }
 .pack-toggle-off { color: var(--dim); }
-/* `pack-toggle-filtered`: stage is `active: on` in pack but the engine
- * filters it for the current session profile (e.g. `impact: destructive`
- * when `clusterProfile === 'other'`). Grays the toggle + crosses it
- * out so the operator reads the actual playable state at a glance,
- * without hiding that the stage is still on in the pack JSON. */
-.pack-toggle-filtered {
-  color: var(--dim) !important;
-  text-decoration: line-through;
-  text-decoration-color: rgba(255, 196, 0, 0.55);
-}
+/* A closed gate is the operator holding the room, so it wears the same
+   amber as the gate state everywhere else on the page. */
+.pack-toggle-gate { color: var(--prompt); border-color: rgba(255, 184, 107, 0.3); }
 .pack-toggle-mark {
   color: var(--yellow);
   font-weight: 700;

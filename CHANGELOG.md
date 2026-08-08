@@ -21,6 +21,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- The Pack tab now opens with the whole run in play order, colour-coded by what
+  each stage will do, and the stage list can be filtered and searched.
 - The prerequisites runbook now asks which project to use instead of assuming
   one named `lab`, and says so plainly when that project does not exist.
 
