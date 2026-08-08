@@ -138,7 +138,7 @@ const HEARTBEAT_MS = 5000;
  */
 const KICK_NOTICE = 'Your session was ended by the operator. Sign in to start a new one.';
 
-function appendUnits(
+export function appendUnits(
   prev: RenderItem[],
   units: MessageUnit[],
   idPrefix: string,
@@ -159,6 +159,8 @@ function appendUnits(
       out.push({ kind: 'code', id, text: u.text, lang: u.lang });
     } else if (u.kind === 'image') {
       out.push({ kind: 'image', id, src: u.src, alt: u.alt });
+    } else if (u.kind === 'demo') {
+      out.push({ kind: 'demo', id, src: u.src, poster: u.poster, label: u.label });
     } else if (u.kind === 'clear') {
       // `<clear/>` is destructive: wipe the scrollback so the next stage
       // starts on a fresh canvas. Gated on `allowClears` — during an
@@ -170,6 +172,11 @@ function appendUnits(
       // Non-destructive separator. Always fires — the player can always
       // scroll up to re-read the earlier stages.
       out.push({ kind: 'page-break', id });
+    } else {
+      // This chain whitelists kinds, so a unit added to the protocol but not
+      // here vanishes between the server and the screen with nothing to show
+      // for it. Say so instead of dropping it in silence.
+      console.warn('[terminal] dropped an unhandled message unit', (u as { kind: string }).kind);
     }
   });
   return { next: out, awaiting };
