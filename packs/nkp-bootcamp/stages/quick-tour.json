@@ -5,7 +5,6 @@
   "prompt": "system",
   "defaultColor": "cyan",
   "messages": [
-    "nkp.tour.intro",
     "nkp.tour.demo"
   ],
   "needs": [

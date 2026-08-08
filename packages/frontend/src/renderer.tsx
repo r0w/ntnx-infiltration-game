@@ -124,8 +124,20 @@ export const TerminalItem = memo(function TerminalItem({
       </InstantBlock>
     );
   }
-  return null;
+  // A unit kind this build does not know — a server ahead of a cached bundle,
+  // say. Render nothing, but still release the sequencer: silently skipping a
+  // unit is recoverable, freezing the whole run on it is not.
+  return <SkippedUnit isActive={isActive} onDone={onDone} />;
 });
+
+function SkippedUnit({ isActive, onDone }: { isActive: boolean; onDone: () => void }) {
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+  useEffect(() => {
+    if (isActive) onDoneRef.current();
+  }, [isActive]);
+  return null;
+}
 
 /**
  * Show a Braille-dot spinner while the pause is running so the player has

@@ -5,7 +5,6 @@
   "prompt": "tank",
   "defaultColor": "magenta",
   "messages": [
-    "nkp.ndk.intro",
     "nkp.ndk.demo"
   ],
   "needs": [
