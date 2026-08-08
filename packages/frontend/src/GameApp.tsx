@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { api, ApiError, type PackInfo } from './api';
 import { DevPanel } from './DevPanel';
 import { FauxTerminal } from './FauxTerminal';
+import { LightboxProvider } from './Lightbox';
 import { LoginForm } from './LoginForm';
 import { ConfirmModal } from './Modal';
 import { useSession, CONTINUE_VAR, AUTOFILLABLE_VARS } from './useSession';
@@ -247,6 +248,7 @@ export function GameApp() {
   const appStyle = { '--terminal-max-width': maxWidth } as CSSProperties;
 
   return (
+    <LightboxProvider>
     <div className="app" style={appStyle}>
       <header className="app-header">
         <div className="app-header-side app-header-left">
@@ -317,6 +319,7 @@ export function GameApp() {
         </ConfirmModal>
       )}
     </div>
+    </LightboxProvider>
   );
 }
 

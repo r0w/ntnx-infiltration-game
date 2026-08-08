@@ -5,7 +5,13 @@ export type MessageUnit =
   | { kind: 'clear' }
   | { kind: 'page-break' }
   | { kind: 'code'; text: string; lang?: string }
-  | { kind: 'image'; src: string; alt?: string };
+  | { kind: 'image'; src: string; alt?: string }
+  /**
+   * An interactive demo the player opens rather than reads: a poster tile that
+   * launches an embedded sandbox (Storylane) in the lightbox. Distinct from
+   * `image` because the poster is a door, not the content.
+   */
+  | { kind: 'demo'; src: string; poster?: string; label?: string };
 
 export type StageStreamEvent =
   | { type: 'stage-start'; stageName: string; typingSpeedMs?: number }

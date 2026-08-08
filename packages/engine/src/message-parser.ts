@@ -216,6 +216,19 @@ export function parseMessage(
         pushVoidUnit({ kind: 'image', src, ...(alt ? { alt } : {}) });
         return true;
       }
+      case 'demo': {
+        const src = tag.attrs.src;
+        if (!src) return true; // same silent drop as a malformed image
+        const poster = tag.attrs.poster;
+        const label = tag.attrs.label;
+        pushVoidUnit({
+          kind: 'demo',
+          src,
+          ...(poster ? { poster } : {}),
+          ...(label ? { label } : {}),
+        });
+        return true;
+      }
       default:
         return false;
     }

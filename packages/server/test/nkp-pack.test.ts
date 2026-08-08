@@ -105,13 +105,25 @@ describe('nkp pack structure', () => {
     expect(Object.keys(en).filter((k) => !keys.has(k))).toEqual([]);
   });
 
-  test('every image a message references ships in the pack', () => {
+  test('every image and demo poster a message references ships in the pack', () => {
     const en = readFileSync(join(PACK, 'locales/en.json'), 'utf8');
     const missing: string[] = [];
     for (const m of en.matchAll(/<image src='([^']+)'/g)) {
       if (!existsSync(join(PACK, 'assets', m[1]))) missing.push(m[1]);
     }
+    for (const m of en.matchAll(/<demo [^>]*poster='([^']+)'/g)) {
+      if (!existsSync(join(PACK, 'assets', m[1]))) missing.push(m[1]);
+    }
     expect(missing).toEqual([]);
+  });
+
+  // A demo tile is a door with nothing behind it if the src is missing, and
+  // the sandboxes are third-party URLs rather than pack assets.
+  test('every demo points at an absolute sandbox URL', () => {
+    const en = readFileSync(join(PACK, 'locales/en.json'), 'utf8');
+    const srcs = [...en.matchAll(/<demo src='([^']+)'/g)].map((m) => m[1]);
+    expect(srcs.length).toBeGreaterThan(0);
+    expect(srcs.filter((u) => !u.startsWith('https://'))).toEqual([]);
   });
 
   test('a stage that captures a value asks for it in its own text', () => {

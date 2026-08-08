@@ -430,12 +430,162 @@ a.terminal-link:visited {
 
 .img-56k-wrap {
   position: relative;
-  display: inline-block;
-  margin: 10px 0;
-  max-width: min(420px, 100%);
+  /* Block + auto margins: screenshots are the widest thing in the stream, and
+     centring them keeps the eye from having to travel back left for the next
+     line of prose. */
+  display: block;
+  margin: 14px auto;
+  max-width: min(680px, 100%);
   border: 1px solid rgba(124, 220, 254, 0.18);
   background: #050a0e;
   padding: 3px;
+  /* It is a button now (click to enlarge) — drop the chrome, keep the frame. */
+  font: inherit;
+  color: inherit;
+  cursor: zoom-in;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: border-color 120ms ease-out;
+  /* The frame must hug the image. Any stray text node between the children
+     would otherwise contribute a line-box strut and pad the frame out. */
+  line-height: 0;
+}
+.img-56k-wrap:hover,
+.img-56k-wrap:focus-visible {
+  border-color: rgba(124, 220, 254, 0.5);
+}
+.img-56k-wrap:focus-visible {
+  outline: 1px solid var(--blue, #7cdcfe);
+  outline-offset: 2px;
+}
+/* The affordance stays out of the way until the pointer says otherwise. */
+.img-zoom-hint {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 1px 6px 2px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #cfe9f7;
+  background: rgba(5, 10, 14, 0.82);
+  border: 1px solid rgba(124, 220, 254, 0.35);
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+  pointer-events: none;
+}
+.img-56k-wrap:hover .img-zoom-hint,
+.img-56k-wrap:focus-visible .img-zoom-hint {
+  opacity: 1;
+}
+
+/* ── interactive demo tile ────────────────────────────────────────────── */
+.demo-tile {
+  position: relative;
+  display: block;
+  margin: 14px auto;
+  max-width: min(680px, 100%);
+  padding: 3px;
+  border: 1px solid rgba(124, 220, 254, 0.28);
+  background: #050a0e;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: border-color 120ms ease-out;
+  line-height: 0;
+}
+.demo-tile:hover,
+.demo-tile:focus-visible { border-color: rgba(124, 220, 254, 0.6); }
+.demo-tile:focus-visible { outline: 1px solid var(--blue, #7cdcfe); outline-offset: 2px; }
+.demo-tile-poster { display: block; width: 100%; height: auto; opacity: 0.72; }
+.demo-tile:hover .demo-tile-poster { opacity: 0.9; }
+.demo-tile-label {
+  line-height: 1.5;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 6px 14px;
+  background: rgba(5, 10, 14, 0.86);
+  border: 1px solid rgba(124, 220, 254, 0.45);
+  color: #cfe9f7;
+  white-space: nowrap;
+}
+/* No poster: the label is the whole tile. */
+.demo-tile:not(:has(.demo-tile-poster)) {
+  padding: 14px;
+  text-align: center;
+}
+.demo-tile:not(:has(.demo-tile-poster)) .demo-tile-label {
+  position: static;
+  transform: none;
+  display: inline-block;
+}
+
+/* ── lightbox ─────────────────────────────────────────────────────────── */
+.lightbox-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 6, 9, 0.9);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 1200; /* above the modals, which can sit under it */
+  animation: modal-fade 120ms ease-out;
+  cursor: zoom-out;
+}
+.lightbox-frame {
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  cursor: default;
+  animation: modal-pop 140ms ease-out;
+}
+.lightbox-image {
+  display: block;
+  max-width: 92vw;
+  max-height: 82vh;
+  width: auto;
+  height: auto;
+  border: 1px solid rgba(124, 220, 254, 0.28);
+  background: #050a0e;
+  padding: 3px;
+}
+.lightbox-embed {
+  display: block;
+  width: min(1200px, 92vw);
+  height: 82vh;
+  border: 1px solid rgba(124, 220, 254, 0.28);
+  background: #050a0e;
+}
+.lightbox-caption {
+  margin: 8px 0 0;
+  max-width: 92vw;
+  color: var(--dim, #7a8b99);
+  font-size: 13px;
+  text-align: center;
+}
+.lightbox-close {
+  position: absolute;
+  top: -34px;
+  right: 0;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: #cfe9f7;
+  background: rgba(5, 10, 14, 0.9);
+  border: 1px solid rgba(124, 220, 254, 0.35);
+  cursor: pointer;
+}
+.lightbox-close:hover { border-color: rgba(124, 220, 254, 0.7); }
+.lightbox-close:focus-visible { outline: 1px solid var(--blue, #7cdcfe); outline-offset: 2px; }
+@media (max-width: 640px) {
+  .lightbox-backdrop { padding: 12px; }
+  .lightbox-close { top: -30px; }
+  .lightbox-embed { height: 74vh; }
 }
 .img-56k {
   display: block;
@@ -2522,6 +2672,11 @@ a.terminal-link:visited {
   }
   .pack-cell:hover,
   .pack-cell:focus-visible { transform: none; }
+  .lightbox-backdrop,
+  .lightbox-frame { animation: none; }
+  .img-56k-wrap,
+  .demo-tile,
+  .img-zoom-hint { transition: none; }
 }
 /* Drift badge + export / import / reset row above the stage table. Wraps
    on narrow viewports rather than squeezing the buttons. */

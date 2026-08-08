@@ -62,6 +62,7 @@ export type RenderItem =
   | { kind: 'await-input'; id: string; variable: string }
   | { kind: 'code'; id: string; text: string; lang?: string }
   | { kind: 'image'; id: string; src: string; alt?: string }
+  | { kind: 'demo'; id: string; src: string; poster?: string; label?: string }
   | { kind: 'page-break'; id: string }
   | { kind: 'check-dwell'; id: string; ms: number; label: string }
   | { kind: 'check-result'; id: string; pass: boolean; neutral?: boolean; detail?: string; hint?: string; cheer?: string }
