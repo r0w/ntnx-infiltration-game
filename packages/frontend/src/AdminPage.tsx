@@ -72,6 +72,24 @@ function AdminLogin({ onLoggedIn }: { onLoggedIn: (pw: string) => void }) {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // /api/pack needs no admin password, so the operator sees which game this
+  // console belongs to before signing in.
+  const [title, setTitle] = useState('ntnx infiltration game');
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .pack()
+      .then((p) => {
+        if (!cancelled) setTitle(p.title);
+      })
+      .catch(() => {
+        /* keep the fallback title */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,7 +110,7 @@ function AdminLogin({ onLoggedIn }: { onLoggedIn: (pw: string) => void }) {
   return (
     <div className="login">
       <div className="login-card">
-        <h1 className="login-title">admin · ntnx infiltration game</h1>
+        <h1 className="login-title">admin · {title}</h1>
         <p className="login-subtitle">Event-day operator tools.</p>
         <form onSubmit={submit}>
           <label className="login-field">

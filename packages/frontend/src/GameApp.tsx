@@ -76,9 +76,12 @@ export function GameApp() {
   // null override → follow the server's pack speed.
   const typingSpeedMs = typingSpeedOverride ?? session.typingSpeedMs;
 
+  // The pack names the game, so a second pack is not branded as the first.
+  const gameTitle = pack?.title ?? 'ntnx infiltration game';
+
   useEffect(() => {
-    document.title = 'ntnx infiltration game';
-  }, []);
+    document.title = gameTitle;
+  }, [gameTitle]);
 
   useEffect(() => {
     let cancelled = false;
@@ -235,6 +238,7 @@ export function GameApp() {
         defaultLocale={pack?.defaultLocale ?? 'en'}
         supportedLocales={pack?.supportedLocales ?? ['en']}
         wipLocales={pack?.wipLocales ?? []}
+        title={gameTitle}
         onSubmit={session.createSession}
       />
     );
@@ -246,7 +250,7 @@ export function GameApp() {
     <div className="app" style={appStyle}>
       <header className="app-header">
         <div className="app-header-side app-header-left">
-          <span className="app-title">ntnx infiltration game</span>
+          <span className="app-title">{gameTitle}</span>
         </div>
         <div className="app-header-side app-header-right">
           <WidthToggle value={maxWidth} onChange={setMaxWidth} />

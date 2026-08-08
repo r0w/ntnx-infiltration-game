@@ -119,6 +119,8 @@ async function handle<T>(res: Response): Promise<T> {
 export interface PackInfo {
   id: string;
   name: string;
+  /** Player-facing game title, from the pack. See PackManifest.title. */
+  title: string;
   /**
    * Operator-facing server mode. `mock` = fixtures, `test` = real PC + dev
    * tools, `live` = real PC + production demo (dev tools + auto-play

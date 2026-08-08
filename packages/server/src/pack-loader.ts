@@ -20,6 +20,14 @@ import {
 export interface PackManifest {
   id: string;
   name: string;
+  /**
+   * What players see in the browser tab, the header, and the login card.
+   * Distinct from `name`, which is the operator-facing label in `/admin`.
+   * A second pack is a different game and must not wear the first one's
+   * name; falls back to the infiltration game's title when absent so the
+   * original pack renders exactly as it always has.
+   */
+  title?: string;
   version: string;
   description?: string;
   checks: string;

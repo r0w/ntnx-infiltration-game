@@ -105,6 +105,7 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
     return c.json({
       id: deps.pack.manifest.id,
       name: deps.pack.manifest.name,
+      title: deps.pack.manifest.title ?? 'ntnx infiltration game',
       mode: serverMode,
       // Surfaced so the DevPanel can dim/highlight destructive stages
       // only on shared clusters (clusterProfile === 'other'); on hpoc
