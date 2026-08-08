@@ -335,6 +335,8 @@ export interface AdminPackConfigImportResult {
   newStages: string[];
   /** Local overrides the import wiped (it replaces, it doesn't merge). */
   clearedStages: string[];
+  /** Stages the imported setup leaves active with no surviving producer. */
+  brokenStages: string[];
 }
 
 export interface AdminLunchStatus {

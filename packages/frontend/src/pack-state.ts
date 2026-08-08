@@ -40,6 +40,9 @@ export function stateNote(
     case 'skipped':
       return s.missingCapabilities.length > 0
         ? `this cluster has no ${s.missingCapabilities.join(', ')}`
+        // `profile` is only null before the pack payload lands, which the
+        // caller renders past, but this stays a pure function: name the
+        // cluster generically rather than print "null".
         : `hpoc-only, and this cluster is ${profile ?? 'shared'}`;
     case 'broken':
       return `nothing left produces ${s.brokenMissingVars.join(', ')}`;

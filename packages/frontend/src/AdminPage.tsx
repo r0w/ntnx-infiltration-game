@@ -1381,6 +1381,18 @@ function PackConfigBar({
                     </dd>
                   </>
                 )}
+                {/* The per-stage toggle warns before it breaks a downstream
+                    stage; an import can break several at once, so it has to
+                    say so afterwards. */}
+                {result.brokenStages.length > 0 && (
+                  <>
+                    <dt className="c-red">broken</dt>
+                    <dd>
+                      left active with nothing to feed them:{' '}
+                      {result.brokenStages.join(', ')}
+                    </dd>
+                  </>
+                )}
               </dl>
             )}
             {error && <p className="c-red admin-pack-config-error">{error}</p>}
@@ -1441,12 +1453,6 @@ function PackConfigBar({
   );
 }
 
-/**
- * What a stage will actually do for the next player who reaches it, in
- * precedence order. `off` and `skipped` never run at all, so they outrank
- * `broken`: a stage the engine skips cannot fail a player. `gated` runs but
- * parks the room until the operator unlocks it.
- */
 /**
  * The Pack tab: the run sheet for the night.
  *
@@ -1548,7 +1554,7 @@ function PackEditor({
           <li key={r.s.stageName}>
             <button
               type="button"
-              className={`pack-cell pack-cell-${r.state} ${flash === r.s.stageName ? 'pack-cell-flash' : ''}`}
+              className={`pack-cell pack-cell-${r.state}`}
               style={{ animationDelay: `${Math.min(idx * 12, 480)}ms` }}
               title={`${idx + 1}. ${r.s.stageName} · ${r.state}${r.note ? `: ${r.note}` : ''}`}
               aria-label={`stage ${idx + 1}, ${r.s.stageName}, ${r.state}`}

@@ -709,9 +709,11 @@ describe('GET /api/admin/pack', () => {
 });
 
 describe('pack config export / import / reset', () => {
+  // use-project depends on mk-project, so turning the producer off has a
+  // downstream victim the import result has to name.
   const packStages: StageDefinition[] = [
-    { index: 0, id: 'mk-project', name: 'mk-project', active: true, messages: ['s1'] },
-    { index: 1, id: 'use-project', name: 'use-project', active: true, messages: ['s2'] },
+    { index: 0, id: 'mk-project', name: 'mk-project', active: true, messages: ['s1'], captures: ['ProjectUUID'] },
+    { index: 1, id: 'use-project', name: 'use-project', active: true, messages: ['s2'], needs: ['ProjectUUID'] },
     { index: 2, id: 'standalone', name: 'standalone', active: true, messages: ['s3'] },
   ];
 
@@ -882,6 +884,68 @@ describe('pack config export / import / reset', () => {
     expect(result.clearedStages).toEqual([]);
     // The import replaced the table, so the dead row is gone for good.
     expect(service.packOverlay.list(PACK_ID).map((o) => o.stageName)).toEqual(['mk-project']);
+  });
+
+  // The toolbar badge counts drift from the pack files. If the export
+  // counted overlay rows instead, one tab would show two numbers for the
+  // same thing: "1 override" next to "pack default".
+  test('an override that matches the pack default is neither counted nor exported', async () => {
+    const db = freshDb();
+    const { r } = instance(db);
+    // mk-project is active in the fixture, so active=true changes nothing.
+    db.prepare(
+      `INSERT INTO pack_overlay (pack_id, stage_name, active, admin_gate)
+       VALUES ($pid, 'mk-project', 1, NULL)`,
+    ).run({ $pid: PACK_ID });
+
+    const exported = await exportConfig(r);
+    expect(exported.overriddenCount).toBe(0);
+    const result = (await (
+      await importConfig(r, exported.config)
+    ).json()) as AdminPackConfigImportResult;
+    expect(result.applied).toEqual([]);
+    expect(result.clearedStages).toEqual([]);
+  });
+
+  test('reset reports what the operator saw, not the raw row count', async () => {
+    const db = freshDb();
+    const { r } = instance(db);
+    db.prepare(
+      `INSERT INTO pack_overlay (pack_id, stage_name, active, admin_gate)
+       VALUES ($pid, 'mk-project', 1, NULL), ($pid, 'long-gone', 0, NULL)`,
+    ).run({ $pid: PACK_ID });
+    await toggle(r, 'standalone', 'active', false);
+
+    const res = await r.request('/pack/config/reset', { method: 'POST', headers: AUTH });
+    // Three rows in the table, but only `standalone` was ever a change.
+    expect(((await res.json()) as { cleared: number }).cleared).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM pack_overlay').get()).toEqual({ n: 0 } as never);
+  });
+
+  // Disabling a producer through the toggle shows a cascade modal first. An
+  // import can do the same thing in one shot, so it has to report it after.
+  test('import reports the stages its config left broken', async () => {
+    const source = instance(freshDb());
+    await toggle(source.r, 'mk-project', 'active', false);
+    const config = (await exportConfig(source.r)).config;
+
+    const target = instance(freshDb());
+    const result = (await (
+      await importConfig(target.r, config)
+    ).json()) as AdminPackConfigImportResult;
+    // use-project needs ProjectUUID, which only mk-project captures.
+    expect(result.brokenStages).toEqual(['use-project']);
+  });
+
+  test('a healthy import reports nothing broken', async () => {
+    const source = instance(freshDb());
+    await toggle(source.r, 'standalone', 'active', false);
+    const config = (await exportConfig(source.r)).config;
+    const target = instance(freshDb());
+    const result = (await (
+      await importConfig(target.r, config)
+    ).json()) as AdminPackConfigImportResult;
+    expect(result.brokenStages).toEqual([]);
   });
 
   test('a config for another pack is refused and changes nothing', async () => {

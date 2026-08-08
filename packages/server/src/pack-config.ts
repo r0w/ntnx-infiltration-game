@@ -59,33 +59,54 @@ function unpack(body: string): string {
   }).toString('utf8');
 }
 
-/**
- * Overlay rows that still match a stage in the pack. The overlay table has
- * no foreign key to the pack (packs live on disk), so rows for stages a
- * later pack version renamed or dropped linger in the DB. Exporting those
- * would ship dead weight and make every import report a phantom missing
- * stage, so both the export and its count go through here.
- */
-export function liveOverlayRows(
-  rows: readonly PackOverlayRow[],
-  packStageNames: readonly string[],
-): PackOverlayRow[] {
-  const known = new Set(packStageNames);
-  return rows.filter((r) => known.has(r.stageName) && !(r.active === null && r.adminGate === null));
+/** A stage as its pack file declares it, before any operator override. */
+export interface PackStageDefaults {
+  name: string;
+  active: boolean;
+  adminGate: boolean;
 }
 
 /**
- * Encode the sparse overlay rows into the portable string. Rows with no
- * override at all, or pointing at a stage this pack no longer has, are
- * dropped.
+ * The overrides an operator would recognise as their own doing: the pack
+ * overlay minus everything that says nothing.
+ *
+ * Two kinds of row say nothing. Rows for a stage the pack no longer has,
+ * because the overlay table has no foreign key to the pack (packs live on
+ * disk) and outlives the stage that spawned it; exporting those makes every
+ * import elsewhere report a phantom missing stage. And rows that repeat the
+ * pack default, which a toggle flipped twice leaves behind; counting those
+ * as changes would make the export claim overrides on a tab that reports no
+ * drift. Everything the operator is shown a number for goes through here,
+ * so there is one count, not two.
+ */
+export function meaningfulOverrides(
+  rows: readonly PackOverlayRow[],
+  defaults: readonly PackStageDefaults[],
+): PackOverlayRow[] {
+  const byName = new Map(defaults.map((d) => [d.name, d]));
+  const out: PackOverlayRow[] = [];
+  for (const r of rows) {
+    const d = byName.get(r.stageName);
+    if (!d) continue;
+    const active = r.active === null || r.active === d.active ? null : r.active;
+    const adminGate = r.adminGate === null || r.adminGate === d.adminGate ? null : r.adminGate;
+    if (active === null && adminGate === null) continue;
+    out.push({ stageName: r.stageName, active, adminGate });
+  }
+  return out;
+}
+
+/**
+ * Encode the operator's real overrides into the portable string. The pack's
+ * stage roster rides along; see the file header for why.
  */
 export function encodePackConfig(
   packId: string,
-  packStageNames: readonly string[],
+  defaults: readonly PackStageDefaults[],
   rows: readonly PackOverlayRow[],
 ): string {
   const overrides: Record<string, PackConfigOverride> = {};
-  const live = liveOverlayRows(rows, packStageNames);
+  const live = meaningfulOverrides(rows, defaults);
   for (const r of [...live].sort((a, b) => a.stageName.localeCompare(b.stageName))) {
     const o: PackConfigOverride = {};
     if (r.active !== null) o.active = r.active;
@@ -94,7 +115,7 @@ export function encodePackConfig(
   }
   return (
     PACK_CONFIG_PREFIX +
-    pack(JSON.stringify({ v: 1, p: packId, s: packStageNames, o: overrides }))
+    pack(JSON.stringify({ v: 1, p: packId, s: defaults.map((d) => d.name), o: overrides }))
   );
 }
 

@@ -10,7 +10,13 @@ import {
 import type { PackOverlayRow } from '../src/db/queries';
 
 const PACK = 'test-pack';
-const STAGES = ['login', 'intro', 'outro'];
+const STAGE_NAMES = ['login', 'intro', 'outro'];
+
+/** The pack as its files declare it: everything on, nothing gated. */
+function defaults(names: readonly string[] = STAGE_NAMES) {
+  return names.map((name) => ({ name, active: true, adminGate: false }));
+}
+const STAGES = defaults();
 
 function row(
   stageName: string,
@@ -38,7 +44,7 @@ describe('encodePackConfig / decodePackConfig', () => {
     ]);
     const decoded = decodePackConfig(s);
     expect(decoded.packId).toBe(PACK);
-    expect(decoded.stages).toEqual(STAGES);
+    expect(decoded.stages).toEqual(STAGE_NAMES);
     expect(decoded.overrides).toEqual({
       intro: { active: false },
       outro: { adminGate: true },
@@ -53,7 +59,7 @@ describe('encodePackConfig / decodePackConfig', () => {
   test('an untouched pack encodes to an empty override set', () => {
     const decoded = decodePackConfig(encodePackConfig(PACK, STAGES, []));
     expect(decoded.overrides).toEqual({});
-    expect(decoded.stages).toEqual(STAGES);
+    expect(decoded.stages).toEqual(STAGE_NAMES);
   });
 
   test('rows with no override at all are dropped', () => {
@@ -71,10 +77,41 @@ describe('encodePackConfig / decodePackConfig', () => {
     expect(decoded.overrides).toEqual({ intro: { active: false } });
   });
 
+  // The badge on the tab counts drift from the pack files, so the string
+  // has to count the same thing or the two disagree on one screen.
+  test('an override that repeats the pack default is not an override', () => {
+    const decoded = decodePackConfig(
+      encodePackConfig(PACK, STAGES, [
+        row('intro', true, null),   // pack says active: true already
+        row('outro', null, false),  // pack says adminGate: false already
+        row('login', false, null),  // a real change
+      ]),
+    );
+    expect(decoded.overrides).toEqual({ login: { active: false } });
+  });
+
+  test('only the redundant half of a row is dropped', () => {
+    const decoded = decodePackConfig(
+      encodePackConfig(PACK, STAGES, [row('intro', true, true)]),
+    );
+    expect(decoded.overrides).toEqual({ intro: { adminGate: true } });
+  });
+
+  test('a pack whose file says off makes active:false the redundant one', () => {
+    const off = [
+      { name: 'login', active: true, adminGate: false },
+      { name: 'intro', active: false, adminGate: false },
+    ];
+    const decoded = decodePackConfig(
+      encodePackConfig(PACK, off, [row('intro', false, null), row('login', false, null)]),
+    );
+    expect(decoded.overrides).toEqual({ login: { active: false } });
+  });
+
   test('export then import then re-export is stable despite a stale row', () => {
     const rows = [row('intro', false, null), row('long-gone', true, null)];
     const first = encodePackConfig(PACK, STAGES, rows);
-    const plan = planPackConfigImport(decodePackConfig(first), PACK, STAGES);
+    const plan = planPackConfigImport(decodePackConfig(first), PACK, STAGE_NAMES);
     expect(encodePackConfig(PACK, STAGES, plan.applied)).toBe(first);
   });
 
@@ -88,7 +125,7 @@ describe('encodePackConfig / decodePackConfig', () => {
   // under the raw JSON it encodes or the operator gets a wall of text.
   test('compresses: a realistic 40-stage pack stays under half the raw JSON', () => {
     const many = Array.from({ length: 40 }, (_, i) => `create-some-resource-${i}`);
-    const s = encodePackConfig(PACK, many, [row(many[3], false, null)]);
+    const s = encodePackConfig(PACK, defaults(many), [row(many[3], false, null)]);
     const raw = JSON.stringify({ v: 1, p: PACK, s: many, o: { [many[3]]: { active: false } } });
     expect(s.length).toBeLessThan(raw.length / 2);
     expect(decodePackConfig(s).stages).toEqual(many);
@@ -153,7 +190,7 @@ describe('planPackConfigImport', () => {
     const cfg = decodePackConfig(
       encodePackConfig(PACK, STAGES, [row('intro', false, null), row('outro', null, true)]),
     );
-    const plan = planPackConfigImport(cfg, PACK, STAGES);
+    const plan = planPackConfigImport(cfg, PACK, STAGE_NAMES);
     expect(plan.applied).toEqual([
       { stageName: 'intro', active: false, adminGate: null },
       { stageName: 'outro', active: null, adminGate: true },
@@ -164,7 +201,7 @@ describe('planPackConfigImport', () => {
 
   test('a pack-id mismatch is fatal', () => {
     const cfg = decodePackConfig(encodePackConfig('other-pack', STAGES, []));
-    expect(() => planPackConfigImport(cfg, PACK, STAGES)).toThrow(
+    expect(() => planPackConfigImport(cfg, PACK, STAGE_NAMES)).toThrow(
       /config is for pack 'other-pack', this server runs 'test-pack'/,
     );
   });
@@ -173,19 +210,19 @@ describe('planPackConfigImport', () => {
   // stage add/remove has to land the stages the two packs still share.
   test('a stage deleted since the export is reported, not fatal', () => {
     const cfg = decodePackConfig(
-      encodePackConfig(PACK, [...STAGES, 'retired'], [
+      encodePackConfig(PACK, defaults([...STAGE_NAMES, 'retired']), [
         row('intro', false, null),
         row('retired', false, null),
       ]),
     );
-    const plan = planPackConfigImport(cfg, PACK, STAGES);
+    const plan = planPackConfigImport(cfg, PACK, STAGE_NAMES);
     expect(plan.applied.map((a) => a.stageName)).toEqual(['intro']);
     expect(plan.missingStages).toEqual(['retired']);
   });
 
   test('a stage added since the export is reported and left at its default', () => {
     const cfg = decodePackConfig(encodePackConfig(PACK, STAGES, [row('intro', false, null)]));
-    const plan = planPackConfigImport(cfg, PACK, [...STAGES, 'brand-new']);
+    const plan = planPackConfigImport(cfg, PACK, [...STAGE_NAMES, 'brand-new']);
     expect(plan.applied.map((a) => a.stageName)).toEqual(['intro']);
     expect(plan.newStages).toEqual(['brand-new']);
     // Left out of `applied` entirely: a replace-all write drops any local
@@ -195,7 +232,7 @@ describe('planPackConfigImport', () => {
 
   test('reports both directions of drift at once', () => {
     const cfg = decodePackConfig(
-      encodePackConfig(PACK, ['login', 'intro', 'retired'], [row('retired', false, null)]),
+      encodePackConfig(PACK, defaults(['login', 'intro', 'retired']), [row('retired', false, null)]),
     );
     const plan = planPackConfigImport(cfg, PACK, ['login', 'intro', 'brand-new']);
     expect(plan.missingStages).toEqual(['retired']);
@@ -207,7 +244,7 @@ describe('planPackConfigImport', () => {
     const cfg = decodePackConfig(
       forge({ v: 1, p: PACK, o: { intro: { active: false } } }),
     );
-    const plan = planPackConfigImport(cfg, PACK, [...STAGES, 'brand-new']);
+    const plan = planPackConfigImport(cfg, PACK, [...STAGE_NAMES, 'brand-new']);
     expect(plan.newStages).toEqual([]);
     expect(plan.applied.map((a) => a.stageName)).toEqual(['intro']);
   });

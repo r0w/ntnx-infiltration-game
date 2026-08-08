@@ -12,9 +12,10 @@ import { readEnabledWipLocales, writeEnabledWipLocales } from '../effective-loca
 import {
   decodePackConfig,
   encodePackConfig,
-  liveOverlayRows,
+  meaningfulOverrides,
   planPackConfigImport,
   PackConfigError,
+  type PackStageDefaults,
 } from '../pack-config';
 import {
   probeClusterName,
@@ -264,6 +265,10 @@ export interface AdminPackConfigImportResult {
   /** Local overrides the import wiped because the config doesn't set them.
    *  Import replaces rather than merges, so the setup is reproducible. */
   clearedStages: string[];
+  /** Stages left active with no surviving producer for what they need. The
+   *  per-stage toggle warns about this before disabling; an imported config
+   *  can disable the same producer in one go, so it has to say so after. */
+  brokenStages: string[];
 }
 
 export interface AdminLanguageEntry {
@@ -654,13 +659,22 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   // pack overlay travels: gate unlocks and the lunch lock are live event
   // state, not configuration, and importing them would surprise a room.
 
+  // The pack as its files declare it, which is what an override is measured
+  // against everywhere the operator sees a number.
+  const stageDefaults = (): PackStageDefaults[] =>
+    deps.pack.stages.map((s) => ({
+      name: s.name,
+      active: s.active ?? true,
+      adminGate: s.adminGate ?? false,
+    }));
+
   router.get('/pack/config', (c) => {
-    const stageNames = deps.pack.stages.map((s) => s.name);
+    const defaults = stageDefaults();
     const rows = deps.service.packOverlay.list(deps.pack.manifest.id);
     const payload: AdminPackConfigPayload = {
-      config: encodePackConfig(deps.pack.manifest.id, stageNames, rows),
+      config: encodePackConfig(deps.pack.manifest.id, defaults, rows),
       packId: deps.pack.manifest.id,
-      overriddenCount: liveOverlayRows(rows, stageNames).length,
+      overriddenCount: meaningfulOverrides(rows, defaults).length,
     };
     return c.json(payload);
   });
@@ -674,7 +688,8 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       throw new HttpError(400, 'config must be a string');
     }
     const packId = deps.pack.manifest.id;
-    const stageNames = deps.pack.stages.map((s) => s.name);
+    const defaults = stageDefaults();
+    const stageNames = defaults.map((d) => d.name);
     let plan;
     try {
       plan = planPackConfigImport(decodePackConfig(body.config), packId, stageNames);
@@ -682,10 +697,10 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       if (err instanceof PackConfigError) throw new HttpError(400, err.message);
       throw err;
     }
-    // Only rows the operator can actually see in the table count as
-    // "wiped": a stale row for a dropped stage isn't news to them.
+    // Only overrides the operator could actually see count as "wiped": a
+    // stale row, or one that repeats the pack default, isn't news to them.
     const before = new Set(
-      liveOverlayRows(deps.service.packOverlay.list(packId), stageNames).map((r) => r.stageName),
+      meaningfulOverrides(deps.service.packOverlay.list(packId), defaults).map((r) => r.stageName),
     );
     deps.service.packOverlay.replaceAll(packId, plan.applied);
     deps.service.applyEffectiveStages();
@@ -698,6 +713,9 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       missingStages: plan.missingStages,
       newStages: plan.newStages,
       clearedStages: [...before].filter((n) => !appliedSet.has(n)).sort(),
+      brokenStages: analyzeDeps({ stages: deps.service.listEffectiveStages() })
+        .broken.map((b) => b.stageName)
+        .sort(),
     };
     return c.json(result);
   });
@@ -705,7 +723,13 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   // Back to the pack JSON defaults, the escape hatch after an import or a
   // long afternoon of toggling.
   router.post('/pack/config/reset', (c) => {
-    const cleared = deps.service.packOverlay.clear(deps.pack.manifest.id);
+    // Report what the operator was shown, not the row count: stale rows and
+    // rows that repeat the pack default were never on their screen.
+    const cleared = meaningfulOverrides(
+      deps.service.packOverlay.list(deps.pack.manifest.id),
+      stageDefaults(),
+    ).length;
+    deps.service.packOverlay.clear(deps.pack.manifest.id);
     deps.service.applyEffectiveStages();
     return c.json({ ok: true, cleared });
   });
