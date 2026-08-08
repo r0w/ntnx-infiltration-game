@@ -10,7 +10,7 @@ You need an HPoC and two files. About five minutes of clicks, then the install r
 
 1. **Book an HPoC** with the **AOS + PC Demo - Latest (7.5.x)** runbook (4 nodes, Flow and Leap enabled). On a fresh HPoC, enable **Intelligent Operations** once in Prism (Settings > Intelligent Operations); one stage needs it.
 2. **Download the two assets** from the [latest release](https://github.com/r0w/ntnx-infiltration-game/releases/latest): `nig-00-runbook-prerequisites.json` and `nig-01-blueprint.json`.
-3. **Run the runbook** (Self-Service > Runbooks): upload `nig-00...` and run it. It creates the AD endpoint the install needs.
+3. **Run the runbook** (Self-Service > Runbooks): upload `nig-00...` and run it. It creates the AD endpoint the install needs. **Target project** must be the same project you import the blueprint into at step 4 - Calm endpoints are project-scoped, so the install can only find the endpoint from its own project. Leave it on `lab` unless your HPoC has no project by that name.
 4. **Launch the blueprint** (Self-Service > Blueprints): upload `nig-01...`, set the `NUTANIX` credential to your PC admin password, then launch and fill the [short form](#the-launch-form). The install then runs on its own (30-40 min).
 5. When the app reaches **`running`**, its description shows the URLs.
 

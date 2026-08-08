@@ -17,6 +17,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- The prerequisites runbook now asks which project to use instead of assuming
+  one named `lab`, and says so plainly when that project does not exist.
+
 ### Fixed
 
 ## [1.0.0] - 2026-07-28
