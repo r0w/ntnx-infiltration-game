@@ -15,8 +15,14 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- The Pack tab can export the stage setup as one string, import it on another
+  instance, and reset every stage back to the pack defaults.
+- The Pack tab says at a glance how many stages differ from the pack defaults.
+
 ### Changed
 
+- The Pack tab now opens with the whole run in play order, colour-coded by what
+  each stage will do, and the stage list can be filtered and searched.
 - The prerequisites runbook now asks which project to use instead of assuming
   one named `lab`, and says so plainly when that project does not exist.
 

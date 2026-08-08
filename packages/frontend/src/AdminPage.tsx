@@ -12,6 +12,8 @@ import {
   type AdminGateEntry,
   type AdminLanguageEntry,
   type AdminLunchStatus,
+  type AdminPackConfigImportResult,
+  type AdminPackConfigPayload,
   type AdminPackStageEntry,
   type AdminPackTogglePreview,
   type AdminPeerEntry,
@@ -19,6 +21,7 @@ import {
 } from './api';
 import { EMAIL_RE } from '@ntnx-game/shared';
 import { ConfirmModal, Modal } from './Modal';
+import { stageState, stateNote, STATE_ORDER, type StageState } from './pack-state';
 
 // GrapesJS studio — lazy so the ~1MB editor only loads when the Emails tab shows it.
 const EmailStudio = lazy(() => import('./EmailStudio'));
@@ -325,6 +328,14 @@ function AdminDashboard({
       setLunchBusy(false);
     }
   };
+
+  // Stages whose live value differs from what their pack file declares.
+  // Counts real drift, not overlay rows: an override that happens to match
+  // the default is invisible to the operator, so it must not raise a flag.
+  const packDriftCount =
+    packStages === null
+      ? null
+      : packStages.filter((s) => s.activeOverridden || s.adminGateOverridden).length;
 
   const togglePackField = async (
     stage: AdminPackStageEntry,
@@ -901,6 +912,11 @@ function AdminDashboard({
       {tab === 'pack' && (
         <section className="admin-panel">
           <PanelHead eyebrow="mission plan" title="Stages" />
+          <PackConfigBar
+            password={password}
+            driftCount={packDriftCount}
+            onChanged={() => void refresh()}
+          />
           <PackEditor
             stages={packStages}
             meta={packMeta}
@@ -1141,6 +1157,311 @@ function AdminDashboard({
   );
 }
 
+/**
+ * Stage-setup toolbar: the drift badge plus export / import / reset.
+ *
+ * The export is one string carrying every on-off and gate override, so a
+ * curated workshop setup can be reproduced on another instance by pasting
+ * it. Import replaces the whole setup rather than merging into it, and
+ * reports stage drift both ways, since packs gain and lose stages between
+ * game versions.
+ */
+function PackConfigBar({
+  password,
+  driftCount,
+  onChanged,
+}: {
+  password: string;
+  /** Stages whose live value differs from the pack JSON. `null` while the
+   *  pack list is still loading. */
+  driftCount: number | null;
+  onChanged: () => void;
+}) {
+  const [dialog, setDialog] = useState<'export' | 'import' | 'reset' | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [exported, setExported] = useState<AdminPackConfigPayload | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [pasted, setPasted] = useState('');
+  const [result, setResult] = useState<AdminPackConfigImportResult | null>(null);
+  const [resetCount, setResetCount] = useState<number | null>(null);
+
+  const close = () => {
+    setDialog(null);
+    setError(null);
+    setCopied(false);
+    setPasted('');
+    setResult(null);
+    setExported(null);
+    setResetCount(null);
+  };
+
+  const openExport = async () => {
+    setDialog('export');
+    setBusy(true);
+    setError(null);
+    try {
+      setExported(await api.adminPackConfig(password));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copy = async () => {
+    if (!exported) return;
+    try {
+      await navigator.clipboard.writeText(exported.config);
+      setCopied(true);
+    } catch {
+      // Clipboard is blocked over plain http on some browsers, and the game
+      // is served over http. The box is selectable, so say that instead.
+      setError('clipboard blocked by the browser, select the text and copy manually');
+    }
+  };
+
+  const runImport = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setResult(await api.adminPackConfigImport(password, pasted));
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runReset = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setResetCount((await api.adminPackConfigReset(password)).cleared);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const drifted = driftCount !== null && driftCount > 0;
+  return (
+    <>
+      <div className="admin-pack-config">
+        <span
+          className={`pack-drift ${drifted ? 'pack-drift-on' : ''}`}
+          title={
+            drifted
+              ? 'the live setup differs from the stage files shipped with the pack'
+              : 'every stage is at the value its pack file declares'
+          }
+        >
+          <span className="pack-drift-dot" aria-hidden="true" />
+          {driftCount === null
+            ? 'reading setup…'
+            : drifted
+            ? `${driftCount} stage${driftCount > 1 ? 's' : ''} changed from pack default`
+            : 'pack default'}
+        </span>
+        <span className="admin-pack-config-sep" aria-hidden="true" />
+        <button type="button" className="app-reset" onClick={() => void openExport()}>
+          export
+        </button>
+        <button type="button" className="app-reset" onClick={() => setDialog('import')}>
+          import
+        </button>
+        {/* Never disabled on driftCount alone: an override that matches the
+            default counts as no drift but is still a row worth clearing. */}
+        <button
+          type="button"
+          className="app-reset"
+          title="drop every override and go back to the pack defaults"
+          onClick={() => setDialog('reset')}
+        >
+          reset
+        </button>
+      </div>
+
+      {dialog === 'export' && (
+        <Modal title="export stage config" onClose={close} wide>
+          <div className="modal-body">
+            <p className="admin-pack-config-lede">
+              Paste this into another instance to give it the same setup.
+            </p>
+            {busy && <p className="c-dim">reading setup…</p>}
+            {exported && (
+              <>
+                <textarea
+                  className="admin-pack-config-box"
+                  readOnly
+                  rows={7}
+                  value={exported.config}
+                  onFocus={(ev) => ev.currentTarget.select()}
+                />
+                <div className="admin-pack-config-meta c-dim">
+                  <span>pack {exported.packId}</span>
+                  <span>
+                    {exported.overriddenCount === 0
+                      ? 'no override, restores the pack defaults'
+                      : `${exported.overriddenCount} override${exported.overriddenCount > 1 ? 's' : ''}`}
+                  </span>
+                  <span>{exported.config.length} chars</span>
+                </div>
+              </>
+            )}
+            {error && <p className="c-red admin-pack-config-error">{error}</p>}
+          </div>
+          <div className="modal-actions">
+            <button type="button" className="modal-btn" onClick={close}>
+              close
+            </button>
+            <button
+              type="button"
+              className="modal-btn"
+              disabled={!exported}
+              onClick={() => void copy()}
+            >
+              {copied ? 'copied' : 'copy'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {dialog === 'import' && (
+        <Modal title="import stage config" onClose={close} busy={busy} wide>
+          <div className="modal-body">
+            {result === null ? (
+              <>
+                <p className="admin-pack-config-lede">
+                  This <strong>replaces</strong> the current setup. Any stage the config
+                  does not set goes back to its pack default.
+                </p>
+                <textarea
+                  className="admin-pack-config-box"
+                  rows={7}
+                  autoFocus
+                  spellCheck={false}
+                  placeholder="NIG1.…"
+                  value={pasted}
+                  onChange={(ev) => setPasted(ev.target.value)}
+                />
+              </>
+            ) : (
+              <dl className="admin-pack-config-report">
+                <dt className="c-green">applied</dt>
+                <dd>
+                  {result.applied.length === 0
+                    ? 'nothing, this config carries no override'
+                    : `${result.applied.length} stage${result.applied.length > 1 ? 's' : ''}: ${result.applied.join(', ')}`}
+                </dd>
+                {result.clearedStages.length > 0 && (
+                  <>
+                    <dt className="c-dim">back to default</dt>
+                    <dd className="c-dim">{result.clearedStages.join(', ')}</dd>
+                  </>
+                )}
+                {result.newStages.length > 0 && (
+                  <>
+                    <dt className="c-yellow">new stage</dt>
+                    <dd>
+                      added since that config was made, left at its default:{' '}
+                      {result.newStages.join(', ')}
+                    </dd>
+                  </>
+                )}
+                {result.missingStages.length > 0 && (
+                  <>
+                    <dt className="c-yellow">unknown</dt>
+                    <dd>
+                      gone from this version of the pack, ignored:{' '}
+                      {result.missingStages.join(', ')}
+                    </dd>
+                  </>
+                )}
+                {/* The per-stage toggle warns before it breaks a downstream
+                    stage; an import can break several at once, so it has to
+                    say so afterwards. */}
+                {result.brokenStages.length > 0 && (
+                  <>
+                    <dt className="c-red">broken</dt>
+                    <dd>
+                      left active with nothing to feed them:{' '}
+                      {result.brokenStages.join(', ')}
+                    </dd>
+                  </>
+                )}
+              </dl>
+            )}
+            {error && <p className="c-red admin-pack-config-error">{error}</p>}
+          </div>
+          <div className="modal-actions">
+            <button type="button" className="modal-btn" disabled={busy} onClick={close}>
+              {result === null ? 'cancel' : 'close'}
+            </button>
+            {result === null && (
+              <button
+                type="button"
+                className="modal-btn modal-btn-danger"
+                disabled={busy || pasted.trim() === ''}
+                onClick={() => void runImport()}
+              >
+                {busy ? 'importing…' : 'import'}
+              </button>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {dialog === 'reset' && (
+        <Modal title="reset stage config" onClose={close} busy={busy}>
+          <div className="modal-body">
+            {resetCount === null ? (
+              <p>
+                Drop every override and put all stages back to the value their pack file
+                declares. Player progress, gate unlocks and the lunch lock are untouched.
+              </p>
+            ) : (
+              <p className="c-green">
+                {resetCount === 0
+                  ? 'nothing to clear, the pack was already at its defaults.'
+                  : `cleared ${resetCount} override${resetCount > 1 ? 's' : ''}.`}
+              </p>
+            )}
+            {error && <p className="c-red admin-pack-config-error">{error}</p>}
+          </div>
+          <div className="modal-actions">
+            <button type="button" className="modal-btn" disabled={busy} onClick={close}>
+              {resetCount === null ? 'cancel' : 'close'}
+            </button>
+            {resetCount === null && (
+              <button
+                type="button"
+                className="modal-btn modal-btn-danger"
+                disabled={busy}
+                onClick={() => void runReset()}
+              >
+                {busy ? 'resetting…' : 'reset'}
+              </button>
+            )}
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/**
+ * The Pack tab: the run sheet for the night.
+ *
+ * The strip along the top is the whole mission in play order, one cell per
+ * stage, coloured by what that stage will actually do. Order is real
+ * information here (players walk it front to back), so the sequence is the
+ * primary view and the table is the detail behind it. The counts under the
+ * strip double as filters, which is why there is no separate legend.
+ */
 function PackEditor({
   stages,
   meta,
@@ -1158,140 +1479,231 @@ function PackEditor({
   ) => void;
   onRequestDisable: (s: AdminPackStageEntry) => void;
 }) {
+  const [filter, setFilter] = useState<StageState | 'all'>('all');
+  const [query, setQuery] = useState('');
+  const [flash, setFlash] = useState<string | null>(null);
+  // Set by a strip click, consumed by the effect below once the row it names
+  // is on screen. Going through state rather than scrolling inside the click
+  // handler is what makes dropping the filters first safe.
+  const [jumpTarget, setJumpTarget] = useState<string | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLTableRowElement | null>());
+  const flashTimer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
+    },
+    [],
+  );
+  useEffect(() => {
+    if (jumpTarget === null) return;
+    // Instant, not smooth: a glide is a no-op whenever the browser isn't
+    // painting the tab, and the flash below is the orientation cue anyway.
+    rowRefs.current.get(jumpTarget)?.scrollIntoView({ block: 'center' });
+    setFlash(jumpTarget);
+    setJumpTarget(null);
+    if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setFlash(null), 1400);
+  }, [jumpTarget]);
+
+  // A stage is filtered at session-creation time when it's hpoc-only AND the
+  // runtime cluster profile is `other`. Mock bypasses that gate (the profile
+  // is forced to `hpoc` at boot), so nothing is marked skipped there.
+  const filtersHpocOnly = meta !== null && meta.clusterProfile === 'other';
+  const rows = (stages ?? []).map((s, idx) => {
+    const state = stageState(s, filtersHpocOnly);
+    return { s, idx, state, note: stateNote(s, state, meta?.clusterProfile ?? null) };
+  });
+
+  const counts = STATE_ORDER.reduce(
+    (acc, st) => ({ ...acc, [st]: rows.filter((r) => r.state === st).length }),
+    {} as Record<StageState, number>,
+  );
+
+  // Clicking a cell in the strip walks the operator to that row. Filters are
+  // dropped first, otherwise the target row may not be rendered to scroll to.
+  const jumpTo = (stageName: string) => {
+    setFilter('all');
+    setQuery('');
+    setJumpTarget(stageName);
+  };
+
   if (stages === null) return <div className="admin-empty">loading pack…</div>;
   if (stages.length === 0) return <div className="admin-empty">empty pack.</div>;
-  // A stage is filtered at session-creation time when it's hpoc-only AND
-  // the runtime cluster profile is `other`. In mock mode the hpoc-only
-  // gate is bypassed (cluster profile forced to `hpoc` at boot), so don't
-  // mark anything filtered there — operator would otherwise wonder why the
-  // tag is on stages that all play through.
-  const filtersHpocOnly = meta !== null && meta.clusterProfile === 'other';
+
+  const q = query.trim().toLowerCase();
+  const visible = rows.filter(
+    (r) =>
+      (filter === 'all' || r.state === filter) &&
+      (q === '' || r.s.stageName.toLowerCase().includes(q)),
+  );
+
   return (
-    <div className="admin-table-wrap">
+    <div className="pack">
       {meta && (
-        <div className="admin-pack-meta c-dim">
-          mode: <span className={meta.mode === 'mock' ? 'c-yellow' : meta.mode === 'test' ? 'c-cyan' : 'c-green'}>{meta.mode}</span>
+        <p className="pack-run-caption c-dim">
+          <span className={meta.mode === 'mock' ? 'c-yellow' : meta.mode === 'test' ? 'c-cyan' : 'c-green'}>
+            {meta.mode}
+          </span>
           {' · '}
-          clusterProfile: <span className={meta.clusterProfile === 'hpoc' ? 'c-green' : 'c-yellow'}>{meta.clusterProfile}</span>
-          {filtersHpocOnly && (
-            <>
-              {' · '}
-              <span className="c-yellow">hpoc-only stages skipped at session start</span>
-            </>
-          )}
-        </div>
+          {meta.clusterProfile} cluster
+        </p>
       )}
-      <table className="admin-table admin-pack-table">
-        <thead>
-          <tr>
-            <th aria-label="order">#</th>
-            <th>name</th>
-            <th>impact</th>
-            <th>active</th>
-            <th>gate</th>
-            <th>needs</th>
-            <th>captures</th>
-            <th>status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {stages.map((s, idx) => {
-            const broken = s.brokenMissingVars.length > 0;
-            const inactive = !s.active;
-            const hpocOnlySkipped = filtersHpocOnly && s.impact === 'hpoc-only';
-            const capsMissing = s.missingCapabilities.length > 0;
-            const busy = busyId === s.stageName;
-            const rowSkipped = hpocOnlySkipped || capsMissing;
-            return (
-              <tr
-                key={s.stageName}
-                className={`pack-row ${inactive ? 'pack-row-off' : ''} ${broken ? 'pack-row-broken' : ''} ${rowSkipped ? 'pack-row-skipped' : ''}`}
-              >
-                <td className="pack-td-id c-dim">{idx + 1}</td>
-                <td className="pack-td-name">{s.stageName}</td>
-                <td>
-                  {s.impact === 'hpoc-only' ? (
-                    <span className="c-yellow" title="impact='hpoc-only' in pack JSON; filtered when clusterProfile === 'other'">
-                      hpoc-only
-                    </span>
-                  ) : (
-                    <span className="c-dim">safe</span>
-                  )}
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    className={`pack-toggle ${s.active ? 'pack-toggle-on' : 'pack-toggle-off'} ${(hpocOnlySkipped || capsMissing) ? 'pack-toggle-filtered' : ''}`}
-                    disabled={busy}
-                    title={
-                      capsMissing
-                        ? `active in pack but engine will skip — caps not detected on this cluster: ${s.missingCapabilities.join(', ')}`
-                        : hpocOnlySkipped
-                        ? `active in pack (JSON default), but engine filters this stage for sessions with clusterProfile='${meta?.clusterProfile}' because impact='hpoc-only'`
-                        : (s.activeOverridden ? 'overridden by operator (click to flip)' : 'using JSON default')
-                    }
-                    onClick={() =>
-                      s.active ? onRequestDisable(s) : onTogglePackField(s, 'active', true)
-                    }
-                  >
-                    {s.active ? 'on' : 'off'}
-                    {s.activeOverridden && <span className="pack-toggle-mark">·</span>}
-                  </button>
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    className={`pack-toggle ${s.adminGate ? 'pack-toggle-on' : 'pack-toggle-off'}`}
-                    disabled={busy}
-                    title={s.adminGateOverridden ? 'overridden by operator (click to flip)' : 'using JSON default'}
-                    onClick={() => onTogglePackField(s, 'adminGate', !s.adminGate)}
-                  >
-                    {s.adminGate ? 'gated' : 'open'}
-                    {s.adminGateOverridden && <span className="pack-toggle-mark">·</span>}
-                  </button>
-                </td>
-                <td className="pack-td-vars c-dim">
-                  {s.needs.length === 0 ? '—' : s.needs.join(', ')}
-                </td>
-                <td className="pack-td-vars c-dim">
-                  {s.captures.length === 0 ? '—' : s.captures.join(', ')}
-                </td>
-                <td>
-                  {broken ? (
-                    <span className="c-red" title={`missing: ${s.brokenMissingVars.join(', ')}`}>
-                      broken: {s.brokenMissingVars.join(', ')}
-                    </span>
-                  ) : inactive ? (
-                    <span
-                      className="c-dim"
+
+      <ol className="pack-run" aria-label="the run, in play order">
+        {rows.map((r, idx) => (
+          <li key={r.s.stageName}>
+            <button
+              type="button"
+              className={`pack-cell pack-cell-${r.state}`}
+              style={{ animationDelay: `${Math.min(idx * 12, 480)}ms` }}
+              title={`${idx + 1}. ${r.s.stageName} · ${r.state}${r.note ? `: ${r.note}` : ''}`}
+              aria-label={`stage ${idx + 1}, ${r.s.stageName}, ${r.state}`}
+              onClick={() => jumpTo(r.s.stageName)}
+            />
+          </li>
+        ))}
+      </ol>
+
+      <div className="pack-controls">
+        <div className="pack-chips" role="group" aria-label="filter stages by state">
+          <button
+            type="button"
+            className={`pack-chip ${filter === 'all' ? 'pack-chip-on' : ''}`}
+            aria-pressed={filter === 'all'}
+            onClick={() => setFilter('all')}
+          >
+            all <b>{rows.length}</b>
+          </button>
+          {STATE_ORDER.map((st) => (
+            <button
+              key={st}
+              type="button"
+              className={`pack-chip pack-chip-${st} ${filter === st ? 'pack-chip-on' : ''}`}
+              aria-pressed={filter === st}
+              disabled={counts[st] === 0}
+              onClick={() => setFilter(st)}
+            >
+              <span className="pack-chip-dot" aria-hidden="true" />
+              {st} <b>{counts[st]}</b>
+            </button>
+          ))}
+        </div>
+        <input
+          type="search"
+          className="pack-search"
+          placeholder="find a stage"
+          aria-label="find a stage by name"
+          value={query}
+          onChange={(ev) => setQuery(ev.target.value)}
+        />
+      </div>
+
+      <div className="admin-table-wrap">
+        <table className="admin-table admin-pack-table">
+          <thead>
+            <tr>
+              <th aria-label="play order">#</th>
+              <th>stage</th>
+              <th>active</th>
+              <th>gate</th>
+              <th>vars</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map(({ s, idx, state, note }) => {
+              const busy = busyId === s.stageName;
+              return (
+                <tr
+                  key={s.stageName}
+                  ref={(el) => {
+                    rowRefs.current.set(s.stageName, el);
+                  }}
+                  className={`pack-row pack-row-${state} ${flash === s.stageName ? 'pack-row-flash' : ''}`}
+                >
+                  <td className="pack-td-id c-dim">{String(idx + 1).padStart(2, '0')}</td>
+                  <td className="pack-td-name">
+                    <span className="pack-name">{s.stageName}</span>
+                    {/* Destructive stages stay worth flagging even where they
+                        run fine: on an hpoc cluster nothing else says so. */}
+                    {s.impact === 'hpoc-only' && (
+                      <span className="pack-tag" title="reshapes the cluster, so it only runs on a dedicated hpoc">
+                        hpoc-only
+                      </span>
+                    )}
+                    {/* Saying "playable" on every healthy row would print the
+                        same word 30-odd times: the state only speaks up when
+                        it has something to report. */}
+                    {state !== 'playable' && (
+                      <span className={`pack-note pack-note-${state}`}>
+                        <span className="pack-state-dot" aria-hidden="true" />
+                        <b>{state}</b>
+                        {note && <span className="pack-note-why">{note}</span>}
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className={`pack-toggle ${s.active ? 'pack-toggle-on' : 'pack-toggle-off'}`}
+                      disabled={busy}
                       title={
                         s.activeOverridden
-                          ? 'turned off via the admin pack toggle (click the on/off button to flip back)'
-                          : 'inactive in pack JSON (active: false in the stage file)'
+                          ? 'you changed this, click to flip it back'
+                          : 'as declared in the pack files'
+                      }
+                      onClick={() =>
+                        s.active ? onRequestDisable(s) : onTogglePackField(s, 'active', true)
                       }
                     >
-                      disabled ({s.activeOverridden ? 'operator override' : 'off in pack'})
-                    </span>
-                  ) : capsMissing ? (
-                    <span
-                      className="c-yellow"
-                      title={`engine will skip — caps not detected on this cluster: ${s.missingCapabilities.join(', ')}`}
+                      {s.active ? 'on' : 'off'}
+                      {s.activeOverridden && <span className="pack-toggle-mark">·</span>}
+                    </button>
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className={`pack-toggle ${s.adminGate ? 'pack-toggle-gate' : 'pack-toggle-off'}`}
+                      disabled={busy}
+                      title={
+                        s.adminGateOverridden
+                          ? 'you changed this, click to flip it back'
+                          : 'as declared in the pack files'
+                      }
+                      onClick={() => onTogglePackField(s, 'adminGate', !s.adminGate)}
                     >
-                      skipped (needs {s.missingCapabilities.join(', ')})
-                    </span>
-                  ) : hpocOnlySkipped ? (
-                    <span className="c-yellow" title="impact='hpoc-only' + clusterProfile='other' → engine skips this stage at session-create">
-                      skipped (hpoc-only)
-                    </span>
-                  ) : (
-                    <span className="c-green">ok</span>
-                  )}
+                      {s.adminGate ? 'gated' : 'open'}
+                      {s.adminGateOverridden && <span className="pack-toggle-mark">·</span>}
+                    </button>
+                  </td>
+                  <td className="pack-vars c-dim">
+                    {s.needs.length === 0 && s.captures.length === 0 ? (
+                      <span className="pack-vars-none">—</span>
+                    ) : (
+                      <>
+                        {s.needs.length > 0 && (
+                          <span title={`needs: ${s.needs.join(', ')}`}>↓ {s.needs.join(', ')}</span>
+                        )}
+                        {s.captures.length > 0 && (
+                          <span title={`captures: ${s.captures.join(', ')}`}>
+                            ↑ {s.captures.join(', ')}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {visible.length === 0 && (
+              <tr>
+                <td colSpan={5} className="pack-empty">
+                  no stage matches. <button type="button" className="app-reset" onClick={() => { setFilter('all'); setQuery(''); }}>show all {rows.length}</button>
                 </td>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

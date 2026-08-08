@@ -35,6 +35,8 @@ Everything runs from `http://<vm>:3000/admin`. Default password **`nutanix/4u`**
 - **Gates**: hold the whole room at a chosen stage until you press **unlock**. Pick which stages gate on the Pack tab.
 - **Lunch lock**: one header button parks everyone on a "back soon" screen. **Resume** when you return.
 - **Disable a stage** (Pack tab): flip a stage off and players skip it, live, no redeploy.
+- **See the run** (Pack tab): the strip along the top is tonight's mission in play order, one cell per stage, coloured by what that stage will do (playable, gated, skipped by this cluster, off, broken). Click a cell to jump to its row, or click a count below the strip to list just those stages.
+- **Share a setup** (Pack tab): **export config** gives you one string holding every on/off and gate choice. Paste it into another instance's **import config** to reproduce the same setup, or **reset to defaults** to undo an afternoon of toggling. Import replaces the setup rather than merging into it, and tells you about any stage the two game versions don't share.
 - **Multi-cluster scoreboard** (Scoreboard tab): add other instances' URLs to merge everyone into one leaderboard.
 - **Emails** (Emails tab): send invitations and lab summaries via Mailtrap, once per participant.
 
