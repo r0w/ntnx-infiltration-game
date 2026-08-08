@@ -167,10 +167,10 @@ class NkpGameVM(AhvVm):
 class NkpVM(Substrate):
     """The NKP profile's own substrate.
 
-    Identical to `VM` in every respect but its name. A substrate belongs to
-    exactly one deployment: pointing both deployments at `VM` imports and
-    validates fine, then fails at provision time with a bare
-    `SYS_GEN__Nutanix_Provision FAILURE` and no VM created.
+    Identical to `VM` but for the VM name, which says which game the VM runs.
+    A substrate per deployment is the conventional Calm shape; both deployments
+    pointing at one substrate also compiles and launches, it just makes the two
+    games indistinguishable in Prism's VM list.
     """
     os_type = "Linux"
     provider_type = "AHV_VM"
