@@ -24,6 +24,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 - The install no longer stops when the cluster serves an older v4 API than
   expected, or when erasure coding has to be turned off on an Objects container.
+- The install no longer stops on clusters running NCM Self-Service 4.4.0, which
+  rejected one of the two blueprints the game uploads for later stages.
 
 ## [1.0.0] - 2026-07-28
 
