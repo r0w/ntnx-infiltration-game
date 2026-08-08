@@ -73,6 +73,19 @@ export function LightboxProvider({ children }: { children: ReactNode }) {
           }}
         >
           <div className={`lightbox-frame lightbox-frame-${content.kind}`}>
+            {/* A sandbox is third-party and can be blocked by an extension, a
+                proxy, or a policy we cannot see from here. Always leave a door
+                that does not depend on framing working. */}
+            {content.kind === 'embed' && (
+              <a
+                className="lightbox-external"
+                href={content.src}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                open in a new tab ↗
+              </a>
+            )}
             <button
               type="button"
               ref={closeRef}
@@ -85,12 +98,13 @@ export function LightboxProvider({ children }: { children: ReactNode }) {
             {content.kind === 'image' ? (
               <img className="lightbox-image" src={content.src} alt={content.alt ?? ''} />
             ) : (
+              /* No loading="lazy": the player just clicked to open this, so
+                 deferring the fetch buys nothing and risks an empty frame. */
               <iframe
                 className="lightbox-embed"
                 src={content.src}
                 title={content.title}
                 allow="fullscreen"
-                loading="lazy"
               />
             )}
             {content.kind === 'image' && content.alt && (

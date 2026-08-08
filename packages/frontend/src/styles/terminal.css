@@ -568,6 +568,19 @@ a.terminal-link:visited {
   font-size: 13px;
   text-align: center;
 }
+.lightbox-external {
+  position: absolute;
+  top: -34px;
+  left: 0;
+  padding: 3px 10px;
+  font-size: 13px;
+  color: #cfe9f7;
+  background: rgba(5, 10, 14, 0.9);
+  border: 1px solid rgba(124, 220, 254, 0.35);
+  text-decoration: none;
+}
+.lightbox-external:hover { border-color: rgba(124, 220, 254, 0.7); }
+.lightbox-external:focus-visible { outline: 1px solid var(--blue, #7cdcfe); outline-offset: 2px; }
 .lightbox-close {
   position: absolute;
   top: -34px;
