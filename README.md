@@ -6,7 +6,7 @@ A hands-on game that teaches the **Nutanix Cloud Platform** by playing it. Playe
 
 ![The live scoreboard on the event screen](docs/screenshots/scoreboard.png)
 
-39 stages, 25 live checks against the Nutanix v4 APIs, three languages (two more in progress), an operator console, and a live leaderboard. Deploys on any PC 7.5 from a [Calm blueprint](./tooling/blueprint/).
+39 stages, 25 live checks against the Nutanix v4 APIs, three languages (two more in progress), an operator console, and a live leaderboard. Deploys from a [Calm blueprint](./tooling/blueprint/) onto PC 7.3 or 7.5.
 
 Based on the original [`ntnx-escape-game`](https://github.com/Golgautier/ntnx-escape-game) by Golgautier.
 
