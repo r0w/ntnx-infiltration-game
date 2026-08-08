@@ -159,6 +159,36 @@ class VM(Substrate):
     )
 
 
+class NkpGameVM(AhvVm):
+    name = "nkp-bootcamp-@@{calm_time}@@"
+    resources = GameVMResources
+
+
+class NkpVM(Substrate):
+    """The NKP profile's own substrate.
+
+    Identical to `VM` in every respect but its name. A substrate belongs to
+    exactly one deployment: pointing both deployments at `VM` imports and
+    validates fine, then fails at provision time with a bare
+    `SYS_GEN__Nutanix_Provision FAILURE` and no VM created.
+    """
+    os_type = "Linux"
+    provider_type = "AHV_VM"
+    provider_spec = NkpGameVM
+    provider_spec_editables = read_spec(
+        os.path.join("specs", "VM_create_spec_editables.yaml")
+    )
+    readiness_probe = readiness_probe(
+        connection_type="SSH",
+        disabled=False,
+        retries="5",
+        connection_port=22,
+        address="@@{platform.status.resources.nic_list[0].ip_endpoint_list[0].ip}@@",
+        delay_secs="60",
+        credential=ref(BP_CRED_NUTANIX),
+    )
+
+
 # ── Package — single placeholder install task ──────────────────────────
 
 class GameContent(Package):
@@ -483,7 +513,7 @@ class NkpDeployment(Deployment):
     max_replicas = "1"
     default_replicas = "1"
     packages = [ref(NkpContent)]
-    substrate = ref(VM)
+    substrate = ref(NkpVM)
 
 
 # ── Profile — runtime + day-2 actions ─────────────────────────────────
@@ -820,7 +850,7 @@ class NtnxInfiltrationGame(Blueprint):
 """
     services = [Game]
     packages = [Ubuntu2204, GameContent, NkpContent]
-    substrates = [VM]
+    substrates = [VM, NkpVM]
     # NCP first, so it is the default selection on the launch screen.
     profiles = [DefaultProfile, NkpProfile]
     credentials = [BP_CRED_NUTANIX]
