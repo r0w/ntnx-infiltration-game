@@ -121,6 +121,8 @@ export interface PackInfo {
   name: string;
   /** Player-facing game title, from the pack. See PackManifest.title. */
   title: string;
+  /** Print each screenshot's description under it. See PackManifest.imageCaptions. */
+  imageCaptions: boolean;
   /**
    * Operator-facing server mode. `mock` = fixtures, `test` = real PC + dev
    * tools, `live` = real PC + production demo (dev tools + auto-play

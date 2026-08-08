@@ -428,12 +428,27 @@ a.terminal-link:visited {
 .c-prompt { color: var(--prompt); font-weight: 600; }
 .c-bold { font-weight: 700; }
 
+.img-figure {
+  margin: 14px auto;
+  width: fit-content;
+  max-width: min(680px, 100%);
+}
+/* Inside a figure the frame's own margins would double the spacing. */
+.img-figure .img-56k-wrap { margin: 0; }
+.img-caption {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dim, #7a8b99);
+  text-align: center;
+}
 .img-56k-wrap {
   position: relative;
   /* Block + auto margins: screenshots are the widest thing in the stream, and
      centring them keeps the eye from having to travel back left for the next
      line of prose. */
   display: block;
+  width: fit-content;
   margin: 14px auto;
   max-width: min(680px, 100%);
   border: 1px solid rgba(124, 220, 254, 0.18);
@@ -602,8 +617,16 @@ a.terminal-link:visited {
 }
 .img-56k {
   display: block;
-  width: 100%;
+  /* Cap the height as well as the width: some bootcamp screenshots are long
+     portrait captures that would otherwise fill the viewport and bury the
+     step's own text. The lightbox is where the full size lives, so shrinking
+     here costs nothing. `width: auto` keeps the aspect ratio while the cap
+     applies. */
+  width: auto;
+  max-width: 100%;
+  max-height: 46vh;
   height: auto;
+  margin: 0 auto;
   /* image-rendering default (auto) keeps screenshots sharp when downscaled.
      The 56k feel comes from the stepped clip-path + scanline, not from
      pixelating the source. */

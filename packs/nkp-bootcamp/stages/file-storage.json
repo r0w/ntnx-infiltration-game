@@ -13,9 +13,6 @@
   "check": {
     "fn": "CheckFileStorage"
   },
-  "captures": [
-    "Ok"
-  ],
   "needs": [
     "UserNum"
   ]

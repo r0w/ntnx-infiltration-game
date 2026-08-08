@@ -47,7 +47,10 @@ export interface AppDeps {
 }
 
 export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } {
-  const runner = new StageRunner(deps.pack.stages, deps.pack.checks, { logger: consoleLogger });
+  const runner = new StageRunner(deps.pack.stages, deps.pack.checks, {
+    logger: consoleLogger,
+    pauseAfterImages: deps.pack.manifest.pauseAfterImages === true,
+  });
   const service = new SessionService({
     db: deps.db,
     runner,
@@ -106,6 +109,7 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
       id: deps.pack.manifest.id,
       name: deps.pack.manifest.name,
       title: deps.pack.manifest.title ?? 'ntnx infiltration game',
+      imageCaptions: deps.pack.manifest.imageCaptions === true,
       mode: serverMode,
       // Surfaced so the DevPanel can dim/highlight destructive stages
       // only on shared clusters (clusterProfile === 'other'); on hpoc

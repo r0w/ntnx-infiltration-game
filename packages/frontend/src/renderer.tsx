@@ -8,6 +8,8 @@ export interface TerminalItemProps {
   typingSpeedMs: number;
   /** When true, <pause/> beats and check-result dwells fire instantly. */
   skipPauses?: boolean;
+  /** Print each image's description under it. See PackManifest.imageCaptions. */
+  imageCaptions?: boolean;
   isActive: boolean;
   onDone: () => void;
 }
@@ -22,6 +24,7 @@ export const TerminalItem = memo(function TerminalItem({
   item,
   typingSpeedMs,
   skipPauses,
+  imageCaptions,
   isActive,
   onDone,
 }: TerminalItemProps) {
@@ -64,7 +67,15 @@ export const TerminalItem = memo(function TerminalItem({
     return <CodeBlock text={item.text} lang={item.lang} isActive={isActive} onDone={onDone} />;
   }
   if (item.kind === 'image') {
-    return <ImageReveal src={item.src} alt={item.alt} isActive={isActive} onDone={onDone} />;
+    return (
+      <ImageReveal
+        src={item.src}
+        alt={item.alt}
+        showCaption={imageCaptions === true}
+        isActive={isActive}
+        onDone={onDone}
+      />
+    );
   }
   if (item.kind === 'demo') {
     return (
@@ -376,11 +387,13 @@ function TypewriterText({ text, color, styles, href, speedMs, isActive, onDone }
 function ImageReveal({
   src,
   alt,
+  showCaption,
   isActive,
   onDone,
 }: {
   src: string;
   alt?: string;
+  showCaption?: boolean;
   isActive: boolean;
   onDone: () => void;
 }) {
@@ -400,7 +413,8 @@ function ImageReveal({
     ev.stopPropagation();
     lightbox.open({ kind: 'image', src: url, alt });
   };
-  return (
+  const caption = showCaption && alt ? alt : null;
+  const frame = (
     <button
       type="button"
       className={`img-56k-wrap img-56k-${phase}`}
@@ -422,6 +436,16 @@ function ImageReveal({
       />
       <span className="img-zoom-hint" aria-hidden="true">⤢</span>
     </button>
+  );
+  if (!caption) return frame;
+  // A figure so the caption is tied to the image rather than floating as the
+  // next line of prose. It sits outside the button: it describes the picture,
+  // it is not part of the control.
+  return (
+    <figure className="img-figure">
+      {frame}
+      <figcaption className="img-caption">{caption}</figcaption>
+    </figure>
   );
 }
 

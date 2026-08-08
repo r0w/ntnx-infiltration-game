@@ -12,9 +12,6 @@
   "check": {
     "fn": "CheckNodePort"
   },
-  "captures": [
-    "Ok"
-  ],
   "needs": [
     "UserNum"
   ]

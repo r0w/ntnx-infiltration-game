@@ -18,6 +18,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 - A second game: the NKP Fundamentals bootcamp, 26 stages from multi-tenancy
   through persistent storage, observability and GitOps.
 - Click any screenshot in the terminal to open it full size.
+- Screenshots can carry their description as a visible caption, and the run can
+  pause on each one so it is not scrolled away while you read it.
 - The NKP tour and the NDK lab open their interactive demo in the game instead
   of sending players off to the bootcamp site.
 - The blueprint launch screen now asks which game to install, NCP or NKP.

@@ -30,11 +30,22 @@ export interface RenderedStage {
 export interface StageRunnerOptions {
   /** Logger used to warn about missing translation keys at render time. */
   logger?: Logger;
+  /**
+   * Park on a "press Enter" after every screenshot.
+   *
+   * Without it a reveal is immediately followed by the next line typing on,
+   * which scrolls the image out of view exactly as the player starts reading
+   * it. Packs that lean on screenshots want this; the infiltration game, which
+   * paces itself with hand-placed prompts, does not. Off by default.
+   */
+  pauseAfterImages?: boolean;
 }
 
 export class StageRunner {
   private readonly logger?: Logger;
   private stages: readonly StageDefinition[];
+
+  private readonly pauseAfterImages: boolean;
 
   constructor(
     stages: readonly StageDefinition[],
@@ -43,6 +54,7 @@ export class StageRunner {
   ) {
     this.stages = stages;
     this.logger = opts.logger;
+    this.pauseAfterImages = opts.pauseAfterImages ?? false;
   }
 
   listStages(): readonly StageDefinition[] {
@@ -104,7 +116,8 @@ export class StageRunner {
       }
     }
 
-    const units = stage.prompt ? injectSpeakerTag(rawUnits, stage.prompt) : rawUnits;
+    const paced = this.pauseAfterImages ? pauseAfterEachImage(rawUnits) : rawUnits;
+    const units = stage.prompt ? injectSpeakerTag(paced, stage.prompt) : paced;
     let firstAwaitInputIdx = -1;
     for (let i = 0; i < units.length; i++) {
       if (units[i].kind === 'await-input') {
@@ -170,6 +183,30 @@ export class StageRunner {
  * legacy Python per-beat `<speaker> ` prefix without relying on per-line
  * emission (which would clutter list items and slow typing).
  */
+/**
+ * Insert a "press Enter" after every image that is not already followed by
+ * one, so a screenshot stays on screen until the player says they are done
+ * with it. Trailing whitespace between the image and an existing prompt does
+ * not count as content — it is the newline the runner adds between messages.
+ */
+function pauseAfterEachImage(units: MessageUnit[]): MessageUnit[] {
+  const out: MessageUnit[] = [];
+  for (let i = 0; i < units.length; i++) {
+    const unit = units[i];
+    out.push(unit);
+    if (unit.kind !== 'image') continue;
+    // Look past blank text at whatever actually comes next.
+    let j = i + 1;
+    while (j < units.length && units[j].kind === 'text' && (units[j] as { text: string }).text.trim() === '') {
+      j++;
+    }
+    const next = units[j];
+    if (next && next.kind === 'await-input') continue;
+    out.push({ kind: 'await-input', variable: '$continue' });
+  }
+  return out;
+}
+
 function injectSpeakerTag(units: readonly MessageUnit[], speaker: string): MessageUnit[] {
   const tag: MessageUnit = { kind: 'text', text: `<${speaker}> `, color: 'dim' };
   const out: MessageUnit[] = [];

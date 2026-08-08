@@ -39,7 +39,14 @@ export function LightboxProvider({ children }: { children: ReactNode }) {
 
   const close = useCallback(() => {
     setContent(null);
-    openerRef.current?.focus?.();
+    // Returning focus to the trigger is the usual pattern, but here the trigger
+    // is a button and Enter is how the player continues the game: they would
+    // press Enter to move on and reopen the lightbox instead. Hand focus to
+    // whatever the page marks as its primary input; failing that, blur rather
+    // than restore, because a dead Enter beats a looping one.
+    const primary = document.querySelector<HTMLElement>('[data-primary-input]');
+    if (primary) primary.focus();
+    else openerRef.current?.blur?.();
     openerRef.current = null;
   }, []);
 

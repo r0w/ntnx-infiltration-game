@@ -12,9 +12,6 @@
   "check": {
     "fn": "CheckSimpleApp"
   },
-  "captures": [
-    "Ok"
-  ],
   "needs": [
     "UserNum"
   ]

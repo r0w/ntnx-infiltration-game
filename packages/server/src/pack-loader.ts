@@ -44,6 +44,20 @@ export interface PackManifest {
    * listening, and a pack that never reads the answers would wait for nothing.
    */
   clusterFacts?: boolean;
+  /**
+   * Park on a "press Enter" after every screenshot. See
+   * {@link StageRunnerOptions.pauseAfterImages}. Off by default.
+   */
+  pauseAfterImages?: boolean;
+  /**
+   * Print each screenshot's description under it in the stream.
+   *
+   * The description already exists as the image's alt text; this decides
+   * whether it is only read by assistive tech and the lightbox, or shown to
+   * everyone. A pack that teaches through screenshots wants the caption
+   * visible; one that uses them as atmosphere does not. Off by default.
+   */
+  imageCaptions?: boolean;
   checks: string;
   actions?: string;
   /**

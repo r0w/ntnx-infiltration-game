@@ -17,6 +17,8 @@ export interface FauxTerminalProps {
   typingSpeedMs: number;
   /** Dev toggle: fire <pause/> beats + check dwells instantly. */
   skipPauses: boolean;
+  /** Show each image's description under it. See PackManifest.imageCaptions. */
+  imageCaptions?: boolean;
   /**
    * When set, the player is parked at an admin-gated stage. The banner
    * surfaces only after the typewriter has caught up to items.length so
@@ -58,6 +60,7 @@ export function FauxTerminal({
   finished,
   typingSpeedMs,
   skipPauses,
+  imageCaptions,
   gatedAt,
   autoPlay,
   onSubmit,
@@ -234,6 +237,7 @@ export function FauxTerminal({
             item={item}
             typingSpeedMs={typingSpeedMs}
             skipPauses={skipPauses}
+            imageCaptions={imageCaptions}
             isActive={idx === activeIdx}
             onDone={advanceSequencer}
           />
@@ -277,6 +281,9 @@ export function FauxTerminal({
                   doesn't pattern-match anything they recognise. */}
               <input
                 ref={inputRef}
+                /* Marks this as the field focus should come back to when an
+                   overlay closes — see Lightbox's close handler. */
+                data-primary-input="true"
                 value={inputValue}
                 onChange={(e) => {
                   let v = e.target.value;
@@ -334,11 +341,13 @@ function Line({
   item,
   typingSpeedMs,
   skipPauses,
+  imageCaptions,
   isActive,
   onDone,
 }: {
   item: RenderItem;
   typingSpeedMs: number;
+  imageCaptions?: boolean;
   skipPauses: boolean;
   isActive: boolean;
   onDone: () => void;
@@ -370,6 +379,7 @@ function Line({
       item={item}
       typingSpeedMs={typingSpeedMs}
       skipPauses={skipPauses}
+      imageCaptions={imageCaptions}
       isActive={isActive}
       onDone={handleDone}
     />

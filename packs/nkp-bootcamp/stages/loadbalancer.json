@@ -12,9 +12,6 @@
   "check": {
     "fn": "CheckLoadBalancer"
   },
-  "captures": [
-    "Ok"
-  ],
   "needs": [
     "UserNum"
   ]

@@ -12,9 +12,6 @@
   "check": {
     "fn": "CheckWordpressIngress"
   },
-  "captures": [
-    "Ok"
-  ],
   "needs": [
     "UserNum"
   ]

@@ -12,9 +12,6 @@
   "check": {
     "fn": "CheckSimpleAppIngress"
   },
-  "captures": [
-    "Ok"
-  ],
   "needs": [
     "UserNum"
   ]

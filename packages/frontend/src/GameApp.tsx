@@ -273,6 +273,7 @@ export function GameApp() {
         finished={session.finished}
         typingSpeedMs={typingSpeedMs}
         skipPauses={skipPauses}
+        imageCaptions={pack?.imageCaptions ?? false}
         gatedAt={session.gatedAt}
         locale={session.locale}
         autoPlay={autoPlay}

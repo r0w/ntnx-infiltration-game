@@ -12,9 +12,6 @@
   "check": {
     "fn": "CheckDynamicProject"
   },
-  "captures": [
-    "Ok"
-  ],
   "needs": [
     "UserNum"
   ]
