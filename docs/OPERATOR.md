@@ -40,6 +40,43 @@ Everything runs from `http://<vm>:3000/admin`. Default password **`nutanix/4u`**
 - **Multi-cluster scoreboard** (Scoreboard tab): add other instances' URLs to merge everyone into one leaderboard.
 - **Emails** (Emails tab): send invitations and lab summaries via Mailtrap, once per participant.
 
+## The other game: NKP Fundamentals
+
+The same blueprint installs a second game, the **NKP Fundamentals bootcamp**. It
+replays the [public bootcamp](https://bootcamps.nutanix.com/nkp-fundamentals/)
+as a validated run: the player creates a Project, gives WordPress persistent
+storage on Nutanix Volumes and Files, and hands deployment over to GitOps, and
+each step is checked against the real cluster before it advances.
+
+Pick **NkpProfile** on the launch screen. The form is shorter than the NCP one,
+because there is no world to build:
+
+| Field | Value |
+|---|---|
+| NKP console URL | the Kommander dashboard, e.g. `https://192.0.2.16/dkp/kommander/dashboard` |
+| NKP bootstrap VM IP | the `nkp-boot` VM |
+| NKP bootstrap VM username | `nutanix` |
+| NKP bootstrap VM password | on an HPoC, the same as the Prism Central password |
+| Prism Central IP / username / password | as for the other game |
+| Run mode, Image tag, Container image repository, Time zone | as for the other game |
+
+Prerequisites differ too:
+
+- **A staged NKP fleet.** A management cluster plus `workload01` and
+  `workload02`, both labelled `infraId: pc`, with the `nutanix-files`
+  StorageClass and a MetalLB pool. That is what the bootcamp's own staging
+  automation builds; the game does not build it.
+- **A user number per player** (`user01`, `user02`, ...), handed out the way the
+  bootcamp does. It scopes every object the player creates.
+- **No prerequisites runbook.** There is no AD endpoint to create, so skip step 3
+  of the quickstart entirely.
+
+The install only fetches a kubeconfig and starts the container, so it takes
+minutes rather than half an hour. One kubeconfig covers the whole fleet: the
+workload clusters' credentials are read from the management cluster. If NKP
+later rotates that certificate, run the **Refresh Kubeconfig** day-2 action
+rather than redeploying.
+
 ## Detailed operator
 
 ### Cluster prerequisites

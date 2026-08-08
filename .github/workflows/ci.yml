@@ -8,9 +8,9 @@ name: ci
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, nkp]
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, nkp]
 
 # Cancel in-flight runs for the same ref when a newer commit lands —
 # saves CI minutes during rapid iteration on a feature branch.

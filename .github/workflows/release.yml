@@ -23,6 +23,7 @@ on:
       - 'v*'
     branches:
       - develop
+      - nkp
   workflow_dispatch:
     inputs:
       tag:
@@ -60,6 +61,9 @@ jobs:
         #   - push to `develop` → no GH Release, image gets `:develop`
         #     and `:develop-<sha7>` so we can deploy a specific commit
         #     and have it survive future develop pushes.
+        #   - push to `nkp` → same treatment under the branch's own name,
+        #     so the NKP bootcamp pack can be deployed and played on a real
+        #     NKP fleet before it merges.
         # `is_release` is consumed by the upload-blueprint job below so
         # the GH Release path runs only on the first two cases.
         run: |
@@ -71,7 +75,7 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
             IS_RELEASE=true
           else
-            TAG="develop"
+            TAG="${GITHUB_REF#refs/heads/}"
             IS_RELEASE=false
           fi
           SHA_SHORT="${GITHUB_SHA::7}"
@@ -81,9 +85,9 @@ jobs:
             APP_VERSION="${TAG}"
             BRANCH="main"
           else
-            DOCKER_TAGS=$(printf '%s\n%s' "${IMG}:develop" "${IMG}:develop-${SHA_SHORT}")
-            APP_VERSION="develop-${SHA_SHORT}"
-            BRANCH="develop"
+            DOCKER_TAGS=$(printf '%s\n%s' "${IMG}:${TAG}" "${IMG}:${TAG}-${SHA_SHORT}")
+            APP_VERSION="${TAG}-${SHA_SHORT}"
+            BRANCH="${TAG}"
           fi
           BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           {

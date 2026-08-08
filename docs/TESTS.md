@@ -42,6 +42,8 @@ bun test -t "lunch lock"                           # by name
 | `cluster-profile.test.ts` | Explicit `hpoc`/`other`, fallback to `other` when unset |
 | `ssh.test.ts` | `/api/ssh/ping` argv validation + probe error remapping |
 | `auto-fill-current.test.ts` | Auto-fillable vars (NodeSerial, NumberUpdates, Runway…) resolve in mock |
+| `nkp-pack.test.ts` | The NKP pack holds together: play order, stage ids, every check reachable, every message key and image present, and all twelve checks pass on the fixtures |
+| `e2e-nkp-mock.test.ts` | A learner plays the whole NKP bootcamp in mock and reaches the last stage |
 | `cluster-config-probe.test.ts` | The cached LCM count stage 29 judges against |
 | `pack-helpers.test.ts` | Stage-29 verdict deferral window after an LCM inventory |
 | `pack-integrity.test.ts` | Pack invariants: dependency-audit orphans, fixture placeholders |

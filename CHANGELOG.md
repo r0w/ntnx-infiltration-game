@@ -15,12 +15,17 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- A second game: the NKP Fundamentals bootcamp, 26 stages from multi-tenancy
+  through persistent storage, observability and GitOps.
+- The blueprint launch screen now asks which game to install, NCP or NKP.
 - The Pack tab can export the stage setup as one string, import it on another
   instance, and reset every stage back to the pack defaults.
 - The Pack tab says at a glance how many stages differ from the pack defaults.
 
 ### Changed
 
+- The game's name in the browser tab and header now comes from the pack, so each
+  game carries its own.
 - The Pack tab now opens with the whole run in play order, colour-coded by what
   each stage will do, and the stage list can be filtered and searched.
 - The prerequisites runbook now asks which project to use instead of assuming

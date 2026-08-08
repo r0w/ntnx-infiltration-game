@@ -177,7 +177,10 @@
         {
           "metadata": {
             "name": "adservice",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -199,7 +202,10 @@
         {
           "metadata": {
             "name": "cartservice",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -221,7 +227,10 @@
         {
           "metadata": {
             "name": "checkoutservice",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -243,7 +252,10 @@
         {
           "metadata": {
             "name": "currencyservice",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -265,7 +277,10 @@
         {
           "metadata": {
             "name": "emailservice",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -287,7 +302,10 @@
         {
           "metadata": {
             "name": "frontend",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -309,7 +327,10 @@
         {
           "metadata": {
             "name": "loadgenerator",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -331,7 +352,10 @@
         {
           "metadata": {
             "name": "paymentservice",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -353,7 +377,10 @@
         {
           "metadata": {
             "name": "productcatalogservice",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -375,7 +402,10 @@
         {
           "metadata": {
             "name": "recommendationservice",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -397,7 +427,10 @@
         {
           "metadata": {
             "name": "shippingservice",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -419,7 +452,10 @@
         {
           "metadata": {
             "name": "redis-cart",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -563,7 +599,10 @@
         {
           "metadata": {
             "name": "adservice",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -585,7 +624,10 @@
         {
           "metadata": {
             "name": "cartservice",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -607,7 +649,10 @@
         {
           "metadata": {
             "name": "checkoutservice",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -629,7 +674,10 @@
         {
           "metadata": {
             "name": "currencyservice",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -651,7 +699,10 @@
         {
           "metadata": {
             "name": "emailservice",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -673,7 +724,10 @@
         {
           "metadata": {
             "name": "frontend",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -695,7 +749,10 @@
         {
           "metadata": {
             "name": "loadgenerator",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -717,7 +774,10 @@
         {
           "metadata": {
             "name": "paymentservice",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -739,7 +799,10 @@
         {
           "metadata": {
             "name": "productcatalogservice",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -761,7 +824,10 @@
         {
           "metadata": {
             "name": "recommendationservice",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -783,7 +849,10 @@
         {
           "metadata": {
             "name": "shippingservice",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,
@@ -805,7 +874,10 @@
         {
           "metadata": {
             "name": "redis-cart",
-            "namespace": "user{UserNum}"
+            "namespace": "user{UserNum}",
+            "labels": {
+              "kustomize.toolkit.fluxcd.io/name": "online-boutique"
+            }
           },
           "spec": {
             "replicas": 1,

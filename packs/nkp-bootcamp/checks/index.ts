@@ -339,9 +339,23 @@ async function CheckGitOpsSource(ctx: CheckContext): Promise<CheckResult> {
   return { pass: true, detail: `online-boutique synced in ${s.ns}` };
 }
 
-/** Counts boutique Deployments that are actually available on a given cluster. */
+/**
+ * Counts the boutique's own available Deployments on a cluster.
+ *
+ * The learner's namespace also holds the WordPress stack from the storage labs,
+ * so counting everything in it would report the boutique as running before Flux
+ * had pulled a single microservice. Flux stamps what it applies with
+ * `kustomize.toolkit.fluxcd.io/name`, which is precisely "deployed from Git
+ * rather than by hand" — the distinction this whole chapter is about.
+ */
+const FLUX_OWNED = 'kustomize.toolkit.fluxcd.io/name';
+
 async function boutiqueOn(kube: KubeClient, ns: string, cluster: string): Promise<{ total: number; ready: number }> {
-  const deps = await kube.list({ group: 'apps', version: 'v1', plural: 'deployments', namespace: ns, cluster });
+  const all = await kube.list({ group: 'apps', version: 'v1', plural: 'deployments', namespace: ns, cluster });
+  const deps = all.filter((d) => {
+    const labels = (d.metadata as { labels?: Record<string, string> } | undefined)?.labels ?? {};
+    return FLUX_OWNED in labels;
+  });
   const ready = deps.filter((d) => ((d.status as { availableReplicas?: number } | undefined)?.availableReplicas ?? 0) > 0);
   return { total: deps.length, ready: ready.length };
 }
@@ -397,7 +411,9 @@ async function CheckDynamicProject(ctx: CheckContext): Promise<CheckResult> {
 
   const projects = await kube.list(PROJECTS);
   const project = findByName(projects, s.ns);
-  if (!project) return { pass: false, hint: `Project "${s.ns}" is gone. It should still exist from the earlier lab.` };
+  if (!project) {
+    return { pass: false, hint: `No project named "${s.ns}" to edit. Create it in the multi-tenancy lab first.` };
+  }
 
   const placement = (
     project.spec as
