@@ -82,12 +82,6 @@ export interface GatedAt {
 export interface SessionHandle {
   sessionId: string | null;
   items: RenderItem[];
-  /**
-   * Where each stage begins in `items` — stage name → the id of the first
-   * line it printed. Only stages still in the scrollback appear, which is
-   * exactly what the menu can scroll back to.
-   */
-  stageStarts: Record<string, string>;
   awaitingVariable: string | null;
   /**
    * Canonical name of the stage owning the pending `<input/>`. Differs from
@@ -149,16 +143,11 @@ export function appendUnits(
   units: MessageUnit[],
   idPrefix: string,
   allowClears: boolean,
-): { next: RenderItem[]; awaiting: string | null; firstId: string | null } {
+): { next: RenderItem[]; awaiting: string | null } {
   let out = [...prev];
   let awaiting: string | null = null;
-  // Id of the first item this batch contributed. The stage menu anchors on
-  // it to scroll back to where a stage began — a `<clear/>` mid-batch resets
-  // it, because whatever came before is no longer on screen to scroll to.
-  let firstId: string | null = null;
   units.forEach((u, idx) => {
     const id = `${idPrefix}-${idx}-${out.length}`;
-    const lenBefore = out.length;
     if (u.kind === 'text') {
       out.push({ kind: 'text', id, color: u.color, styles: u.styles, text: u.text, href: u.href });
     } else if (u.kind === 'await-input') {
@@ -178,10 +167,7 @@ export function appendUnits(
       // auto-advance chain the player hasn't signalled they're done
       // reading, so a wipe would kill text mid-read. The gate flips back
       // on the next input submission.
-      if (allowClears) {
-        out = [];
-        firstId = null;
-      }
+      if (allowClears) out = [];
     } else if (u.kind === 'page-break') {
       // Non-destructive separator. Always fires — the player can always
       // scroll up to re-read the earlier stages.
@@ -192,11 +178,8 @@ export function appendUnits(
       // for it. Say so instead of dropping it in silence.
       console.warn('[terminal] dropped an unhandled message unit', (u as { kind: string }).kind);
     }
-    // Only a unit that actually pushed can be the anchor: a dropped kind
-    // would otherwise hand the anchor to whatever was already on screen.
-    if (firstId === null && out.length > lenBefore) firstId = out[lenBefore]!.id;
   });
-  return { next: out, awaiting, firstId };
+  return { next: out, awaiting };
 }
 
 export function useSession(): SessionHandle {
@@ -208,10 +191,6 @@ export function useSession(): SessionHandle {
     }
   });
   const [items, setItems] = useState<RenderItem[]>([]);
-  // stage name → id of the first item it printed. Lives beside `items` and
-  // dies with them: it describes what is on screen right now, not what the
-  // player has completed (the server owns that).
-  const [stageStarts, setStageStarts] = useState<Record<string, string>>({});
   const [awaitingVariable, setAwaitingVariable] = useState<string | null>(null);
   const [awaitingStageName, setAwaitingStageName] = useState<string | null>(null);
   const [finished, setFinished] = useState(false);
@@ -253,7 +232,6 @@ export function useSession(): SessionHandle {
       finishedRef.current = false;
       awaitingRef.current = null;
       setItems([]);
-      setStageStarts({});
       setAwaitingVariable(null);
       setAwaitingStageName(null);
       setFinished(false);
@@ -310,16 +288,7 @@ export function useSession(): SessionHandle {
     const prefix = `s${r.stageName ?? 'x'}-${advanceCounterRef.current++}`;
     const allowClears = userActedSinceClearRef.current;
     setItems((prev) => {
-      const { next, awaiting, firstId } = appendUnits(prev, r.units, prefix, allowClears);
-      // Remember where each stage started so the menu can scroll back to it.
-      // First write wins: a stage that streams in several batches (a failed
-      // check re-arms the same prompt) must keep pointing at its opening line.
-      if (r.stageName && firstId) {
-        setStageStarts((prevStarts) =>
-          prevStarts[r.stageName!] ? prevStarts : { ...prevStarts, [r.stageName!]: firstId },
-        );
-      }
-      if (next.length === 0) setStageStarts({});
+      const { next, awaiting } = appendUnits(prev, r.units, prefix, allowClears);
       // Trust r.awaitingVariable when the server explicitly says we're
       // awaiting input — the response may carry no new units (e.g. a
       // rejected waitForInputValue mismatch) yet the session is still
@@ -411,7 +380,6 @@ export function useSession(): SessionHandle {
         awaitingRef.current = null;
         setSessionId(r.sessionId);
         setItems([]);
-        setStageStarts({});
         setAwaitingVariable(null);
         setAwaitingStageName(null);
         setFinished(false);
@@ -436,7 +404,6 @@ export function useSession(): SessionHandle {
     gatedRef.current = null;
     setSessionId(null);
     setItems([]);
-    setStageStarts({});
     setAwaitingVariable(null);
     setAwaitingStageName(null);
     setFinished(false);
@@ -712,7 +679,6 @@ export function useSession(): SessionHandle {
         finishedRef.current = false;
         awaitingRef.current = null;
         setItems([]);
-        setStageStarts({});
         setAwaitingVariable(null);
         setAwaitingStageName(null);
         setFinished(false);
@@ -772,7 +738,6 @@ export function useSession(): SessionHandle {
     gatedRef.current = null;
     setSessionId(null);
     setItems([]);
-    setStageStarts({});
     setAwaitingVariable(null);
     setAwaitingStageName(null);
     setFinished(false);
@@ -783,7 +748,6 @@ export function useSession(): SessionHandle {
   return {
     sessionId,
     items,
-    stageStarts,
     awaitingVariable,
     awaitingStageName,
     finished,

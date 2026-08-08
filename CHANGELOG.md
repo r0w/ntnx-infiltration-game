@@ -23,8 +23,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 - The NKP tour and the NDK lab open their interactive demo in the game instead
   of sending players off to the bootcamp site.
 - A collapsible contents menu down the left of the NKP bootcamp, with the
-  chapters of the original, showing where you are and scrolling back to any
-  step you have already read.
+  chapters of the original. It shows where you are, and opens any step you have
+  already reached so you can read it again without leaving your place.
 - The blueprint launch screen now asks which game to install, NCP or NKP.
 - The Pack tab can export the stage setup as one string, import it on another
   instance, and reset every stage back to the pack defaults.

@@ -443,6 +443,12 @@ export const api = {
   /** The pack's reading menu, titles already in the session's language.
    *  `chapters: []` for a pack that ships no menu. */
   nav: (id: string) => get<PackNavPayload>(`/session/${id}/nav`),
+  /** A stage the player has already reached, re-rendered for re-reading.
+   *  403 for anything ahead of them. Changes nothing server-side. */
+  readStage: (id: string, stage: string) =>
+    get<{ stage: string; units: MessageUnit[] }>(
+      `/session/${id}/read/${encodeURIComponent(stage)}`,
+    ),
   pack: () => get<PackInfo>('/pack'),
   scoreboard: () => get<ScoreboardPayload>('/scoreboard'),
   combinedScoreboard: () => get<CombinedScoreboardPayload>('/scoreboard/combined'),

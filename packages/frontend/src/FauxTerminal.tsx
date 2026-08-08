@@ -1,16 +1,10 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BrailleSpinner, TerminalItem, VERIFYING_LABELS } from './renderer';
 import { usePageBreakScrollPin } from './usePageBreakScrollPin';
 import { awaitingLabel, CONTINUE_VAR, AUTOFILLABLE_VARS, type GatedAt, type RenderItem } from './useSession';
 
 export interface FauxTerminalProps {
   items: RenderItem[];
-  /**
-   * stage name → id of the first item it printed. Each one gets an invisible
-   * marker in the stream so the stage menu can scroll back to it. Empty for
-   * packs with no menu, which is every pack but the bootcamp.
-   */
-  stageStarts?: Record<string, string>;
   awaitingVariable: string | null;
   busy: boolean;
   /** True between the player's submit and the server response landing — drives
@@ -59,7 +53,6 @@ export interface FauxTerminalProps {
 
 export function FauxTerminal({
   items,
-  stageStarts,
   awaitingVariable,
   busy,
   checkPending,
@@ -229,12 +222,6 @@ export function FauxTerminal({
 
   const isEmpty = items.length === 0 && !awaitingVariable && !finished;
   const visibleItems = items.slice(0, Math.min(activeIdx + 1, items.length));
-  // Inverted so the render loop is a map lookup per item rather than a scan.
-  const anchorFor = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const [stage, id] of Object.entries(stageStarts ?? {})) m.set(id, stage);
-    return m;
-  }, [stageStarts]);
 
   return (
     <div className="terminal" onClick={focusInput}>
@@ -245,19 +232,15 @@ export function FauxTerminal({
           </div>
         )}
         {visibleItems.map((item, idx) => (
-          <Fragment key={item.id}>
-            {anchorFor.get(item.id) && (
-              <span className="stage-anchor" data-stage={anchorFor.get(item.id)} aria-hidden="true" />
-            )}
-            <Line
-              item={item}
-              typingSpeedMs={typingSpeedMs}
-              skipPauses={skipPauses}
-              imageCaptions={imageCaptions}
-              isActive={idx === activeIdx}
-              onDone={advanceSequencer}
-            />
-          </Fragment>
+          <Line
+            key={item.id}
+            item={item}
+            typingSpeedMs={typingSpeedMs}
+            skipPauses={skipPauses}
+            imageCaptions={imageCaptions}
+            isActive={idx === activeIdx}
+            onDone={advanceSequencer}
+          />
         ))}
         {gatedAt && activeIdx >= items.length && (
           <div className={`terminal-gated terminal-gated-${gatedAt.reason}`}>

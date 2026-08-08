@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import type { MessageUnit } from '@ntnx-game/shared';
 import { api, ApiError, type PackInfo, type PackNavChapter } from './api';
 import { DevPanel } from './DevPanel';
 import { FauxTerminal } from './FauxTerminal';
 import { StageRail } from './StageRail';
+import { StageReader } from './StageReader';
 import { LightboxProvider } from './Lightbox';
 import { LoginForm } from './LoginForm';
 import { ConfirmModal } from './Modal';
@@ -69,6 +71,15 @@ export function readerPosition(
   return { index: next, stage: order[next] ?? null };
 }
 
+/** A step opened from the contents menu, while its text is on its way. */
+interface ReadingState {
+  stage: string;
+  title: string;
+  units: MessageUnit[];
+  loading: boolean;
+  error: string | null;
+}
+
 export function GameApp() {
   const session = useSession();
   const [pack, setPack] = useState<PackInfo | null>(null);
@@ -82,6 +93,7 @@ export function GameApp() {
   const [autoPlayError, setAutoPlayError] = useState<string | null>(null);
   const [logoutPrompt, setLogoutPrompt] = useState(false);
   const [nav, setNav] = useState<PackNavChapter[]>([]);
+  const [reading, setReading] = useState<ReadingState | null>(null);
   const awaitingRef = session.awaitingVariable;
   const submitInput = session.submitInput;
   const advance = session.advance;
@@ -105,9 +117,26 @@ export function GameApp() {
   // null override → follow the server's pack speed.
   const typingSpeedMs = typingSpeedOverride ?? session.typingSpeedMs;
 
-  // Only stages still in the scrollback can be scrolled back to.
-  const stageStarts = session.stageStarts;
-  const reachableStages = useMemo(() => new Set(Object.keys(stageStarts)), [stageStarts]);
+  // Re-read a step. The server re-renders it from the pack; nothing about the
+  // run moves, so this is safe to fire mid-stage.
+  const sessionId = session.sessionId;
+  const closeReader = useCallback(() => setReading(null), []);
+  const handleRead = useCallback(
+    (stage: string, title: string) => {
+      if (!sessionId) return;
+      setReading({ stage, title, units: [], loading: true, error: null });
+      api.readStage(sessionId, stage).then(
+        (r) => setReading((cur) => (cur?.stage === stage ? { ...cur, units: r.units, loading: false } : cur)),
+        (err: unknown) =>
+          setReading((cur) =>
+            cur?.stage === stage
+              ? { ...cur, loading: false, error: err instanceof Error ? err.message : String(err) }
+              : cur,
+          ),
+      );
+    },
+    [sessionId],
+  );
 
   // The pack names the game, so a second pack is not branded as the first.
   const gameTitle = pack?.title ?? 'ntnx infiltration game';
@@ -325,12 +354,11 @@ export function GameApp() {
           chapters={nav}
           currentIndex={position.index}
           activeStage={position.stage}
-          reachable={reachableStages}
+          onRead={handleRead}
         />
       )}
       <FauxTerminal
         items={session.items}
-        stageStarts={session.stageStarts}
         awaitingVariable={session.awaitingVariable}
         busy={session.busy || autoPlayActing}
         checkPending={session.checkPending}
@@ -368,6 +396,15 @@ export function GameApp() {
           onSkipPausesChange={setSkipPauses}
           mode={pack?.mode === 'live' ? undefined : pack?.mode}
           onGoto={handleGoto}
+        />
+      )}
+      {reading && (
+        <StageReader
+          title={reading.title}
+          units={reading.units}
+          loading={reading.loading}
+          error={reading.error}
+          onClose={closeReader}
         />
       )}
       {logoutPrompt && (

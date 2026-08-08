@@ -450,7 +450,7 @@ function ImageReveal({
 }
 
 /** Pack assets are served from one route; absolute URLs pass through. */
-function assetUrl(src: string): string {
+export function assetUrl(src: string): string {
   return src.startsWith('http') || src.startsWith('/') ? src : `/api/pack-assets/${src}`;
 }
 
@@ -500,7 +500,7 @@ const KNOWN_COLORS = new Set([
 ]);
 const KNOWN_STYLES = new Set(['bold', 'dim']);
 
-function textClasses(color: string | undefined, styles: string[] | undefined): string {
+export function textClasses(color: string | undefined, styles: string[] | undefined): string {
   const out: string[] = [];
   if (color && KNOWN_COLORS.has(color)) out.push(`c-${color}`);
   else out.push('c-default');

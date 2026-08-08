@@ -3360,14 +3360,6 @@ a.terminal-link:visited {
 }
 .stage-rail-live:hover { color: var(--accent); background: #121a20; }
 
-/* Zero-size marker the menu scrolls to. It sits in a `pre-wrap` flow, so it
-   must contribute no box of its own. */
-.stage-anchor {
-  display: inline;
-  font-size: 0;
-  line-height: 0;
-}
-
 /* Narrow viewports: the rail floats over the terminal instead of eating a
    third of the reading column. */
 @media (max-width: 900px) {
@@ -3378,3 +3370,77 @@ a.terminal-link:visited {
     box-shadow: 0 0 24px rgba(0, 0, 0, 0.6);
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Stage reader — a step of the bootcamp, opened from the contents menu.
+
+   It sits over the run rather than in it, and reads as a page rather than as
+   a terminal: the transcript keeps the typewriter, this keeps the material.
+   The z-index stays under the lightbox so a screenshot opened from here still
+   enlarges over the top.
+   --------------------------------------------------------------------------- */
+.reader-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 6, 9, 0.82);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 24px;
+  z-index: 1100;
+  animation: modal-fade 120ms ease-out;
+}
+.reader-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(860px, 100%);
+  max-height: 100%;
+  background: var(--bg-panel);
+  border: 1px solid #243039;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+}
+.reader-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid #1b232b;
+}
+.reader-eyebrow {
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.reader-title {
+  flex: 1;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.01em;
+}
+.reader-close {
+  background: none;
+  border: 1px solid #243039;
+  color: var(--dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.reader-close:hover { color: var(--fg); border-color: #35424d; }
+.reader-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px 28px;
+  /* Same wrapping rules as the transcript: the text is authored with its own
+     line breaks and they carry meaning. */
+  white-space: pre-wrap;
+  word-break: break-word;
+  scrollbar-width: thin;
+  scrollbar-color: #2a3640 transparent;
+}
+.reader-body::-webkit-scrollbar { width: 8px; }
+.reader-body::-webkit-scrollbar-thumb { background: #2a3640; border-radius: 4px; }

@@ -585,6 +585,45 @@ export class SessionService {
   }
 
   /**
+   * Re-render a stage the player has already reached, for re-reading.
+   *
+   * Read-only in every sense: no check runs, no capture happens, no session
+   * field moves. It also refuses stages ahead of the player, because a
+   * contents menu that let you read the next lab's text would hand out the
+   * answers.
+   *
+   * The prompts, pauses and check beats are stripped. What comes back is the
+   * material — text, screenshots, demos — not a replayable turn.
+   */
+  readStage(sessionId: string, stageName: string): { stage: string; units: MessageUnit[] } {
+    const session = this.getSession(sessionId);
+    const stage = this.runner.stageByName(stageName);
+    if (!stage) throw new HttpError(404, `Stage '${stageName}' not in pack`);
+
+    // Furthest point the player has legitimately seen: the stage they are
+    // parked in, else the one after their last completed.
+    const reached = session.awaiting
+      ? this.stageIndex(session.awaiting.stageName)
+      : this.stageIndex(session.currentStage) + 1;
+    if (this.stageIndex(stageName) > reached) {
+      throw new HttpError(403, `Stage '${stageName}' is ahead of you`);
+    }
+
+    const vars = variablesForSession(session.id, this.variables, this.initialVariables);
+    const rendered = this.runner.render(
+      stage,
+      vars,
+      session.locale,
+      this.bundle,
+      this.globalTypingSpeedMs,
+    );
+    const units = rendered.units.filter(
+      (u) => u.kind !== 'await-input' && u.kind !== 'pause' && u.kind !== 'clear',
+    );
+    return { stage: stageName, units };
+  }
+
+  /**
    * Walk upcoming stages' `needs` and, for each missing variable whose
    * producer stage should have already run (producer appears before
    * currentStage in pack order), replay the producer's check silently to

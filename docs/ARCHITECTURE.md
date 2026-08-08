@@ -76,17 +76,22 @@ course someone came to learn from, and a learner re-reads: `nav` in the manifest
 gives that pack a table of contents, chapters and one level of nesting, with
 locale keys for the labels so the menu translates like everything else.
 
-Two rules keep it honest. It never advances the game: the only thing a row does
-is scroll the transcript back to where that stage began, so a menu can never
-skip a lab. And a row is clickable only while its opening line is still in the
-scrollback, which after a reload is nothing — the transcript lives in the
-browser, so the menu offers exactly what the terminal can still show. A stage's
-run position is read from `pack.stages`, not restated in `nav`; the pack test
-locks the two orders together (`packages/server/test/nkp-pack.test.ts`).
+Two rules keep it honest. **It never advances the game**: a row opens a panel
+that re-renders that stage's text, and the run behind it does not move, so a
+menu can never skip a lab. And **it never reads ahead**: `readStage` refuses
+anything past the player's own position, or the menu would be an answer key for
+every lab still to come. The prompts, pauses and check beats are stripped on the
+way out — what comes back is the material, not a replayable turn.
 
-The wiring between menu and terminal is a DOM contract, like the scroll pin's
-`data-page-break` and the lightbox's `data-primary-input`: the terminal stamps
-`data-stage` in front of each stage's first line and `stage-anchors.ts` finds it.
+Re-rendering server-side rather than scrolling the transcript is what lets a
+learner in Observability go back to Persistent storage: the scrollback only
+holds what this browser tab has played, and a reload empties it. A stage's run
+position is read from `pack.stages`, not restated in `nav`; the pack test locks
+the two orders together (`packages/server/test/nkp-pack.test.ts`).
+
+The panel stacks under the lightbox, so a screenshot opened from it still
+enlarges over the top. Escape then peels one layer at a time: the lightbox
+publishes `isOpen` and the panel below stands down while it is up.
 
 ## Two transports, one shape
 

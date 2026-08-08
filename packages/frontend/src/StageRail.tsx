@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { PackNavChapter, PackNavItem } from './api';
-import { jumpToLive, jumpToStage } from './stage-anchors';
+import { jumpToLive } from './stage-anchors';
 
 const OPEN_KEY = 'ntnx-stage-rail-open';
 
@@ -8,27 +8,27 @@ const OPEN_KEY = 'ntnx-stage-rail-open';
  * The reading menu down the left of the terminal.
  *
  * It is a map of the bootcamp, in the bootcamp's own chapters, and it does
- * exactly one thing: scroll the transcript back to a stage the player has
- * already read. It never advances the game and never unlocks anything —
- * a menu that could skip a lab would turn the run into a table of contents.
+ * exactly one thing: open a step the player has already reached, to read
+ * again. It never advances the game and never unlocks anything — a menu that
+ * could skip a lab would turn the run into a table of contents.
  *
- * A row is clickable when its opening line is still in the scrollback. That
- * is a stricter test than "already played" on purpose: after a reload the
- * transcript is empty, and a row that scrolled nowhere would be a lie.
+ * Every step behind the player opens, not only the ones still on screen: the
+ * text comes back from the server, so a learner in Observability can go back
+ * and re-read Persistent storage, and a reload costs nothing.
  */
 export function StageRail({
   chapters,
   currentIndex,
   activeStage,
-  reachable,
+  onRead,
 }: {
   chapters: PackNavChapter[];
   /** Index of the furthest stage the player has reached, -1 before the first. */
   currentIndex: number;
   /** Stage being played right now, marked as the reader's position. */
   activeStage: string | null;
-  /** Stages whose opening line is still on screen. */
-  reachable: ReadonlySet<string>;
+  /** Open a step for re-reading. */
+  onRead: (stage: string, title: string) => void;
 }) {
   const [open, setOpen] = useState<boolean>(() => {
     try {
@@ -98,7 +98,7 @@ export function StageRail({
             onToggle={() => toggleChapter(ch.id)}
             currentIndex={currentIndex}
             activeStage={activeStage}
-            reachable={reachable}
+            onRead={onRead}
           />
         ))}
       </div>
@@ -115,14 +115,14 @@ function Chapter({
   onToggle,
   currentIndex,
   activeStage,
-  reachable,
+  onRead,
 }: {
   chapter: PackNavChapter;
   collapsed: boolean;
   onToggle: () => void;
   currentIndex: number;
   activeStage: string | null;
-  reachable: ReadonlySet<string>;
+  onRead: (stage: string, title: string) => void;
 }) {
   const flat = useMemo(() => flatten(chapter.items), [chapter.items]);
   const done = flat.filter((i) => i.index < currentIndex).length;
@@ -150,7 +150,7 @@ function Chapter({
               depth={0}
               currentIndex={currentIndex}
               activeStage={activeStage}
-              reachable={reachable}
+              onRead={onRead}
             />
           ))}
         </ul>
@@ -164,27 +164,29 @@ function Row({
   depth,
   currentIndex,
   activeStage,
-  reachable,
+  onRead,
 }: {
   item: PackNavItem;
   depth: number;
   currentIndex: number;
   activeStage: string | null;
-  reachable: ReadonlySet<string>;
+  onRead: (stage: string, title: string) => void;
 }) {
   const isActive = item.stage === activeStage;
   const isDone = item.index < currentIndex;
-  const canJump = reachable.has(item.stage);
+  // Behind the player, or the step they are standing in: both are theirs to
+  // re-read. Anything further on is not, and the server refuses it too.
+  const canRead = item.index <= currentIndex;
   const state = isActive ? 'here' : isDone ? 'done' : 'ahead';
 
   return (
     <li className={`rail-row rail-row-d${depth}`}>
       <button
         type="button"
-        className={`rail-link is-${state}${canJump ? '' : ' is-static'}`}
-        onClick={canJump ? () => jumpToStage(item.stage) : undefined}
-        disabled={!canJump}
-        title={canJump ? 'Read this step again' : undefined}
+        className={`rail-link is-${state}${canRead ? '' : ' is-static'}`}
+        onClick={canRead ? () => onRead(item.stage, item.title) : undefined}
+        disabled={!canRead}
+        title={canRead ? 'Read this step again' : 'Not there yet'}
       >
         <span className="rail-glyph" aria-hidden="true">
           {isActive ? '▸' : isDone ? '✓' : '·'}
@@ -201,7 +203,7 @@ function Row({
               depth={depth + 1}
               currentIndex={currentIndex}
               activeStage={activeStage}
-              reachable={reachable}
+              onRead={onRead}
             />
           ))}
         </ul>

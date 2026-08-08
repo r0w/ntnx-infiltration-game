@@ -70,6 +70,13 @@ export function buildStageRoutes(deps: StageRoutesDeps): Hono {
     return c.json({ chapters });
   });
 
+  // Re-read a stage already played. Read-only: see SessionService.readStage.
+  router.get('/:id/read/:stage', (c) => {
+    const stageName = c.req.param('stage');
+    if (!stageName) throw new HttpError(400, 'missing stage name');
+    return c.json(service.readStage(c.req.param('id'), stageName));
+  });
+
   router.post('/:id/switch-identity', (c) => {
     const r = service.switchIdentity(c.req.param('id'));
     return c.json(r);
