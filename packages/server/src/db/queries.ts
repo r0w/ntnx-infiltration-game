@@ -800,6 +800,40 @@ export class PackOverlayQueries {
       )
       .run({ $pid: packId, $sid: stageName });
   }
+
+  /**
+   * Swap the whole overlay for a pack in one transaction. Used by the
+   * config import: replacing rather than merging is what makes an imported
+   * config reproduce the source setup instead of layering onto whatever
+   * the local operator had already flipped.
+   */
+  replaceAll(packId: string, rows: readonly PackOverlayRow[]): void {
+    const del = this.db.prepare(`DELETE FROM pack_overlay WHERE pack_id = $pid`);
+    const ins = this.db.prepare(
+      `INSERT INTO pack_overlay (pack_id, stage_name, active, admin_gate)
+       VALUES ($pid, $sid, $a, $g)`,
+    );
+    this.db.transaction(() => {
+      del.run({ $pid: packId });
+      for (const r of rows) {
+        if (r.active === null && r.adminGate === null) continue; // nothing to store
+        ins.run({
+          $pid: packId,
+          $sid: r.stageName,
+          $a: r.active === null ? null : r.active ? 1 : 0,
+          $g: r.adminGate === null ? null : r.adminGate ? 1 : 0,
+        });
+      }
+    })();
+  }
+
+  /** Drop every override for a pack — back to the JSON defaults. */
+  clear(packId: string): number {
+    const res = this.db
+      .prepare(`DELETE FROM pack_overlay WHERE pack_id = $pid`)
+      .run({ $pid: packId });
+    return res.changes;
+  }
 }
 
 /**

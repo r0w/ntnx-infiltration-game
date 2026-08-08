@@ -10,6 +10,12 @@ import { analyzeDeps, cascadeDisable, type BrokenStage } from '../dep-analysis';
 import { probeClusterConfig } from '../cluster-config-probe';
 import { readEnabledWipLocales, writeEnabledWipLocales } from '../effective-locales';
 import {
+  decodePackConfig,
+  encodePackConfig,
+  planPackConfigImport,
+  PackConfigError,
+} from '../pack-config';
+import {
   probeClusterName,
   probeIntelligentOps,
   probeSoftwareVersions,
@@ -232,6 +238,31 @@ export interface AdminPackTogglePreview {
   requested: string;
   /** Stages that would also become broken if `requested` were turned off. */
   cascade: BrokenStage[];
+}
+
+export interface AdminPackConfigPayload {
+  /** The portable string to copy out of this instance. */
+  config: string;
+  packId: string;
+  /** How many stages currently carry an operator override. 0 = the pack is
+   *  untouched and the string encodes an empty config. */
+  overriddenCount: number;
+}
+
+export interface AdminPackConfigImportResult {
+  ok: true;
+  packId: string;
+  /** Stage names whose overrides were applied. */
+  applied: string[];
+  /** Overridden names this pack no longer has (stages deleted since the
+   *  export). Reported, not fatal — the rest of the config still lands. */
+  missingStages: string[];
+  /** Stages this pack has that the config's pack didn't (added since the
+   *  export). Left at their JSON default for the operator to review. */
+  newStages: string[];
+  /** Local overrides the import wiped because the config doesn't set them.
+   *  Import replaces rather than merges, so the setup is reproducible. */
+  clearedStages: string[];
 }
 
 export interface AdminLanguageEntry {
@@ -614,6 +645,69 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     const r = cascadeDisable(effective, new Set([stageName]));
     const preview: AdminPackTogglePreview = { requested: stageName, cascade: r.cascade };
     return c.json(preview);
+  });
+
+  // ─── portable stage config (export / import / reset) ────────────────
+  // One string carrying every operator override, so a curated setup can be
+  // reproduced on another instance without hand-editing SQLite. Only the
+  // pack overlay travels: gate unlocks and the lunch lock are live event
+  // state, not configuration, and importing them would surprise a room.
+
+  router.get('/pack/config', (c) => {
+    const rows = deps.service.packOverlay.list(deps.pack.manifest.id);
+    const payload: AdminPackConfigPayload = {
+      config: encodePackConfig(
+        deps.pack.manifest.id,
+        deps.pack.stages.map((s) => s.name),
+        rows,
+      ),
+      packId: deps.pack.manifest.id,
+      overriddenCount: rows.length,
+    };
+    return c.json(payload);
+  });
+
+  // POST /pack/config  Body: { config: string }
+  // Replaces the whole overlay: what the operator gets is the config, not
+  // the config merged onto whatever they had flipped before.
+  router.post('/pack/config', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { config?: unknown };
+    if (typeof body.config !== 'string') {
+      throw new HttpError(400, 'config must be a string');
+    }
+    const packId = deps.pack.manifest.id;
+    const stageNames = deps.pack.stages.map((s) => s.name);
+    let plan;
+    try {
+      plan = planPackConfigImport(decodePackConfig(body.config), packId, stageNames);
+    } catch (err) {
+      if (err instanceof PackConfigError) throw new HttpError(400, err.message);
+      throw err;
+    }
+    const before = new Set(
+      deps.service.packOverlay.list(packId).map((r) => r.stageName),
+    );
+    deps.service.packOverlay.replaceAll(packId, plan.applied);
+    deps.service.applyEffectiveStages();
+    const applied = plan.applied.map((a) => a.stageName);
+    const appliedSet = new Set(applied);
+    const result: AdminPackConfigImportResult = {
+      ok: true,
+      packId,
+      applied,
+      missingStages: plan.missingStages,
+      newStages: plan.newStages,
+      clearedStages: [...before].filter((n) => !appliedSet.has(n)).sort(),
+    };
+    return c.json(result);
+  });
+
+  // Back to the pack JSON defaults — the escape hatch after an import or a
+  // long afternoon of toggling.
+  router.post('/pack/config/reset', (c) => {
+    const cleared = deps.service.packOverlay.clear(deps.pack.manifest.id);
+    deps.service.applyEffectiveStages();
+    return c.json({ ok: true, cleared });
   });
 
   // ─── cluster config (cached snapshot of slow PC queries) ────────────

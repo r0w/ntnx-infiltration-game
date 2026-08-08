@@ -317,6 +317,26 @@ export interface AdminPackTogglePreview {
   cascade: Array<{ stageName: string; missingVars: string[] }>;
 }
 
+export interface AdminPackConfigPayload {
+  /** Portable string carrying every operator override. */
+  config: string;
+  packId: string;
+  overriddenCount: number;
+}
+
+export interface AdminPackConfigImportResult {
+  ok: true;
+  packId: string;
+  applied: string[];
+  /** In the config, absent from this pack — stages deleted since the export. */
+  missingStages: string[];
+  /** In this pack, absent from the config — stages added since the export.
+   *  Left at their JSON default. */
+  newStages: string[];
+  /** Local overrides the import wiped (it replaces, it doesn't merge). */
+  clearedStages: string[];
+}
+
 export interface AdminLunchStatus {
   paused: boolean;
   pausedAt: number | null;
@@ -452,6 +472,12 @@ export const api = {
       password,
       { value },
     ),
+  adminPackConfig: (password: string) =>
+    adminGet<AdminPackConfigPayload>('/admin/pack/config', password),
+  adminPackConfigImport: (password: string, config: string) =>
+    adminPost<AdminPackConfigImportResult>('/admin/pack/config', password, { config }),
+  adminPackConfigReset: (password: string) =>
+    adminPost<{ ok: true; cleared: number }>('/admin/pack/config/reset', password),
   adminPackPreviewDisable: (password: string, stageName: string) =>
     adminGet<AdminPackTogglePreview>(
       `/admin/pack/preview-disable/${encodeURIComponent(stageName)}`,

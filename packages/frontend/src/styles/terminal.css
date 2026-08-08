@@ -2331,6 +2331,29 @@ a.terminal-link:visited {
   font-size: 12px;
   margin: 0 0 8px 0;
 }
+/* Export / import / reset row above the stage table. Wraps on narrow
+   viewports so the hint drops under the buttons instead of squeezing them. */
+.admin-pack-config {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px 0;
+}
+.admin-pack-config-hint { font-size: 11px; }
+/* The config string is one long unbroken token — wrap it inside the box
+   rather than let it scroll off, so the operator can select all of it. */
+.admin-pack-config-box {
+  width: 100%;
+  font-size: 11px;
+  word-break: break-all;
+}
+.admin-pack-config-result {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+}
 .pack-toggle {
   background: transparent;
   border: 1px solid #2a3540;

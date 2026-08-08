@@ -12,6 +12,8 @@ import {
   type AdminGateEntry,
   type AdminLanguageEntry,
   type AdminLunchStatus,
+  type AdminPackConfigImportResult,
+  type AdminPackConfigPayload,
   type AdminPackStageEntry,
   type AdminPackTogglePreview,
   type AdminPeerEntry,
@@ -901,6 +903,7 @@ function AdminDashboard({
       {tab === 'pack' && (
         <section className="admin-panel">
           <PanelHead eyebrow="mission plan" title="Stages" />
+          <PackConfigBar password={password} onChanged={() => void refresh()} />
           <PackEditor
             stages={packStages}
             meta={packMeta}
@@ -1138,6 +1141,251 @@ function AdminDashboard({
       )}
       <VersionFooter />
     </div>
+  );
+}
+
+/**
+ * Export / import / reset for the operator's stage setup. The export is one
+ * string carrying every on-off and gate override, so a curated workshop
+ * config can be reproduced on another instance by pasting it. Import
+ * replaces the whole setup (it doesn't merge) and reports stage drift both
+ * ways, since packs gain and lose stages between game versions.
+ */
+function PackConfigBar({
+  password,
+  onChanged,
+}: {
+  password: string;
+  onChanged: () => void;
+}) {
+  const [dialog, setDialog] = useState<'export' | 'import' | 'reset' | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [exported, setExported] = useState<AdminPackConfigPayload | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [pasted, setPasted] = useState('');
+  const [result, setResult] = useState<AdminPackConfigImportResult | null>(null);
+  const [resetCount, setResetCount] = useState<number | null>(null);
+
+  const close = () => {
+    setDialog(null);
+    setError(null);
+    setCopied(false);
+    setPasted('');
+    setResult(null);
+    setExported(null);
+    setResetCount(null);
+  };
+
+  const openExport = async () => {
+    setDialog('export');
+    setBusy(true);
+    setError(null);
+    try {
+      setExported(await api.adminPackConfig(password));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copy = async () => {
+    if (!exported) return;
+    try {
+      await navigator.clipboard.writeText(exported.config);
+      setCopied(true);
+    } catch {
+      // Clipboard is blocked over plain http on some browsers, and the
+      // game is served over http. The textarea is selectable — say so.
+      setError('clipboard blocked by the browser — select the text and copy manually');
+    }
+  };
+
+  const runImport = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setResult(await api.adminPackConfigImport(password, pasted));
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runReset = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setResetCount((await api.adminPackConfigReset(password)).cleared);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="admin-pack-config">
+        <button type="button" className="app-reset" onClick={() => void openExport()}>
+          export config
+        </button>
+        <button type="button" className="app-reset" onClick={() => setDialog('import')}>
+          import config
+        </button>
+        <button
+          type="button"
+          className="app-reset"
+          onClick={() => setDialog('reset')}
+          title="drop every operator override and go back to the pack defaults"
+        >
+          reset to defaults
+        </button>
+        <span className="c-dim admin-pack-config-hint">
+          one string carrying the on/off + gate setup — paste it into another instance to
+          reproduce it
+        </span>
+      </div>
+
+      {dialog === 'export' && (
+        <Modal title="export stage config" onClose={close}>
+          <div className="modal-body">
+            {busy && <p className="c-dim">reading config…</p>}
+            {error && <p className="c-red">{error}</p>}
+            {exported && (
+              <>
+                <p className="c-dim">
+                  {exported.overriddenCount === 0
+                    ? 'no stage is overridden — this config restores the pack defaults.'
+                    : `${exported.overriddenCount} stage(s) overridden.`}
+                </p>
+                <textarea
+                  className="admin-cluster-input admin-pack-config-box"
+                  readOnly
+                  rows={4}
+                  value={exported.config}
+                  onFocus={(ev) => ev.currentTarget.select()}
+                />
+              </>
+            )}
+          </div>
+          <div className="modal-actions">
+            <button type="button" className="modal-btn" onClick={close}>
+              close
+            </button>
+            <button
+              type="button"
+              className="modal-btn"
+              disabled={!exported}
+              onClick={() => void copy()}
+            >
+              {copied ? 'copied' : 'copy'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {dialog === 'import' && (
+        <Modal title="import stage config" onClose={close} busy={busy}>
+          <div className="modal-body">
+            {result === null ? (
+              <>
+                <p className="c-dim">
+                  Paste a config string. It <strong>replaces</strong> the current setup, so
+                  anything you flipped by hand and the config doesn't set goes back to its
+                  pack default.
+                </p>
+                <textarea
+                  className="admin-cluster-input admin-pack-config-box"
+                  rows={4}
+                  autoFocus
+                  placeholder="NIG1.…"
+                  value={pasted}
+                  onChange={(ev) => setPasted(ev.target.value)}
+                />
+              </>
+            ) : (
+              <ul className="admin-pack-config-result">
+                <li className="c-green">
+                  applied {result.applied.length} override(s)
+                  {result.applied.length > 0 && `: ${result.applied.join(', ')}`}
+                </li>
+                {result.clearedStages.length > 0 && (
+                  <li className="c-dim">
+                    reset to default (not in the config): {result.clearedStages.join(', ')}
+                  </li>
+                )}
+                {result.newStages.length > 0 && (
+                  <li className="c-yellow">
+                    new since that config, left at default: {result.newStages.join(', ')}
+                  </li>
+                )}
+                {result.missingStages.length > 0 && (
+                  <li className="c-yellow">
+                    gone from this pack, ignored: {result.missingStages.join(', ')}
+                  </li>
+                )}
+              </ul>
+            )}
+            {error && <p className="c-red">{error}</p>}
+          </div>
+          <div className="modal-actions">
+            <button type="button" className="modal-btn" disabled={busy} onClick={close}>
+              {result === null ? 'cancel' : 'close'}
+            </button>
+            {result === null && (
+              <button
+                type="button"
+                className="modal-btn modal-btn-danger"
+                disabled={busy || pasted.trim() === ''}
+                onClick={() => void runImport()}
+              >
+                {busy ? 'importing…' : 'import'}
+              </button>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {dialog === 'reset' && (
+        <Modal title="reset stage config" onClose={close} busy={busy}>
+          <div className="modal-body">
+            {resetCount === null ? (
+              <p>
+                Drop every operator override and go back to the pack defaults. Player
+                progress and gate unlocks are untouched.
+              </p>
+            ) : (
+              <p className="c-green">
+                {resetCount === 0
+                  ? 'nothing to clear — the pack was already at its defaults.'
+                  : `cleared ${resetCount} override(s).`}
+              </p>
+            )}
+            {error && <p className="c-red">{error}</p>}
+          </div>
+          <div className="modal-actions">
+            <button type="button" className="modal-btn" disabled={busy} onClick={close}>
+              {resetCount === null ? 'cancel' : 'close'}
+            </button>
+            {resetCount === null && (
+              <button
+                type="button"
+                className="modal-btn modal-btn-danger"
+                disabled={busy}
+                onClick={() => void runReset()}
+              >
+                {busy ? 'resetting…' : 'reset'}
+              </button>
+            )}
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }
 

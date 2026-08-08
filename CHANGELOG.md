@@ -15,6 +15,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- The Pack tab can export the stage setup as one string, import it on another
+  instance, and reset every stage back to the pack defaults.
+
 ### Changed
 
 - The prerequisites runbook now asks which project to use instead of assuming

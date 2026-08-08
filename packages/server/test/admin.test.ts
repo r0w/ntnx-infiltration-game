@@ -23,6 +23,8 @@ import {
   buildAdminRoutes,
   type AdminGateEntry,
   type AdminLunchStatus,
+  type AdminPackConfigImportResult,
+  type AdminPackConfigPayload,
   type AdminPackPayload,
   type AdminPackTogglePreview,
   type AdminUserEntry,
@@ -703,6 +705,207 @@ describe('GET /api/admin/pack', () => {
     // Sparse-row guarantee: clearing both fields drops the row entirely.
     const overlayRows = service.packOverlay.list(PACK_ID);
     expect(overlayRows).toEqual([]);
+  });
+});
+
+describe('pack config export / import / reset', () => {
+  const packStages: StageDefinition[] = [
+    { index: 0, id: 'mk-project', name: 'mk-project', active: true, messages: ['s1'] },
+    { index: 1, id: 'use-project', name: 'use-project', active: true, messages: ['s2'] },
+    { index: 2, id: 'standalone', name: 'standalone', active: true, messages: ['s3'] },
+  ];
+
+  /** A router + its service, so a test can drive several requests against
+   *  one in-memory effective-stage cache (as the real server does). */
+  function instance(db: Database, stages: StageDefinition[] = packStages) {
+    const pack = fakePack(stages);
+    const service = makeService(db, pack);
+    const r = buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix, clusterProfile: 'hpoc', pcEndpoint: '' });
+    return { service, r };
+  }
+
+  const AUTH = { 'X-Admin-Password': ADMIN_PW };
+  const AUTH_JSON = { ...AUTH, 'Content-Type': 'application/json' };
+
+  async function toggle(
+    r: ReturnType<typeof instance>['r'],
+    stage: string,
+    field: 'active' | 'adminGate',
+    value: boolean | null,
+  ) {
+    return r.request(`/pack/stages/${stage}/toggle?field=${field}`, {
+      method: 'POST',
+      headers: AUTH_JSON,
+      body: JSON.stringify({ value }),
+    });
+  }
+
+  async function exportConfig(r: ReturnType<typeof instance>['r']) {
+    const res = await r.request('/pack/config', { headers: AUTH });
+    expect(res.status).toBe(200);
+    return (await res.json()) as AdminPackConfigPayload;
+  }
+
+  async function importConfig(r: ReturnType<typeof instance>['r'], config: unknown) {
+    return r.request('/pack/config', {
+      method: 'POST',
+      headers: AUTH_JSON,
+      body: JSON.stringify({ config }),
+    });
+  }
+
+  test('all three endpoints require the admin header', async () => {
+    const { r } = instance(freshDb());
+    expect((await r.request('/pack/config')).status).toBe(401);
+    expect((await r.request('/pack/config', { method: 'POST' })).status).toBe(401);
+    expect((await r.request('/pack/config/reset', { method: 'POST' })).status).toBe(401);
+  });
+
+  test('export of an untouched pack reports zero overrides', async () => {
+    const { r } = instance(freshDb());
+    const body = await exportConfig(r);
+    expect(body.packId).toBe(PACK_ID);
+    expect(body.overriddenCount).toBe(0);
+    expect(body.config.startsWith('NIG1.')).toBe(true);
+  });
+
+  test('a config exported from one instance reproduces the setup on another', async () => {
+    const source = instance(freshDb());
+    await toggle(source.r, 'mk-project', 'active', false);
+    await toggle(source.r, 'standalone', 'adminGate', true);
+    const exported = await exportConfig(source.r);
+    expect(exported.overriddenCount).toBe(2);
+
+    // Fresh DB = a different instance running the same pack.
+    const target = instance(freshDb());
+    const res = await importConfig(target.r, exported.config);
+    expect(res.status).toBe(200);
+    const result = (await res.json()) as AdminPackConfigImportResult;
+    expect(result.applied).toEqual(['mk-project', 'standalone']);
+    expect(result.missingStages).toEqual([]);
+    expect(result.newStages).toEqual([]);
+
+    const view = (await (
+      await target.r.request('/pack', { headers: AUTH })
+    ).json()) as AdminPackPayload;
+    expect(view.stages.find((s) => s.stageName === 'mk-project')?.active).toBe(false);
+    expect(view.stages.find((s) => s.stageName === 'standalone')?.adminGate).toBe(true);
+    // Re-exporting the same setup yields the same string — configs are
+    // comparable by eye.
+    expect((await exportConfig(target.r)).config).toBe(exported.config);
+  });
+
+  test('the live runner picks the import up, not just the DB', async () => {
+    const { service, r } = instance(freshDb());
+    const source = instance(freshDb());
+    await toggle(source.r, 'use-project', 'active', false);
+    await importConfig(r, (await exportConfig(source.r)).config);
+    expect(
+      service.listEffectiveStages().find((s) => s.name === 'use-project')?.active,
+    ).toBe(false);
+  });
+
+  test('import replaces rather than merges, and says what it wiped', async () => {
+    const source = instance(freshDb());
+    await toggle(source.r, 'mk-project', 'active', false);
+    const config = (await exportConfig(source.r)).config;
+
+    const target = instance(freshDb());
+    await toggle(target.r, 'standalone', 'active', false);
+    const result = (await (await importConfig(target.r, config)).json()) as AdminPackConfigImportResult;
+    expect(result.applied).toEqual(['mk-project']);
+    expect(result.clearedStages).toEqual(['standalone']);
+
+    const view = (await (
+      await target.r.request('/pack', { headers: AUTH })
+    ).json()) as AdminPackPayload;
+    expect(view.stages.find((s) => s.stageName === 'standalone')?.active).toBe(true);
+  });
+
+  // The pack gains and loses stages between game versions; a config from
+  // either side of that must still import what the two packs share.
+  test('a stage the local pack no longer has is reported, the rest still lands', async () => {
+    const wider = [
+      ...packStages,
+      { index: 3, id: 'retired', name: 'retired', active: true, messages: ['s1'] },
+    ];
+    const source = instance(freshDb(), wider);
+    await toggle(source.r, 'retired', 'active', false);
+    await toggle(source.r, 'mk-project', 'active', false);
+    const config = (await exportConfig(source.r)).config;
+
+    const target = instance(freshDb());
+    const result = (await (await importConfig(target.r, config)).json()) as AdminPackConfigImportResult;
+    expect(result.applied).toEqual(['mk-project']);
+    expect(result.missingStages).toEqual(['retired']);
+  });
+
+  test('a stage added since the export is reported and left at its default', async () => {
+    const source = instance(freshDb(), packStages.slice(0, 2));
+    await toggle(source.r, 'mk-project', 'active', false);
+    const config = (await exportConfig(source.r)).config;
+
+    const target = instance(freshDb());
+    const result = (await (await importConfig(target.r, config)).json()) as AdminPackConfigImportResult;
+    expect(result.applied).toEqual(['mk-project']);
+    expect(result.newStages).toEqual(['standalone']);
+
+    const view = (await (
+      await target.r.request('/pack', { headers: AUTH })
+    ).json()) as AdminPackPayload;
+    const added = view.stages.find((s) => s.stageName === 'standalone');
+    expect(added?.active).toBe(true);
+    expect(added?.activeOverridden).toBe(false);
+  });
+
+  test('a config for another pack is refused and changes nothing', async () => {
+    const other = fakePack(packStages);
+    other.manifest = { ...other.manifest, id: 'some-other-pack' };
+    const otherDb = freshDb();
+    const otherService = makeService(otherDb, other);
+    const otherRouter = buildAdminRoutes({ db: otherDb, pack: other, adminPassword: ADMIN_PW, service: otherService, nutanix: noopNutanix, clusterProfile: 'hpoc', pcEndpoint: '' });
+    const foreign = (await (
+      await otherRouter.request('/pack/config', { headers: AUTH })
+    ).json()) as AdminPackConfigPayload;
+
+    const { service, r } = instance(freshDb());
+    await toggle(r, 'mk-project', 'active', false);
+    const res = await importConfig(r, foreign.config);
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain('some-other-pack');
+    // The local setup survived the refusal.
+    expect(service.packOverlay.list(PACK_ID)).toHaveLength(1);
+  });
+
+  test('a malformed config is a 400, not a 500', async () => {
+    const { r } = instance(freshDb());
+    expect((await importConfig(r, 'garbage')).status).toBe(400);
+    expect((await importConfig(r, 'NIG1.@@@')).status).toBe(400);
+    expect((await importConfig(r, 42)).status).toBe(400);
+    const empty = await r.request('/pack/config', { method: 'POST', headers: AUTH_JSON, body: '' });
+    expect(empty.status).toBe(400);
+  });
+
+  test('reset drops every override and restores the JSON defaults', async () => {
+    const { service, r } = instance(freshDb());
+    await toggle(r, 'mk-project', 'active', false);
+    await toggle(r, 'standalone', 'adminGate', true);
+
+    const res = await r.request('/pack/config/reset', { method: 'POST', headers: AUTH });
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { cleared: number }).toEqual({ ok: true, cleared: 2 } as never);
+
+    expect(service.packOverlay.list(PACK_ID)).toEqual([]);
+    expect(service.listEffectiveStages().every((s) => s.active)).toBe(true);
+    const view = (await (await r.request('/pack', { headers: AUTH })).json()) as AdminPackPayload;
+    expect(view.stages.every((s) => !s.activeOverridden && !s.adminGateOverridden)).toBe(true);
+  });
+
+  test('reset on an untouched pack is a no-op', async () => {
+    const { r } = instance(freshDb());
+    const res = await r.request('/pack/config/reset', { method: 'POST', headers: AUTH });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { cleared: number }).cleared).toBe(0);
   });
 });
 
