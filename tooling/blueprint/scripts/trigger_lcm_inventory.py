@@ -57,9 +57,12 @@ def ns_version(ns, probe, candidates=('v4.2', 'v4.1', 'v4.0')):
             print("[ver]  %s -> %s" % (ns, v))
             _NS_VER[ns] = v
             return v
-    print("[ver]  %s -> %s (no probe answered, using lowest)" % (ns, candidates[-1]))
-    _NS_VER[ns] = candidates[-1]
-    return candidates[-1]
+    # Nothing answered — the PC is unreachable, so the real call is about to
+    # fail anyway. Fall back to the newest candidate rather than the oldest so
+    # a transient blip can't silently downgrade a healthy 7.5 cluster.
+    print("[ver]  %s -> %s (no probe answered, keeping newest)" % (ns, candidates[0]))
+    _NS_VER[ns] = candidates[0]
+    return candidates[0]
 
 
 def lcm_version():
