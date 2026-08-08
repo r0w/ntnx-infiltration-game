@@ -22,6 +22,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- The install no longer stops when the cluster serves an older v4 API than
+  expected, or when erasure coding has to be turned off on an Objects container.
+
 ## [1.0.0] - 2026-07-28
 
 ### Fixed

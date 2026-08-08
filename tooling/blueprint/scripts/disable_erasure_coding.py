@@ -8,9 +8,10 @@ A fresh HPoC with Nutanix Files turns EC ON on the Files container
 (`Nutanix_<fs>_ctr`). EC strips need 4 nodes, so `Remove 4th host on
 HPoC` fails its precheck ("not enough NODES to meet Erasure Code
 settings") until EC is off. We PUT every ON container back to OFF
-(clustermgmt v4.2). That stops new strips; Curator un-codes the existing
-ones in the background, so we don't wait on a drain here — the node
-removal retries its precheck until Curator catches up.
+(clustermgmt, version negotiated). That stops new strips; Curator
+un-codes the existing ones in the background, so we don't wait on a
+drain here — the node removal retries its precheck until Curator
+catches up.
 
 Idempotent (OFF/NONE containers are skipped) and hpoc-gated: only `hpoc`
 removes a node. Validated live on DM3-POC013.
@@ -39,9 +40,47 @@ BASE = "https://%s:9440" % PC_IP
 AUTH = (PC_USERNAME, PC_PASSWORD)
 HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
-# clustermgmt v4.2 is where the StorageContainer model exposes `erasureCode`
-# (enum NONE | OFF | ON). v4.0/v4.1 don't carry the field.
-CTR_BASE = "%s/api/clustermgmt/v4.2/config/storage-containers" % BASE
+# PC 7.5 serves clustermgmt/prism v4.2; PC 7.3 stops at v4.1 and 404s
+# anything pinned higher. `erasureCode` (enum NONE | OFF | ON) is carried
+# on the StorageContainer model from v4.0 up, so negotiating down is safe.
+_NS_VER = {}
+
+
+def ns_version(ns, probe, candidates=('v4.2', 'v4.1', 'v4.0')):
+    """Highest version of a v4 namespace this PC actually serves."""
+    if ns in _NS_VER:
+        return _NS_VER[ns]
+    for v in candidates:
+        code = None
+        for _ in range(2):  # a blip must not demote the version
+            try:
+                code = requests.get("%s/api/%s/%s/%s" % (BASE, ns, v, probe),
+                                    auth=AUTH, headers=HEADERS,
+                                    verify=False, timeout=30).status_code
+                break
+            except Exception:
+                pass
+        if code is None:
+            # Unreachable tells us nothing about which versions exist. Stop
+            # probing rather than demote the whole run on a network blip.
+            break
+        if code != 404:
+            print("[ver]  %s -> %s" % (ns, v))
+            _NS_VER[ns] = v
+            return v
+    # Inconclusive: keep the newest so a bad probe can't downgrade a healthy
+    # cluster. If every version really 404s, the real call fails loudly.
+    print("[ver]  %s -> %s (probe inconclusive, keeping newest)"
+          % (ns, candidates[0]))
+    _NS_VER[ns] = candidates[0]
+    return candidates[0]
+
+
+def ctr_base():
+    v = ns_version('clustermgmt', 'config/storage-containers?$limit=1')
+    return "%s/api/clustermgmt/%s/config/storage-containers" % (BASE, v)
+
+
 # Task poll: sleep between GETs so we don't busy-poll the task to exhaustion
 # before it settles (the update task is ~20 s live). The patcher rewrites
 # time.sleep to a TCP-timeout shim that blocks ~N s on the Calm VM. 90 × 2 s
@@ -55,7 +94,7 @@ def list_containers():
     out = []
     while True:
         r = requests.get(
-            "%s?$page=%d&$limit=100" % (CTR_BASE, page),
+            "%s?$page=%d&$limit=100" % (ctr_base(), page),
             auth=AUTH, headers=HEADERS, verify=False, timeout=30,
         )
         r.raise_for_status()
@@ -73,7 +112,7 @@ def get_container(ext_id):
     """Returns (data_body, etag) for a single container — the ETag is
     required as If-Match on the PUT."""
     r = requests.get(
-        "%s/%s" % (CTR_BASE, ext_id),
+        "%s/%s" % (ctr_base(), ext_id),
         auth=AUTH, headers=HEADERS, verify=False, timeout=30,
     )
     r.raise_for_status()
@@ -83,7 +122,8 @@ def get_container(ext_id):
 def poll_task(task_ext_id):
     """Poll a prism task to a terminal state. Returns the status string
     (SUCCEEDED / FAILED / ...) or None if it never settled within the cap."""
-    url = "%s/api/prism/v4.2/config/tasks/%s" % (BASE, task_ext_id)
+    url = "%s/api/prism/%s/config/tasks/%s" % (
+        BASE, ns_version('prism', 'config/tasks?$limit=1'), task_ext_id)
     last = None
     for _ in range(TASK_POLL_ITERS):
         try:
@@ -103,6 +143,9 @@ def disable_one(ctr):
     name = ctr.get('name')
     body, etag = get_container(ext_id)
     body['erasureCode'] = 'OFF'
+    # AOS rejects a delay on a non-EC container (CLU-30101). The Objects
+    # containers carry one; the Files container doesn't.
+    body.pop('erasureCodeDelaySecs', None)
 
     headers = dict(HEADERS)
     headers['Ntnx-Request-Id'] = str(uuid.uuid4())
@@ -110,7 +153,7 @@ def disable_one(ctr):
         headers['If-Match'] = etag
 
     r = requests.put(
-        "%s/%s" % (CTR_BASE, ext_id),
+        "%s/%s" % (ctr_base(), ext_id),
         auth=AUTH, headers=headers, verify=False, timeout=60,
         data=json.dumps(body),
     )
