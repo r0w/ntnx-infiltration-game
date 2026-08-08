@@ -328,9 +328,9 @@ export interface AdminPackConfigImportResult {
   ok: true;
   packId: string;
   applied: string[];
-  /** In the config, absent from this pack — stages deleted since the export. */
+  /** In the config, absent from this pack: stages deleted since the export. */
   missingStages: string[];
-  /** In this pack, absent from the config — stages added since the export.
+  /** In this pack, absent from the config: stages added since the export.
    *  Left at their JSON default. */
   newStages: string[];
   /** Local overrides the import wiped (it replaces, it doesn't merge). */

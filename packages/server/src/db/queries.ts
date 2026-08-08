@@ -827,7 +827,7 @@ export class PackOverlayQueries {
     })();
   }
 
-  /** Drop every override for a pack — back to the JSON defaults. */
+  /** Drop every override for a pack, back to the JSON defaults. */
   clear(packId: string): number {
     const res = this.db
       .prepare(`DELETE FROM pack_overlay WHERE pack_id = $pid`)

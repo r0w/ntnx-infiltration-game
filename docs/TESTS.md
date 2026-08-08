@@ -34,7 +34,8 @@ bun test -t "lunch lock"                           # by name
 | File | What it pins |
 |---|---|
 | `session-service.test.ts` | The gameplay state machine: advance, input, capture + substitute, destructive gating, `skipTo`, cheers, `<action/>` dispatch, retry rewind, re-auth, admin gates, lunch lock |
-| `admin.test.ts` | `/api/admin/*`: login, users, delete cascade, gates, pack toggles, lunch status |
+| `admin.test.ts` | `/api/admin/*`: login, users, delete cascade, gates, pack toggles, lunch status, stage-config export/import/reset |
+| `pack-config.test.ts` | The portable stage-config string: encode/decode, compression, stage drift both ways, pack mismatch |
 | `check-trigram.test.ts` | Trigram shape + collision (returning-agent re-auth) |
 | `dep-analysis.test.ts` | Cascade-disable preview: which downstream stages break when an upstream producer is off |
 | `scoreboard.test.ts` | Sort, anonymous filtering, UUID anti-leak, packId scoping |
@@ -58,6 +59,7 @@ bun test -t "lunch lock"                           # by name
 | File | What it pins |
 |---|---|
 | `ssh-console.test.ts` | Tab-completion + `classifyPingLine` (timeout → fail, 0% loss → pass) |
+| `pack-state.test.ts` | What the Pack tab shows per stage: the five states, their precedence, and the reason line |
 
 The React components, typewriter, and polling loop aren't unit-tested; they're thin views over state whose HTTP contract is covered by the route + e2e tests.
 

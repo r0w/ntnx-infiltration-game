@@ -256,7 +256,7 @@ export interface AdminPackConfigImportResult {
   /** Stage names whose overrides were applied. */
   applied: string[];
   /** Overridden names this pack no longer has (stages deleted since the
-   *  export). Reported, not fatal — the rest of the config still lands. */
+   *  export). Reported, not fatal: the rest of the config still lands. */
   missingStages: string[];
   /** Stages this pack has that the config's pack didn't (added since the
    *  export). Left at their JSON default for the operator to review. */
@@ -683,7 +683,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       throw err;
     }
     // Only rows the operator can actually see in the table count as
-    // "wiped" — a stale row for a dropped stage isn't news to them.
+    // "wiped": a stale row for a dropped stage isn't news to them.
     const before = new Set(
       liveOverlayRows(deps.service.packOverlay.list(packId), stageNames).map((r) => r.stageName),
     );
@@ -702,7 +702,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     return c.json(result);
   });
 
-  // Back to the pack JSON defaults — the escape hatch after an import or a
+  // Back to the pack JSON defaults, the escape hatch after an import or a
   // long afternoon of toggling.
   router.post('/pack/config/reset', (c) => {
     const cleared = deps.service.packOverlay.clear(deps.pack.manifest.id);
