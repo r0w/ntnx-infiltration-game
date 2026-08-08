@@ -43,6 +43,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- The NKP bootcamp's takeaways, both chapter recaps and the conclusion, now
+  carry the wording of the original instead of a summary of it.
 - A screenshot with a long caption no longer sits off to the left of it.
 - The install no longer stops when the cluster serves an older v4 API than
   expected, or when erasure coding has to be turned off on an Objects container.
