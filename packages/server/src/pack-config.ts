@@ -54,9 +54,24 @@ function fromBase64Url(s: string): string {
 }
 
 /**
+ * Overlay rows that still match a stage in the pack. The overlay table has
+ * no foreign key to the pack (packs live on disk), so rows for stages a
+ * later pack version renamed or dropped linger in the DB. Exporting those
+ * would ship dead weight and make every import report a phantom missing
+ * stage, so both the export and its count go through here.
+ */
+export function liveOverlayRows(
+  rows: readonly PackOverlayRow[],
+  packStageNames: readonly string[],
+): PackOverlayRow[] {
+  const known = new Set(packStageNames);
+  return rows.filter((r) => known.has(r.stageName) && !(r.active === null && r.adminGate === null));
+}
+
+/**
  * Encode the sparse overlay rows into the portable string. Rows with no
- * override at all are dropped: they carry nothing and the DB garbage-
- * collects them anyway.
+ * override at all, or pointing at a stage this pack no longer has, are
+ * dropped.
  */
 export function encodePackConfig(
   packId: string,
@@ -64,7 +79,8 @@ export function encodePackConfig(
   rows: readonly PackOverlayRow[],
 ): string {
   const overrides: Record<string, PackConfigOverride> = {};
-  for (const r of [...rows].sort((a, b) => a.stageName.localeCompare(b.stageName))) {
+  const live = liveOverlayRows(rows, packStageNames);
+  for (const r of [...live].sort((a, b) => a.stageName.localeCompare(b.stageName))) {
     const o: PackConfigOverride = {};
     if (r.active !== null) o.active = r.active;
     if (r.adminGate !== null) o.adminGate = r.adminGate;

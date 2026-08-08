@@ -56,6 +56,23 @@ describe('encodePackConfig / decodePackConfig', () => {
     expect(decoded.overrides).toEqual({});
   });
 
+  // The overlay table outlives the pack version that wrote it, so a stage
+  // dropped from the pack leaves a row behind. Exporting it would make
+  // every import elsewhere report a phantom missing stage.
+  test('rows for stages the pack no longer has are dropped', () => {
+    const decoded = decodePackConfig(
+      encodePackConfig(PACK, STAGES, [row('intro', false, null), row('long-gone', false, null)]),
+    );
+    expect(decoded.overrides).toEqual({ intro: { active: false } });
+  });
+
+  test('export then import then re-export is stable despite a stale row', () => {
+    const rows = [row('intro', false, null), row('long-gone', true, null)];
+    const first = encodePackConfig(PACK, STAGES, rows);
+    const plan = planPackConfigImport(decodePackConfig(first), PACK, STAGES);
+    expect(encodePackConfig(PACK, STAGES, plan.applied)).toBe(first);
+  });
+
   test('encoding is deterministic and order-independent', () => {
     const a = encodePackConfig(PACK, STAGES, [row('outro', null, true), row('intro', false, null)]);
     const b = encodePackConfig(PACK, STAGES, [row('intro', false, null), row('outro', null, true)]);

@@ -12,6 +12,7 @@ import { readEnabledWipLocales, writeEnabledWipLocales } from '../effective-loca
 import {
   decodePackConfig,
   encodePackConfig,
+  liveOverlayRows,
   planPackConfigImport,
   PackConfigError,
 } from '../pack-config';
@@ -654,15 +655,12 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   // state, not configuration, and importing them would surprise a room.
 
   router.get('/pack/config', (c) => {
+    const stageNames = deps.pack.stages.map((s) => s.name);
     const rows = deps.service.packOverlay.list(deps.pack.manifest.id);
     const payload: AdminPackConfigPayload = {
-      config: encodePackConfig(
-        deps.pack.manifest.id,
-        deps.pack.stages.map((s) => s.name),
-        rows,
-      ),
+      config: encodePackConfig(deps.pack.manifest.id, stageNames, rows),
       packId: deps.pack.manifest.id,
-      overriddenCount: rows.length,
+      overriddenCount: liveOverlayRows(rows, stageNames).length,
     };
     return c.json(payload);
   });
@@ -684,8 +682,10 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       if (err instanceof PackConfigError) throw new HttpError(400, err.message);
       throw err;
     }
+    // Only rows the operator can actually see in the table count as
+    // "wiped" — a stale row for a dropped stage isn't news to them.
     const before = new Set(
-      deps.service.packOverlay.list(packId).map((r) => r.stageName),
+      liveOverlayRows(deps.service.packOverlay.list(packId), stageNames).map((r) => r.stageName),
     );
     deps.service.packOverlay.replaceAll(packId, plan.applied);
     deps.service.applyEffectiveStages();

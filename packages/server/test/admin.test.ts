@@ -858,6 +858,32 @@ describe('pack config export / import / reset', () => {
     expect(added?.activeOverridden).toBe(false);
   });
 
+  // An overlay row survives the stage that spawned it (no FK to the pack),
+  // so a long-running instance carries rows for stages a game update
+  // dropped. They must not leak into the exported config.
+  test('a stale override for a dropped stage is left out of the export', async () => {
+    const db = freshDb();
+    const { service, r } = instance(db);
+    db.prepare(
+      `INSERT INTO pack_overlay (pack_id, stage_name, active, admin_gate)
+       VALUES ($pid, 'long-gone', 0, NULL)`,
+    ).run({ $pid: PACK_ID });
+    await toggle(r, 'mk-project', 'active', false);
+
+    const exported = await exportConfig(r);
+    expect(exported.overriddenCount).toBe(1);
+    // Importing it back onto this same instance is a no-op, not a phantom
+    // "missing stage" report.
+    const result = (await (
+      await importConfig(r, exported.config)
+    ).json()) as AdminPackConfigImportResult;
+    expect(result.applied).toEqual(['mk-project']);
+    expect(result.missingStages).toEqual([]);
+    expect(result.clearedStages).toEqual([]);
+    // The import replaced the table, so the dead row is gone for good.
+    expect(service.packOverlay.list(PACK_ID).map((o) => o.stageName)).toEqual(['mk-project']);
+  });
+
   test('a config for another pack is refused and changes nothing', async () => {
     const other = fakePack(packStages);
     other.manifest = { ...other.manifest, id: 'some-other-pack' };
