@@ -49,22 +49,27 @@ def ns_version(ns, probe, candidates=('v4.2', 'v4.1', 'v4.0')):
     if ns in _NS_VER:
         return _NS_VER[ns]
     for v in candidates:
-        try:
-            r = requests.get("%s/api/%s/%s/%s" % (PC_BASE, ns, v, probe),
-                             auth=AUTH, headers=HEADERS, verify=False, timeout=30)
-            code = r.status_code
-        except Exception:
-            # Unreachable, or a response we can't read a status off — treat
-            # as "this version didn't answer" and try the next candidate.
-            continue
+        code = None
+        for _ in range(2):  # a blip must not demote the version
+            try:
+                code = requests.get("%s/api/%s/%s/%s" % (PC_BASE, ns, v, probe),
+                                    auth=AUTH, headers=HEADERS,
+                                    verify=False, timeout=30).status_code
+                break
+            except Exception:
+                pass
+        if code is None:
+            # Unreachable tells us nothing about which versions exist. Stop
+            # probing rather than demote the whole run on a network blip.
+            break
         if code != 404:
             print("[ver]  %s -> %s" % (ns, v))
             _NS_VER[ns] = v
             return v
-    # Nothing answered — the PC is unreachable, so the real call is about to
-    # fail anyway. Fall back to the newest candidate rather than the oldest so
-    # a transient blip can't silently downgrade a healthy 7.5 cluster.
-    print("[ver]  %s -> %s (no probe answered, keeping newest)" % (ns, candidates[0]))
+    # Inconclusive: keep the newest so a bad probe can't downgrade a healthy
+    # cluster. If every version really 404s, the real call fails loudly.
+    print("[ver]  %s -> %s (probe inconclusive, keeping newest)"
+          % (ns, candidates[0]))
     _NS_VER[ns] = candidates[0]
     return candidates[0]
 
