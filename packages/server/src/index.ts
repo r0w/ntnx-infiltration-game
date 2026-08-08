@@ -87,18 +87,16 @@ async function main() {
     });
   }
 
-  // The capability probe asks Prism Central a long series of questions about
-  // NCM, Intelligent Operations, spare nodes and the like, to decide which
-  // stages a cluster can play. A pack whose stages gate on none of that pays
-  // the whole cost for nothing, and on a cluster that answers some of those
-  // questions slowly it can hold the server short of listening. Packs opt out
-  // with `"capabilities": false` in pack.json.
-  const wantsCapabilities = pack.manifest.capabilities !== false;
-  const probe = wantsCapabilities
+  // Both Prism interrogations below answer questions only the infiltration
+  // game's stages ask, and neither carries a deadline — so for a pack that
+  // never reads the answers they are not just wasted work, they are a way for
+  // the server to never start listening. See PackManifest.clusterFacts.
+  const wantsClusterFacts = pack.manifest.clusterFacts !== false;
+  const probe = wantsClusterFacts
     ? await probeCapabilities({ nutanix, logger: consoleLogger })
     : { flags: [], unreachable: false, details: [] };
-  if (!wantsCapabilities) {
-    consoleLogger.info('capability probe skipped', { pack: pack.manifest.id });
+  if (!wantsClusterFacts) {
+    consoleLogger.info('cluster-facts probes skipped', { pack: pack.manifest.id });
   }
 
   // Loud aggregate diagnostic when the cluster is fully unreachable in
@@ -119,7 +117,7 @@ async function main() {
   // on every player attempt. Skipped in mock mode; failures degrade
   // to "live query at check-time" via the existing fallback paths.
   // Operator-edited rows are sticky (probe never overwrites them).
-  if (transportMode === 'live' && !probe.unreachable) {
+  if (transportMode === 'live' && !probe.unreachable && wantsClusterFacts) {
     try {
       const { ClusterConfigQueries } = await import('./db/queries');
       const { probeClusterConfig } = await import('./cluster-config-probe');

@@ -31,14 +31,19 @@ export interface PackManifest {
   version: string;
   description?: string;
   /**
-   * Whether to run the Nutanix capability probe at boot. It decides which
-   * stages a cluster can play (NCM present? spare node? Intelligent Operations
-   * on?), which only matters to a pack that gates stages on those flags. Set
-   * `false` in a pack that gates on none of them: the probe is a long series of
-   * Prism queries, and a slow answer to one of them delays the server.
-   * Defaults to true, so existing packs are untouched.
+   * Whether this pack's stages read Nutanix cluster facts.
+   *
+   * When true (the default), boot runs two Prism interrogations: the capability
+   * probe, which decides what a cluster can play (NCM present? spare node?
+   * Intelligent Operations on?), and the cluster-config snapshot, which caches
+   * slow answers like rackable-unit serials and the LCM update count. Both
+   * exist to answer questions only the infiltration game's stages ask.
+   *
+   * Set `false` and boot skips both. That is not merely an optimisation: these
+   * queries have no deadline, so one slow answer holds the server short of
+   * listening, and a pack that never reads the answers would wait for nothing.
    */
-  capabilities?: boolean;
+  clusterFacts?: boolean;
   checks: string;
   actions?: string;
   /**
