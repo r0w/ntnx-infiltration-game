@@ -2,6 +2,10 @@
   "id": "ntnx-infiltration",
   "name": "NCP",
   "title": "ntnx infiltration game",
+  "identity": {
+    "variable": "Trigram",
+    "label": "trigram"
+  },
   "version": "0.0.0",
   "description": "Nutanix Cloud Platform infiltration scenario — successor to ntnx-escape-game.",
   "checks": "./checks/index.ts",

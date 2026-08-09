@@ -210,7 +210,7 @@ export class SessionQueries {
    * projector) but required here for the operator to identify a player who
    * claims to be "1234" and help them out.
    */
-  listAdmin(packId: string): AdminSessionRow[] {
+  listAdmin(packId: string, identityVar = 'Trigram'): AdminSessionRow[] {
     const rows = this.db
       .prepare(
         `SELECT
@@ -220,7 +220,7 @@ export class SessionQueries {
            s.finished_at AS finished_at,
            s.locale AS locale,
            (SELECT value FROM session_variables
-              WHERE session_id = s.id AND name = 'Trigram') AS trigram_var,
+              WHERE session_id = s.id AND name = $identityVar) AS trigram_var,
            (SELECT value FROM session_variables
               WHERE session_id = s.id AND name = 'Username') AS username_var,
            (SELECT value FROM session_variables
@@ -244,7 +244,7 @@ export class SessionQueries {
          WHERE s.pack_id = $packId
          ORDER BY s.started_at DESC`,
       )
-      .all({ $packId: packId }) as Array<{
+      .all({ $packId: packId, $identityVar: identityVar }) as Array<{
         session_id: string;
         current_stage: string | null;
         started_at: number;
@@ -278,7 +278,7 @@ export class SessionQueries {
     }));
   }
 
-  listScoreboard(packId: string): ScoreboardRow[] {
+  listScoreboard(packId: string, identityVar = 'Trigram'): ScoreboardRow[] {
     // We read the real trigram/username from `session_variables` — the
     // `sessions.trigram` column is a UUID placeholder (identification happens
     // in-game via <input/>), so joining on it would surface UUIDs, not the
@@ -293,7 +293,7 @@ export class SessionQueries {
            s.started_at AS started_at,
            s.finished_at AS finished_at,
            (SELECT value FROM session_variables
-              WHERE session_id = s.id AND name = 'Trigram') AS trigram_var,
+              WHERE session_id = s.id AND name = $identityVar) AS trigram_var,
            (SELECT value FROM session_variables
               WHERE session_id = s.id AND name = 'Username') AS username_var,
            (SELECT COUNT(*) FROM stage_history
@@ -311,7 +311,7 @@ export class SessionQueries {
            last_activity_at DESC,
            s.started_at ASC`,
       )
-      .all({ $packId: packId }) as Array<{
+      .all({ $packId: packId, $identityVar: identityVar }) as Array<{
         session_id: string;
         current_stage: string | null;
         started_at: number;
@@ -586,7 +586,7 @@ export class AttemptQueries {
 
   /** Newest-first attempts for the pack, with the session's trigram/username
    *  joined in so the admin Logs tab renders without a second lookup. */
-  listRecent(packId: string, limit: number): AttemptRow[] {
+  listRecent(packId: string, limit: number, identityVar = 'Trigram'): AttemptRow[] {
     const rows = this.db
       .prepare(
         `SELECT
@@ -598,7 +598,7 @@ export class AttemptQueries {
            a.duration_ms AS duration_ms,
            a.detail AS detail,
            (SELECT value FROM session_variables
-              WHERE session_id = a.session_id AND name = 'Trigram') AS trigram_var,
+              WHERE session_id = a.session_id AND name = $identityVar) AS trigram_var,
            (SELECT value FROM session_variables
               WHERE session_id = a.session_id AND name = 'Username') AS username_var
          FROM check_attempts a
@@ -607,7 +607,7 @@ export class AttemptQueries {
          ORDER BY a.checked_at DESC, a.id DESC
          LIMIT $limit`,
       )
-      .all({ $packId: packId, $limit: limit }) as Array<{
+      .all({ $packId: packId, $limit: limit, $identityVar: identityVar }) as Array<{
         id: number;
         session_id: string;
         stage_name: string;

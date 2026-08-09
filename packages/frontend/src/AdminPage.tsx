@@ -175,6 +175,8 @@ function AdminDashboard({
     : 'users';
   const setTab = (next: AdminTab) => navigate(`/admin/${next}`);
   const [entries, setEntries] = useState<AdminUserEntry[] | null>(null);
+  // What this pack calls a player — 'trigram' for NCP, 'user' for the bootcamp.
+  const [identityLabel, setIdentityLabel] = useState('trigram');
   const [gates, setGates] = useState<AdminGateEntry[] | null>(null);
   const [lunch, setLunch] = useState<AdminLunchStatus | null>(null);
   const [lunchBusy, setLunchBusy] = useState(false);
@@ -258,6 +260,7 @@ function AdminDashboard({
         api.adminPeers(password),
       ]);
       setEntries(usersPayload.entries);
+      setIdentityLabel(usersPayload.identityLabel ?? 'trigram');
       setGates(gatesPayload.entries);
       setPackStages(packPayload.stages);
       setPackBrokenCount(packPayload.brokenCount);
@@ -757,6 +760,9 @@ function AdminDashboard({
           const filtered = showAnonymousUsers
             ? entries
             : entries.filter((e) => e.trigram !== null);
+          // Agent and PIN belong to the infiltration game. A pack that never
+          // captures them would otherwise show two columns of dashes.
+          const hasAgentCols = entries.some((e) => e.username !== null || e.pin !== null);
           // Stuck players first, longest-stuck on top — the triage order.
           // The rest keeps the server's newest-session-first order.
           const visible = [...filtered].sort((a, b) => {
@@ -795,9 +801,9 @@ function AdminDashboard({
           <table className="admin-table">
             <thead>
               <tr>
-                <th>Trigram</th>
-                <th>Agent</th>
-                <th>PIN</th>
+                <th>{identityLabel}</th>
+                {hasAgentCols && <th>Agent</th>}
+                {hasAgentCols && <th>PIN</th>}
                 <th>Stage</th>
                 <th>Progress</th>
                 <th>Started</th>
@@ -822,8 +828,10 @@ function AdminDashboard({
                       <span className="c-dim">—</span>
                     )}
                   </td>
-                  <td>{e.username ?? <span className="c-dim">—</span>}</td>
-                  <td className="admin-td-pin">{e.pin ?? <span className="c-dim">—</span>}</td>
+                  {hasAgentCols && <td>{e.username ?? <span className="c-dim">—</span>}</td>}
+                  {hasAgentCols && (
+                    <td className="admin-td-pin">{e.pin ?? <span className="c-dim">—</span>}</td>
+                  )}
                   <td>
                     {e.finishedAt !== null ? (
                       <span className="c-green">finished</span>
@@ -1013,7 +1021,7 @@ function AdminDashboard({
           <dl className="modal-meta">
             <dt>agent</dt>
             <dd>{confirmTarget.username ?? <span className="c-dim">—</span>}</dd>
-            <dt>trigram</dt>
+            <dt>{identityLabel}</dt>
             <dd className="modal-trigram">{confirmTarget.trigram ?? <span className="c-dim">—</span>}</dd>
             <dt>session</dt>
             <dd className="c-dim">{confirmTarget.sessionId.slice(0, 8)}</dd>
@@ -1065,7 +1073,7 @@ function AdminDashboard({
           <dl className="modal-meta">
             <dt>agent</dt>
             <dd>{skipTarget.username ?? <span className="c-dim">—</span>}</dd>
-            <dt>trigram</dt>
+            <dt>{identityLabel}</dt>
             <dd className="modal-trigram">{skipTarget.trigram ?? <span className="c-dim">—</span>}</dd>
             <dt>stage to skip</dt>
             <dd className="modal-trigram">{skipTarget.nextStageName}</dd>
@@ -1099,7 +1107,7 @@ function AdminDashboard({
                 <dl className="modal-meta">
                   <dt>agent</dt>
                   <dd>{failTarget.username ?? <span className="c-dim">—</span>}</dd>
-                  <dt>trigram</dt>
+                  <dt>{identityLabel}</dt>
                   <dd className="modal-trigram">
                     {failTarget.trigram ?? <span className="c-dim">—</span>}
                   </dd>

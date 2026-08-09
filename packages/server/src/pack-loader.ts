@@ -96,6 +96,14 @@ export interface PackManifest {
    * Absent, or a label the map does not mention, renders as written.
    */
   speakers?: Record<string, string>;
+  /**
+   * Which captured variable identifies a player, and what to call it in
+   * `/admin`. The infiltration game asks for a trigram; the bootcamp asks for
+   * a user number, and before this the admin Users tab read `Trigram` only —
+   * so every bootcamp session showed up nameless and was hidden by the
+   * "identified sessions" filter. Defaults to the infiltration game's own.
+   */
+  identity?: { variable: string; label: string };
   checks: string;
   actions?: string;
   /**

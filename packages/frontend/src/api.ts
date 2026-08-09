@@ -289,6 +289,8 @@ export interface AdminAttemptEntry {
 export interface AdminUsersPayload {
   packId: string;
   packName: string;
+  /** What this pack calls a player: `trigram` for NCP, `user` for the bootcamp. */
+  identityLabel?: string;
   totalStages: number;
   entries: AdminUserEntry[];
 }

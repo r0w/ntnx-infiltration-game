@@ -86,7 +86,10 @@ export function buildScoreboardRoutes(deps: ScoreboardRoutesDeps): Hono {
   const totalStages = deps.pack.stages.length;
 
   function buildLocalEntries(): ScoreboardEntry[] {
-    const rows = sessions.listScoreboard(deps.pack.manifest.id);
+    const rows = sessions.listScoreboard(
+      deps.pack.manifest.id,
+      deps.pack.manifest.identity?.variable,
+    );
     // Compute once per request — same value across every row.
     const effectiveTotalStages = deps.service.effectivePlayableCount(
       deps.capabilities,

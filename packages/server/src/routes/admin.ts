@@ -363,9 +363,16 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     await next();
   });
 
+  // Which captured variable names a player, and what to call it on screen.
+  // The rows keep the field name `trigram` on the wire — renaming it would
+  // ripple through the scoreboard and the session table for no gain — but
+  // what fills it, and the word above it, come from the pack.
+  const identityVar = () => deps.pack.manifest.identity?.variable ?? 'Trigram';
+  const identityLabel = () => deps.pack.manifest.identity?.label ?? 'trigram';
+
   router.get('/users', (c) => {
     const effective = deps.service.listEffectiveStages();
-    const rows = sessions.listAdmin(deps.pack.manifest.id);
+    const rows = sessions.listAdmin(deps.pack.manifest.id, identityVar());
     // Compute once per request — same value for every row on this snapshot.
     const effectiveTotalStages = deps.service.effectivePlayableCount(
       deps.capabilities ?? [],
@@ -401,6 +408,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     return c.json({
       packId: deps.pack.manifest.id,
       packName: deps.pack.manifest.name,
+      identityLabel: identityLabel(),
       totalStages,
       entries,
     });
@@ -411,7 +419,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   router.get('/attempts', (c) => {
     const raw = Number(c.req.query('limit') ?? 200);
     const limit = Number.isFinite(raw) ? Math.min(Math.max(Math.trunc(raw), 1), 1000) : 200;
-    const entries: AttemptRow[] = attempts.listRecent(deps.pack.manifest.id, limit);
+    const entries: AttemptRow[] = attempts.listRecent(deps.pack.manifest.id, limit, identityVar());
     return c.json({ entries });
   });
 
@@ -469,7 +477,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   // check uses the effective adminGate value.
   router.get('/gates', (c) => {
     const unlocked = new Set(deps.service.listUnlockedGates());
-    const allSessions = sessions.listAdmin(deps.pack.manifest.id);
+    const allSessions = sessions.listAdmin(deps.pack.manifest.id, identityVar());
     const active = allSessions.filter((s) => s.finishedAt === null);
     const totalActive = active.length;
     const unlockedAtByName = new Map(
@@ -620,7 +628,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   router.get('/lunch', (c) => {
     const info = deps.service.globalPauseInfo();
     const active = sessions
-      .listAdmin(deps.pack.manifest.id)
+      .listAdmin(deps.pack.manifest.id, identityVar())
       .filter((s) => s.finishedAt === null);
     const status: AdminLunchStatus = {
       paused: info !== null,
