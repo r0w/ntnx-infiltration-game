@@ -69,22 +69,28 @@ async function main() {
     maxRetries: cfg.pcMaxRetries,
   });
 
-  // Read-only k8s transport for the NKP pack. In mock mode it reads the pack's
-  // fixtures.json (`kube` section), no cluster. In live/test mode, NKP_KUBECONFIG
-  // points at the *management* kubeconfig; the workload clusters come from the
-  // CAPI kubeconfig secrets on that cluster, so the operator supplies one file
-  // and the whole fleet is readable.
-  // NCP packs never touch ctx.kube, so this stays undefined for them.
+  // Transports beyond `ctx.nutanix` are built only when the pack asked for
+  // them in `pack.json.transports`. In mock mode a transport reads the pack's
+  // own fixtures, no cluster. Live, the kubeconfig points at the *management*
+  // cluster; the workload clusters come from the CAPI kubeconfig secrets on
+  // it, so one file makes the whole fleet readable.
   let kube;
-  if (transportMode === 'mock') {
-    kube = createKubeClient({ mode: 'mock', fixtures: fixturesPath });
-  } else if (process.env.NKP_KUBECONFIG) {
-    const { readFileSync } = await import('node:fs');
-    kube = await createLiveKubeFleet(readFileSync(process.env.NKP_KUBECONFIG, 'utf8'));
-    consoleLogger.info('kube transport ready (live)', {
-      kubeconfig: process.env.NKP_KUBECONFIG,
-      clusters: kube.clusters.join(', '),
-    });
+  if (pack.manifest.transports?.includes('kube')) {
+    if (transportMode === 'mock') {
+      kube = createKubeClient({ mode: 'mock', fixtures: fixturesPath });
+    } else if (cfg.kubeconfigPath) {
+      const { readFileSync } = await import('node:fs');
+      kube = await createLiveKubeFleet(readFileSync(cfg.kubeconfigPath, 'utf8'));
+      consoleLogger.info('kube transport ready (live)', {
+        kubeconfig: cfg.kubeconfigPath,
+        clusters: kube.clusters.join(', '),
+      });
+    } else {
+      consoleLogger.warn('pack asked for a kube transport but no kubeconfig is set', {
+        pack: pack.manifest.id,
+        expected: 'KUBECONFIG_PATH',
+      });
+    }
   }
 
   // Both Prism interrogations below answer questions only the infiltration
@@ -147,43 +153,30 @@ async function main() {
   }
 
   // Seed template-facing variables from env so `{PC}` / `{PCUser}` /
-  // `{PCPassword}` / `{ImageURL}` render something instead of leaving a hole
-  // in the prompt. Empty strings are kept (template renders ''), which is the
-  // same behavior the player sees pre-login anyway. `Vlanid` is intentionally
-  // absent — it's always allocated per-session (collision-free); pinning it
-  // would break multi-player at stage 10 (two subnets on one VLAN).
-  // OldPC* are NOT in this map — they're projected from cluster_config at
-  // session-create instead, so admin edits via /admin → cluster apply
-  // without a server restart.
+  // `{PCPassword}` render something instead of leaving a hole in the prompt.
+  // Empty strings are kept (template renders ''), which is the same behavior
+  // the player sees pre-login anyway. Only what every game shares lives here;
+  // a game's own world comes from its boot module just below.
   const initialVariables: Record<string, unknown> = {
     PC: cfg.pcEndpoint,
     PCUser: cfg.pcUser,
     PCPassword: cfg.pcPassword,
-    ImageURL: cfg.gameImageUrl,
-    EmailReport: cfg.gameEmailReport,
-    ProdUsername: cfg.gameProdUsername,
-    ProdPassword: cfg.gameProdPassword,
     frontendHost: cfg.gameFrontendHost,
-    // NKP pack: the Kommander console URL (clickable in-game). Derived from the
-    // fleet just below when the operator did not pin one; this value only
-    // survives for a pack with no Kubernetes transport to ask.
-    DashboardUrl: process.env.NKP_DASHBOARD_URL || 'https://your-nkp-console/dkp/kommander/dashboard',
   };
 
-  // A pack that reads a cluster over Kubernetes can be told the real ingress
-  // addresses, so its steps name them instead of asking the learner to
-  // substitute a placeholder. Unresolvable values fall back to the bootcamp's
-  // own wording — see kube-facts.ts.
-  if (kube) {
-    const { probeKubeFacts, kommanderDashboardUrl } = await import('./kube-facts');
-    const facts = await probeKubeFacts(kube, consoleLogger);
-    Object.assign(initialVariables, facts);
-    initialVariables.DashboardUrl = kommanderDashboardUrl(facts, process.env.NKP_DASHBOARD_URL);
-    consoleLogger.info('kube facts resolved', {
-      mgmt: facts.MgmtIngressIP,
-      workload01: facts.Workload1IngressIP,
-      dashboard: initialVariables.DashboardUrl,
-    });
+  // What this particular game wants to know at boot: values read from its own
+  // env settings, or addresses probed off the cluster it was asked for. A pack
+  // without a boot module adds nothing.
+  if (pack.boot.variables) {
+    Object.assign(
+      initialVariables,
+      await pack.boot.variables({
+        mode: transportMode,
+        env: process.env,
+        logger: consoleLogger,
+        transports: { kube },
+      }),
+    );
   }
 
   // NIG Central stats emitter — inert unless NIG_CENTRAL_URL is set.

@@ -8,6 +8,8 @@ import type {
   Locale,
   LocaleBundle,
   LocaleCatalog,
+  PackBoot,
+  PackTransport,
   StageDefinition,
 } from '@ntnx-game/engine';
 import {
@@ -104,6 +106,18 @@ export interface PackManifest {
    * "identified sessions" filter. Defaults to the infiltration game's own.
    */
   identity?: { variable: string; label: string };
+  /**
+   * Transports this pack needs beyond `ctx.nutanix`, which it always gets.
+   * The server builds what is named here and hands it to the checks, the acts
+   * and the boot module; a pack that names nothing costs nothing.
+   */
+  transports?: PackTransport[];
+  /**
+   * Path (relative to pack root) to the module exporting {@link PackBoot} —
+   * the hooks that let a game read its own settings at boot instead of the
+   * server carrying them. Optional.
+   */
+  boot?: string;
   checks: string;
   actions?: string;
   /**
@@ -148,6 +162,8 @@ export interface LoadedPack {
   actions: ActionRegistry;
   acts: ActRegistry;
   cleanups: CleanupRegistry;
+  /** The pack's boot hooks, `{}` when it declares none. */
+  boot: PackBoot;
   bundle: LocaleBundle;
 }
 
@@ -166,10 +182,26 @@ export async function loadPack(packsDir: string, packId: string): Promise<Loaded
   const cleanups = manifest.cleanups
     ? await loadCleanups(resolve(dir, manifest.cleanups))
     : new CleanupRegistry();
+  const boot = manifest.boot ? await loadBoot(resolve(dir, manifest.boot)) : {};
   const bundle = manifest.locales
     ? await loadLocaleBundle(resolve(dir, manifest.locales), manifest)
     : emptyBundleFromManifest(manifest);
-  return { manifest, dir, stages, checks, actions, acts, cleanups, bundle };
+  return { manifest, dir, stages, checks, actions, acts, cleanups, boot, bundle };
+}
+
+/**
+ * Load the pack's boot hooks. Unlike the registries below, a missing module is
+ * fatal: the manifest named it, so failing quietly would start the game with
+ * its variables unseeded and leave the operator reading holes in the prompts.
+ */
+async function loadBoot(modulePath: string): Promise<PackBoot> {
+  const mod = (await import(modulePath)) as Record<string, unknown>;
+  const exported = (mod.boot ?? mod.default ?? mod) as Partial<PackBoot>;
+  return {
+    variables: typeof exported.variables === 'function' ? exported.variables : undefined,
+    identityFromPath:
+      typeof exported.identityFromPath === 'function' ? exported.identityFromPath : undefined,
+  };
 }
 
 async function loadStages(dir: string, order: string[]): Promise<StageDefinition[]> {

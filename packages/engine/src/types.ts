@@ -20,6 +20,13 @@ export interface LocaleBundle {
   catalogs: Record<Locale, LocaleCatalog>;
 }
 
+/**
+ * Something a cluster can offer that a stage may require. The names below are
+ * what the Nutanix probe reports and what the infiltration game's stages ask
+ * for; the trailing `string & {}` keeps the union open, because a game on
+ * another product will probe for other things and must not have to widen a
+ * type in the engine to say so. Editors still complete the known ones.
+ */
 export type CapabilityFlag =
   | 'NCM'
   | 'IO'
@@ -34,7 +41,9 @@ export type CapabilityFlag =
   // Planner cluster). When unwired, both stages auto-skip via the
   // capability gate instead of leaving the player with a broken
   // prompt (empty `{OldPCPassword}` in the displayed creds).
-  | 'PlannerCluster';
+  | 'PlannerCluster'
+  // eslint-disable-next-line @typescript-eslint/ban-types -- keeps the union open
+  | (string & {});
 
 /**
  * Cluster profile drives `impact: 'hpoc-only'` gating.
@@ -312,6 +321,55 @@ export interface KubeClient {
   remove?(ref: KubeResourceRef): Promise<void>;
   /** Cluster names this client can reach, management first. For diagnostics. */
   readonly clusters: readonly string[];
+}
+
+/**
+ * A transport a pack asks for beyond `ctx.nutanix`, which every pack gets.
+ * Named in `pack.json.transports`; the server builds it, the pack decides
+ * what to ask it. Today only Kubernetes qualifies.
+ */
+export type PackTransport = 'kube';
+
+/** The transports the server built for this pack, by name. */
+export interface PackTransports {
+  kube?: KubeClient;
+}
+
+/** What a pack's boot module is handed. See {@link PackBoot}. */
+export interface PackBootContext {
+  /** `mock` reads the pack's fixtures; `live` reaches a real cluster. */
+  mode: 'mock' | 'live';
+  /** The process environment, so a pack can read its own settings. */
+  env: Record<string, string | undefined>;
+  logger: Logger;
+  transports: PackTransports;
+}
+
+/**
+ * Optional per-pack boot hooks, loaded from `pack.json.boot`.
+ *
+ * The server owns *building* transports and the settings every game shares
+ * (Prism endpoint, credentials, the host it serves from). Everything a
+ * particular game wants to know at boot belongs here instead, so a third game
+ * is a new directory rather than another branch in `packages/server`.
+ */
+export interface PackBoot {
+  /**
+   * Variables seeded into every session on top of the server's own, e.g. an
+   * image URL read from env, or an address probed off the cluster. Runs once
+   * at boot; failures must be handled here, not thrown — a game that cannot
+   * resolve one address should still start.
+   */
+  variables?(
+    ctx: PackBootContext,
+  ): Promise<Record<string, unknown>> | Record<string, unknown>;
+  /**
+   * Which variables identify the player named in an operator endpoint's path
+   * segment (`/api/act/cleanup-all/user01`). The server always seeds
+   * `Trigram` with the raw segment; a pack that calls its players something
+   * else, or that normalises the value, says so here. Absent = trigram only.
+   */
+  identityFromPath?(segment: string): Record<string, unknown>;
 }
 
 export interface CheckContext {

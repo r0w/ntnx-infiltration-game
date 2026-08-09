@@ -14,6 +14,10 @@
   },
   "version": "0.1.0",
   "description": "Nutanix Kubernetes Platform Fundamentals, hands-on: multi-tenancy with Workspaces and Projects, persistent storage with Nutanix Volumes and Files, observability, and GitOps across a fleet.",
+  "transports": [
+    "kube"
+  ],
+  "boot": "./boot/index.ts",
   "checks": "./checks/index.ts",
   "actions": "./actions/index.ts",
   "acts": "./acts/index.ts",

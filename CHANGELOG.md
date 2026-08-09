@@ -59,6 +59,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
   game carries its own.
 - Screenshots in the terminal are wider and centred, so the detail a step points
   at is readable without enlarging.
+- Each game now carries its own settings and its own Kubernetes access instead
+  of the server holding both games' at once; the kubeconfig setting is named
+  `KUBECONFIG_PATH`, with the old `NKP_KUBECONFIG` still accepted.
 - The Pack tab now opens with the whole run in play order, colour-coded by what
   each stage will do, and the stage list can be filtered and searched.
 - The prerequisites runbook now asks which project to use instead of assuming
@@ -66,6 +69,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Turning off a stage in the Pack tab now also turns off the stages whose
+  cluster resources it creates, in the infiltration game too: disabling the VM
+  stage takes the six stages that act on that VM with it.
 - Asking to switch player in the bootcamp no longer jumps straight to the end
   screen: it puts you back at the question, with the previous answer cleared.
 - The terminal now offers to switch player in the words of the game you are

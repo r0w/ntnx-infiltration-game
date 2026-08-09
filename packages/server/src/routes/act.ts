@@ -65,33 +65,26 @@ export function buildActRoutes(deps: ActRoutesDeps): Hono {
   // request's lifetime) so operator-run acts don't pollute the sessions
   // table with synthetic rows.
   /**
-   * Heuristic: the pure-input stages each have a known variable name the
-   * player would normally submit. When the auto-play caller has pre-seeded
-   * that variable in `body.vars`, we treat the stage as runnable and let
-   * the check validate. List kept small — extend if new pure-input stages
-   * land in the pack.
+   * Does this pure-input stage have something to validate?
+   *
+   * A stage the player types into declares what it takes in `captures`, so the
+   * question is simply whether the synthetic context already holds one of
+   * those values — seeded from the path segment, or pre-populated by the
+   * caller in `body.vars`. Reading it off the stage means a second pack, and
+   * the next one after it, need no entry anywhere: the old hand-written map
+   * still listed `switch-to-admin-user`, a stage that has had no check for a
+   * long time.
    */
   function isInputCaptured(
-    stage: { name: string },
+    stage: { captures?: string[] },
     ctx: ActContext,
   ): boolean {
-    const byStage: Record<string, string> = {
-      login: 'Trigram',
-      // The bootcamp's identity stage. `makeContext` already seeds UserNum
-      // from the path segment, so the check has everything it needs and the
-      // operator gets a verdict on the first stage instead of a skip.
-      welcome: 'UserNum',
-      'switch-to-admin-user': 'Username',
-      'expand-cluster': 'NodeSerial',
-      'lcm-check-updates': 'NumberUpdates',
-      'capacity-runway': 'Runway',
-    };
-    const varName = byStage[stage.name];
-    if (!varName) return false;
-    const val = ctx.vars.get(varName);
-    if (typeof val === 'string') return val.length > 0;
-    if (typeof val === 'number') return Number.isFinite(val);
-    return false;
+    return (stage.captures ?? []).some((name) => {
+      const val = ctx.vars.get(name);
+      if (typeof val === 'string') return val.length > 0;
+      if (typeof val === 'number') return Number.isFinite(val);
+      return false;
+    });
   }
 
   function makeContext(trigram: string, extraVars: Record<string, unknown> = {}): ActContext {
@@ -100,12 +93,11 @@ export function buildActRoutes(deps: ActRoutesDeps): Hono {
     varStore.set('Trigram', trigram);
     // The path segment is "who to act for", and each pack spells that
     // differently: the infiltration game scopes its objects by trigram, the
-    // bootcamp by user number. Seed both from the one identifier so
-    // `/cleanup-all/user01` (or `/01`) reaches the NKP handlers, and nothing
-    // changes for a pack that only ever reads Trigram.
-    const asUserNum = trigram.trim().toLowerCase().replace(/^user/, '');
-    if (/^\d{1,2}$/.test(asUserNum)) {
-      varStore.set('UserNum', asUserNum.padStart(2, '0'));
+    // bootcamp by user number. The pack's boot module turns the segment into
+    // whatever its own handlers read; a pack without one gets the trigram
+    // above and nothing else.
+    for (const [k, v] of Object.entries(deps.pack.boot.identityFromPath?.(trigram) ?? {})) {
+      varStore.set(k, v);
     }
     for (const [k, v] of Object.entries(extraVars)) varStore.set(k, v);
     const vars: Variables = {

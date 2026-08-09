@@ -70,6 +70,35 @@ display and boot switches, all defaulting to the infiltration game's behaviour:
 | `nav` | A contents menu down the side of the terminal, in the source material's chapters |
 | `speakers` | Who fills a stage's `prompt` role, e.g. `{"tank": "instructor"}` |
 | `identity` | Which captured variable names a player, and what `/admin` calls it |
+| `transports` | Which transports beyond `ctx.nutanix` this game needs, e.g. `["kube"]` |
+| `boot` | Path to the pack's boot module — see below |
+
+### What a game knows at boot
+
+The server owns what every game shares: the Prism endpoint and credentials, the
+host it serves from, the transports themselves. Everything a *particular* game
+wants at boot is its own, and lives in `packs/<id>/boot/`:
+
+- **`variables(ctx)`** returns what to seed into every session. The infiltration
+  game reads its world out of env — the image the player clones, the address
+  their report is mailed to, the production account they are told to log in as.
+  The bootcamp instead asks the fleet, and turns the answers into the ingress
+  addresses its steps name.
+- **`identityFromPath(segment)`** turns the player named in an operator URL
+  (`/api/act/cleanup-all/user01`) into whatever that game's handlers read. The
+  server always seeds `Trigram`; a pack that calls its players something else,
+  or that normalises the value, says so here.
+
+Both are optional, and the split is the point: before it, adding the second game
+meant an `if` in `packages/server/src/index.ts` for its kubeconfig, another for
+its console URL, a `DashboardUrl` default seeded into every session including the
+game that has no dashboard, and a regex naming `UserNum` in an operator route. A
+third game would have added four more. Now it adds a directory.
+
+`transports` is the other half. A pack names what it needs, the server builds it
+and hands it to the checks, the acts and the boot module. Naming nothing costs
+nothing — the infiltration game gets no Kubernetes client at all, where before
+mock mode built one for every pack whether or not anything would ever call it.
 
 ### The contents menu
 
@@ -113,7 +142,24 @@ from the stage before it, it consumes the *namespace* that stage created, so a
 disabled create-project left the storage labs looking fine and failing on the
 cluster. `dependsOn` names the stage instead, and the same fixed-point cascade
 covers it. A prerequisite the pack does not ship is ignored, not fatal: a typo
-in a manifest should not disable a working stage.
+in a manifest should not disable a working stage — but it is not silent either,
+because the stage audit fails on a `dependsOn` naming a stage the pack does not
+have, or one played later.
+
+Both games declare them now. The infiltration game had lost its edges to a
+refactor rather than to a missing feature: since checks began resolving entities
+by name (`{Trigram}-vm`) instead of consuming captured UUIDs, most stages'
+`needs` shrank to `Trigram` and the graph went flat, so `/admin` would happily
+let an operator disable `create-vm` and still call the six stages that act on
+that VM healthy. Fifteen `dependsOn` declarations, read off the checks and the
+stage prompts, put those edges back: disabling `create-vm` now takes six stages
+with it, `create-category` six, `create-project` seven.
+
+The other half of that graph, the variables, is no longer hardcoded either. The
+analysis used to carry a fixed list of "seeded" names — including two that only
+the infiltration game seeds — so a second game's stages could be reported broken
+for needing something the server had, in fact, given them. It now reads the
+names actually seeded for the running pack, boot module included.
 
 One asymmetry worth knowing: a check's `hint` is written for the player and
 `detail` for the operator and the logs, and `/admin` reads only `detail`. The

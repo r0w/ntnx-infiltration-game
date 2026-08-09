@@ -8,6 +8,7 @@
   },
   "version": "0.0.0",
   "description": "Nutanix Cloud Platform infiltration scenario — successor to ntnx-escape-game.",
+  "boot": "./boot/index.ts",
   "checks": "./checks/index.ts",
   "actions": "./actions/index.ts",
   "acts": "./acts/index.ts",

@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { INGRESS_PLACEHOLDER, kommanderDashboardUrl, probeKubeFacts } from '../src/kube-facts';
+import {
+  INGRESS_PLACEHOLDER,
+  kommanderDashboardUrl,
+  probeKubeFacts,
+} from '../../../packs/nkp-bootcamp/boot/kube-facts';
 import type { KubeClient } from '@ntnx-game/engine';
 
 /**

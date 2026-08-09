@@ -25,24 +25,13 @@ export interface ServerConfig {
   clusterProfile: ClusterProfile | undefined;
   typingSpeedMs: number;
   publicDir: string | undefined;
-  gameImageUrl: string;
   /**
-   * Suffix appended to the player's `{Trigram}` to form the report-recipient
-   * + playbook-recipient email address (`{Trigram}{EmailReport}`). Stage 27
-   * + stage 33 prompts both render this; CheckReport asserts the actual
-   * recipient on the report config matches. Default is the same value the
-   * upstream Python game uses (the team's lab inbox).
+   * Kubeconfig for a pack that declares `transports: ["kube"]`. Points at the
+   * *management* cluster; the workload clusters are read from the CAPI
+   * kubeconfig secrets on it, so one file opens the whole fleet. Ignored by a
+   * pack that asks for no Kubernetes transport.
    */
-  gameEmailReport: string;
-  /**
-   * AD user the prompt asks the player to log in as during the "verify
-   * prod user isolation" + live-migrate stages — renders as
-   * `{ProdUsername}` / `{ProdPassword}` in stage 13 + 14 prompts.
-   * Operator-supplied per cluster (matches Python `PRODUSERNAME` /
-   * `PRODPASSWORD`).
-   */
-  gameProdUsername: string;
-  gameProdPassword: string;
+  kubeconfigPath: string;
   /**
    * Host/IP of the game's frontend — the source IP the player is told to
    * lock SSH down to in stage 19 (`Service ssh from this IP {frontendHost}
@@ -125,14 +114,10 @@ export function loadConfig(env = process.env): ServerConfig {
     clusterProfile: asProfile(env.CLUSTER_PROFILE),
     typingSpeedMs: asInt(env.TYPING_SPEED_MS, 15),
     publicDir: env.PUBLIC_DIR,
-    // Default to Jammy (cohérent w/ BP substrate; Noble cidata is unreliable
-    // on some HPoC AHV builds — cf. project_ahv_use_jammy memory).
-    gameImageUrl:
-      env.GAME_IMAGE_URL ||
-      'https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img',
-    gameEmailReport: env.GAME_EMAIL_REPORT || '-secret-message@ntnxlab.com',
-    gameProdUsername: env.GAME_PROD_USERNAME ?? '',
-    gameProdPassword: env.GAME_PROD_PASSWORD ?? '',
+    // `NKP_KUBECONFIG` is the name the deployed blueprints wrote before the
+    // setting became transport-generic; still honoured so an existing VM keeps
+    // working after an image roll that never touches its .env.
+    kubeconfigPath: env.KUBECONFIG_PATH || env.NKP_KUBECONFIG || '',
     gameFrontendHost: env.GAME_FRONTEND_HOST ?? '',
     gameOldPc: env.GAME_OLD_PC ?? '',
     gameOldPcUsername: env.GAME_OLD_PC_USERNAME ?? '',
