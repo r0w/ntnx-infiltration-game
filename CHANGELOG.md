@@ -60,8 +60,17 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- The NKP app you deploy from the terminal now lands on the cluster whose
+  address its Ingress carries, so `https://user09.<ingress>.sslip.io` really
+  serves NGINX instead of returning a 404.
+- Running the whole bootcamp from the operator endpoints no longer reports every
+  step as failed on a cluster where every step actually worked.
+- Replaying the bootcamp for a learner who already reached the dynamic
+  assignment lab no longer sends the second cluster back out of their project.
 - Usage stats now identify a deployment by the machine it runs on, instead of
   reporting the same container address from every install.
+- Usage stats say which game they come from, so the two are no longer counted
+  as one.
 - The bootcamp's learners now appear in `/admin` Users: each pack says which
   captured value names a player, so a user number counts as an identity.
 - When a bootcamp check fails, `/admin` now says what it found, like the
