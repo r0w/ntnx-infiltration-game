@@ -2,12 +2,13 @@ import { Hono } from 'hono';
 import type { Database } from 'bun:sqlite';
 import type { CapabilityFlag, KubeClient, NutanixClient } from '@ntnx-game/engine';
 import { readLcmUpdates } from '@ntnx-game/engine';
-import { probeCapabilities, type CapabilityProbeDetail } from '@ntnx-game/nutanix';
+import type { CapabilityProbeDetail } from '@ntnx-game/nutanix';
 import { HttpError, type SessionService } from '../session-service';
 import { AttemptQueries, SessionQueries, ScoreboardPeerQueries, type AdminSessionRow, type AttemptRow, type ScoreboardPeerRow } from '../db/queries';
 import type { LoadedPack } from '../pack-loader';
 import { analyzeDeps, cascadeDisable, type BrokenStage } from '../dep-analysis';
 import { storeClusterFacts } from '../cluster-facts';
+import { makePackProbes } from '../pack-probes';
 import { readEnabledWipLocales, writeEnabledWipLocales } from '../effective-locales';
 import {
   decodePackConfig,
@@ -318,6 +319,15 @@ export interface AdminLunchStatus {
  * sessions" guard on a trusted LAN.
  */
 export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
+  /** The same context boot hands the pack, for the operator-triggered re-runs. */
+  const bootContext = () => ({
+    mode: deps.nutanix.mode,
+    env: process.env,
+    logger: consoleLogger,
+    transports: { nutanix: deps.nutanix, kube: deps.kube },
+    probes: makePackProbes(deps.nutanix, consoleLogger),
+  });
+
   const router = new Hono();
   // Local HttpError → JSON bridge so the sub-router behaves correctly in
   // isolation (used by tests). The top-level app.onError also catches these
@@ -836,12 +846,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     // Force-refresh: drop the rows the pack is about to re-read, so its
     // `if-absent` facts re-populate too. The operator asked for it explicitly,
     // which is the one case that outranks their own stored value.
-    const facts = await deps.pack.boot.clusterFacts({
-      mode: deps.nutanix.mode,
-      env: process.env,
-      logger: consoleLogger,
-      transports: { nutanix: deps.nutanix, kube: deps.kube },
-    });
+    const facts = await deps.pack.boot.clusterFacts(bootContext());
     for (const f of facts) deps.service.clusterConfig.delete(f.key);
     await storeClusterFacts({
       facts,
@@ -1374,10 +1379,12 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   // MultiNode / ApprovalPolicy).
   router.post('/capabilities/refresh', async (c) => {
     const before = new Set(deps.capabilities);
-    const probe = await probeCapabilities({
-      nutanix: deps.nutanix,
-      logger: consoleLogger,
-    });
+    if (!deps.pack.boot.capabilities) {
+      throw new HttpError(400, 'this game gates no stage on a cluster capability');
+    }
+    // Through the pack, like boot does: the operator re-asks the same questions
+    // this game asked at start-up, not a fixed Prism list the server owns.
+    const probe = await deps.pack.boot.capabilities(bootContext());
     // Mutate in place so the array reference shared by /pack + session
     // route immediately sees the new contents — no need to thread a
     // setter through every consumer.

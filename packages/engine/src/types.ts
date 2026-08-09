@@ -337,6 +337,25 @@ export interface PackTransports {
   kube?: KubeClient;
 }
 
+/**
+ * Ready-made cluster interrogations the server can run on a pack's behalf.
+ *
+ * A pack is loaded as source from `packs/` and the runtime image ships no
+ * `node_modules`, so a pack can only ever *type*-import a workspace package —
+ * the code behind these lives in the server bundle and cannot be reached from
+ * a pack by an import. Handing them over keeps the decision where it belongs
+ * (the pack chooses whether to ask at all, and what to do with the answer)
+ * without pretending a pack can resolve `@ntnx-game/nutanix` at runtime.
+ *
+ * A game on another product simply calls none of them.
+ */
+export interface PackProbes {
+  /** Ask Prism which optional features it offers. */
+  nutanixCapabilities(): Promise<PackCapabilities>;
+  /** Available LCM updates, or `null` while an inventory is rebuilding the list. */
+  lcmAvailableUpdates(): Promise<number | null>;
+}
+
 /** What a pack's boot module is handed. See {@link PackBoot}. */
 export interface PackBootContext {
   /** `mock` reads the pack's fixtures; `live` reaches a real cluster. */
@@ -345,6 +364,7 @@ export interface PackBootContext {
   env: Record<string, string | undefined>;
   logger: Logger;
   transports: PackTransports;
+  probes: PackProbes;
 }
 
 /**

@@ -1,5 +1,5 @@
 import type { CheckContext } from '@ntnx-game/engine';
-import { discoverableNodeSerials } from '@ntnx-game/engine';
+import { discoverableNodeSerials } from '../checks/helpers';
 
 /**
  * Auto-fill: read off the cluster the answer a player would normally type.

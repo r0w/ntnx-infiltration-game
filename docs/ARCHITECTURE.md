@@ -98,6 +98,17 @@ wants at boot is its own, and lives in `packs/<id>/boot/`:
   server keeps one rule for itself, that a value an operator typed in `/admin`
   is never overwritten by a probe.
 
+**One hard rule holds all of this together: a pack may only *type*-import a
+workspace package.** The runtime image bundles the server and copies `packs/`
+beside it, with no `node_modules` anywhere, so a bare specifier in a pack file
+resolves perfectly on a developer's machine and kills the container at boot.
+Types are erased and cost nothing; anything a pack needs at runtime either
+lives in the pack (`checks/helpers.ts` carries its own Prism helpers) or is
+handed to it — which is what `ctx.probes` is for, and why the capability probe
+is *called* by the pack but *implemented* in the server bundle. A test walks
+every pack file and fails on a value import, because this is the kind of
+mistake that passes every local check and only shows up on the cluster.
+
 Alongside them, `pack.json` names an **`autoFill`** module: variable → a
 resolver that reads that prompt's answer off the cluster, for the dev and test
 "fill it for me" button. Those three resolvers named stages 28, 29 and 31 of one

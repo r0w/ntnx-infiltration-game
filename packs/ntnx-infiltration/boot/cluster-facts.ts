@@ -1,5 +1,5 @@
-import type { Logger, NutanixClient, PackClusterFact } from '@ntnx-game/engine';
-import { countLcmAvailableUpdates, discoverableNodeSerials } from '@ntnx-game/engine';
+import type { PackBootContext, PackClusterFact } from '@ntnx-game/engine';
+import { discoverableNodeSerials } from '../checks/helpers';
 
 /**
  * The two cluster answers this game caches instead of re-asking on every
@@ -12,10 +12,9 @@ import { countLcmAvailableUpdates, discoverableNodeSerials } from '@ntnx-game/en
  * the rule that an operator's `/admin` value always wins, belong to the
  * server: see `storeClusterFacts`.
  */
-export async function readClusterFacts(
-  nutanix: NutanixClient,
-  logger: Logger,
-): Promise<PackClusterFact[]> {
+export async function readClusterFacts(ctx: PackBootContext): Promise<PackClusterFact[]> {
+  const { logger } = ctx;
+  const nutanix = ctx.transports.nutanix;
   if (nutanix.mode === 'mock') {
     // The fixtures already shape both checks correctly, and a test suite has no
     // business inventing hardware serials.
@@ -43,7 +42,7 @@ export async function readClusterFacts(
   // wrong answer for the whole event, so an unsettled reading is omitted and
   // the last good value stands.
   try {
-    const count = await countLcmAvailableUpdates(nutanix, logger);
+    const count = await ctx.probes.lcmAvailableUpdates();
     if (count === null) {
       logger.debug('cluster facts: LCM count unreadable or mid-inventory, keeping the last one');
     } else {

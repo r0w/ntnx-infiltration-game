@@ -1,5 +1,4 @@
 import type { PackBootContext, PackCapabilities, PackClusterFact } from '@ntnx-game/engine';
-import { probeCapabilities } from '@ntnx-game/nutanix';
 import { readClusterFacts } from './cluster-facts';
 
 /**
@@ -40,15 +39,11 @@ export function variables({ env }: PackBootContext): Record<string, unknown> {
  * game on another product asks its own, and the engine only ever sees the
  * answers.
  */
-export async function capabilities(ctx: PackBootContext): Promise<PackCapabilities> {
-  const probe = await probeCapabilities({
-    nutanix: ctx.transports.nutanix,
-    logger: ctx.logger,
-  });
-  return { flags: probe.flags, unreachable: probe.unreachable, details: probe.details };
+export function capabilities(ctx: PackBootContext): Promise<PackCapabilities> {
+  return ctx.probes.nutanixCapabilities();
 }
 
 /** See {@link readClusterFacts}: the two slow answers stages 28 and 29 judge against. */
 export function clusterFacts(ctx: PackBootContext): Promise<PackClusterFact[]> {
-  return readClusterFacts(ctx.transports.nutanix, ctx.logger);
+  return readClusterFacts(ctx);
 }

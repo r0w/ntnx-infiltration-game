@@ -49,6 +49,7 @@ bun test -t "lunch lock"                           # by name
 | `cluster-profile.test.ts` | Explicit `hpoc`/`other`, fallback to `other` when unset |
 | `ssh.test.ts` | `/api/ssh/ping` argv validation + probe error remapping |
 | `auto-fill-current.test.ts` | Auto-fillable vars (NodeSerial, NumberUpdates, Runway…) resolve in mock |
+| `pack-imports.test.ts` | The one rule that only breaks in production: a pack may type-import a workspace package, never value-import one |
 | `pack-boot.test.ts` | The per-pack boot seam: which transports and capabilities a pack asks for, the variables it seeds (and its fallbacks), the prompts it can auto-fill, and how each pack reads a player out of an operator URL |
 | `depends-on.test.ts` | `dependsOn` vs `needs`, the fixed-point cascade, seeded variables, and the real cascades both shipped packs declare |
 | `nkp-kube-facts.test.ts` | The bootcamp's boot probe: real ingress addresses when the fleet answers, the published placeholder when it does not, and the console URL built from either |

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { NutanixClient } from '@ntnx-game/engine';
 import { ClusterConfigQueries } from '../src/db/queries';
 import { storeClusterFacts } from '../src/cluster-facts';
+import { makePackProbes } from '../src/pack-probes';
 import { readClusterFacts } from '../../../packs/ntnx-infiltration/boot/cluster-facts';
 
 const SCHEMA = readFileSync(
@@ -64,8 +65,17 @@ function newCfg(): ClusterConfigQueries {
  * contract: a fact the cluster will not give up is omitted, not guessed.
  */
 async function probeInto(cfg: ClusterConfigQueries, nutanix: NutanixClient): Promise<void> {
+  // The real boot context, probes included: the LCM reading still goes through
+  // the server-side helper, which is where the mid-inventory rule lives.
+  const ctx = {
+    mode: nutanix.mode,
+    env: {},
+    logger: silentLogger,
+    transports: { nutanix },
+    probes: makePackProbes(nutanix, silentLogger),
+  };
   await storeClusterFacts({
-    facts: await readClusterFacts(nutanix, silentLogger),
+    facts: await readClusterFacts(ctx),
     cfg,
     logger: silentLogger,
   });

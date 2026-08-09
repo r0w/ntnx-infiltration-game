@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createNutanixClient } from '@ntnx-game/nutanix';
+import { makePackProbes } from './pack-probes';
 import { createKubeClient, createLiveKubeFleet } from '@ntnx-game/kube-transport';
 import { loadConfig } from './config';
 import { consoleLogger } from './logger';
@@ -98,6 +99,7 @@ async function main() {
     env: process.env,
     logger: consoleLogger,
     transports: { nutanix, kube },
+    probes: makePackProbes(nutanix, consoleLogger),
   };
 
   // Which optional features this cluster offers, for the stages that require

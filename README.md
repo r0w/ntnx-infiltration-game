@@ -101,7 +101,7 @@ docs/
    ```
 2. Add the keys to each `packs/<pack>/locales/<code>.json`. Missing keys fall back to the default locale, then to the key itself (a grep-able translator marker).
 3. Add the stage name to `pack.json.stages[]` at the position you want it played.
-4. Export the check function from `packs/<pack>/checks/index.ts`.
+4. Export the check function from `packs/<pack>/checks/index.ts`. Import types from `@ntnx-game/engine` freely, but never *values* - the runtime image ships no `node_modules`, so a value import works locally and kills the container on deploy. Put runtime helpers in the pack, or take them off the context.
 5. (For mock mode) Add a fixture to `packs/<pack>/fixtures.json` keyed by `"METHOD path"`.
 6. Tag with `"impact": "destructive"` if the stage mutates cluster-wide state - it then only runs when the cluster profile is `hpoc`. Tag `"requires": ["NCM"]` (or `IO`, `CalmDSL`, `NodeRemove`) if the stage depends on an optional feature.
 7. Declare `"dependsOn": ["create-vm"]` for each earlier stage whose *cluster state* this one consumes - `needs` only models variables, so without this the `/admin` cascade lets an operator disable a prerequisite and leave this stage looking fine. Then run `bun tooling/audit-stage-deps.ts <pack> --apply` to refresh the derived `needs` / `captures`.
