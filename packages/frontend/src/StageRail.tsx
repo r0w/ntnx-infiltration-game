@@ -124,7 +124,11 @@ function Chapter({
   activeStage: string | null;
   onRead: (stage: string, title: string) => void;
 }) {
-  const flat = useMemo(() => flatten(chapter.items), [chapter.items]);
+  // Headings are structure, not steps: the counter only tallies real stages.
+  const flat = useMemo(
+    () => flatten(chapter.items).filter((i) => i.stage !== undefined),
+    [chapter.items],
+  );
   const done = flat.filter((i) => i.index < currentIndex).length;
   const holdsActive = activeStage !== null && flat.some((i) => i.stage === activeStage);
 
@@ -143,9 +147,9 @@ function Chapter({
       </button>
       {!collapsed && (
         <ul className="rail-list">
-          {chapter.items.map((item) => (
+          {chapter.items.map((item, i) => (
             <Row
-              key={item.stage}
+              key={item.stage ?? `group-${i}`}
               item={item}
               depth={0}
               currentIndex={currentIndex}
@@ -172,19 +176,46 @@ function Row({
   activeStage: string | null;
   onRead: (stage: string, title: string) => void;
 }) {
-  const isActive = item.stage === activeStage;
+  const stage = item.stage;
+  const isActive = stage !== undefined && stage === activeStage;
   const isDone = item.index < currentIndex;
   // Behind the player, or the step they are standing in: both are theirs to
   // re-read. Anything further on is not, and the server refuses it too.
-  const canRead = item.index <= currentIndex;
+  const canRead = stage !== undefined && item.index <= currentIndex;
   const state = isActive ? 'here' : isDone ? 'done' : 'ahead';
+
+  const children = item.items.length > 0 && (
+    <ul className="rail-list">
+      {item.items.map((sub, i) => (
+        <Row
+          key={sub.stage ?? `group-${i}`}
+          item={sub}
+          depth={depth + 1}
+          currentIndex={currentIndex}
+          activeStage={activeStage}
+          onRead={onRead}
+        />
+      ))}
+    </ul>
+  );
+
+  // A heading is structure, not a destination: it names the section its rows
+  // belong to and is never clickable, however far the player has got.
+  if (stage === undefined) {
+    return (
+      <li className={`rail-row rail-row-d${depth} rail-row-group`}>
+        <span className={`rail-group-label is-${isDone ? 'done' : 'ahead'}`}>{item.title}</span>
+        {children}
+      </li>
+    );
+  }
 
   return (
     <li className={`rail-row rail-row-d${depth}`}>
       <button
         type="button"
         className={`rail-link is-${state}${canRead ? '' : ' is-static'}`}
-        onClick={canRead ? () => onRead(item.stage, item.title) : undefined}
+        onClick={canRead ? () => onRead(stage, item.title) : undefined}
         disabled={!canRead}
         title={canRead ? 'Read this step again' : 'Not there yet'}
       >
@@ -194,20 +225,7 @@ function Row({
         <span className="rail-label">{item.title}</span>
         {item.hasCheck && <span className="rail-tag rail-tag-lab">lab</span>}
       </button>
-      {item.items.length > 0 && (
-        <ul className="rail-list">
-          {item.items.map((sub) => (
-            <Row
-              key={sub.stage}
-              item={sub}
-              depth={depth + 1}
-              currentIndex={currentIndex}
-              activeStage={activeStage}
-              onRead={onRead}
-            />
-          ))}
-        </ul>
-      )}
+      {children}
     </li>
   );
 }

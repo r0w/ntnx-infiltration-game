@@ -4,9 +4,14 @@ import type { LoadedPack, PackNavItem } from './pack-loader';
 
 /** A nav row with its title resolved and its position in the run pinned down. */
 export interface ResolvedNavItem {
-  stage: string;
+  /** Absent on a section heading, which groups rows without being one. */
+  stage?: string;
   title: string;
-  /** Position in pack order — what the client compares against to lock a row. */
+  /**
+   * Position in pack order — what the client compares against to lock a row.
+   * A heading borrows the earliest index below it, so it unlocks exactly when
+   * its first page does.
+   */
   index: number;
   /** This stage is validated against the cluster, so it is a lab, not a read. */
   hasCheck: boolean;
@@ -42,6 +47,24 @@ export function resolvePackNav(
   const walk = (items: PackNavItem[]): ResolvedNavItem[] => {
     const out: ResolvedNavItem[] = [];
     for (const item of items) {
+      const children = item.items ? walk(item.items) : [];
+
+      // A heading: no stage of its own, so it lives entirely off its children.
+      // One with nothing left under it is a label over emptiness — drop it.
+      if (item.stage === undefined) {
+        if (children.length === 0) {
+          onWarn?.(`pack nav has a heading with no reachable rows under it: ${item.title}`);
+          continue;
+        }
+        out.push({
+          title: title(item.title),
+          index: Math.min(...children.map((c) => c.index)),
+          hasCheck: false,
+          items: children,
+        });
+        continue;
+      }
+
       const stage = byName.get(item.stage);
       if (!stage) {
         onWarn?.(`pack nav names a stage the pack does not have: ${item.stage}`);
@@ -52,7 +75,7 @@ export function resolvePackNav(
         title: title(item.title),
         index: stage.index,
         hasCheck: !!stage.check,
-        items: item.items ? walk(item.items) : [],
+        items: children,
       });
     }
     return out;

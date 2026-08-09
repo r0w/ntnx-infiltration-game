@@ -94,11 +94,13 @@
             },
             {
               "stage": "file-storage",
-              "title": "nkp.nav.file-storage"
-            },
-            {
-              "stage": "wordpress-ingress",
-              "title": "nkp.nav.wordpress-ingress"
+              "title": "nkp.nav.file-storage",
+              "items": [
+                {
+                  "stage": "wordpress-ingress",
+                  "title": "nkp.nav.wordpress-ingress"
+                }
+              ]
             }
           ]
         },
@@ -136,11 +138,13 @@
       "items": [
         {
           "stage": "gitops-source",
-          "title": "nkp.nav.gitops-source"
-        },
-        {
-          "stage": "gitops-app",
-          "title": "nkp.nav.gitops-app"
+          "title": "nkp.nav.gitops-source",
+          "items": [
+            {
+              "stage": "gitops-app",
+              "title": "nkp.nav.gitops-app"
+            }
+          ]
         },
         {
           "stage": "dynamic-gitops",
@@ -155,44 +159,47 @@
         {
           "stage": "conclusion",
           "title": "nkp.nav.takeaways"
-        },
+        }
+      ]
+    },
+    {
+      "id": "optional-labs",
+      "title": "nkp.nav.chapter.optional-labs",
+      "optional": true,
+      "items": [
         {
           "stage": "ndk",
           "title": "nkp.nav.ndk"
-        }
-      ]
-    },
-    {
-      "id": "deploy-app",
-      "title": "nkp.nav.chapter.deploy-app",
-      "optional": true,
-      "items": [
-        {
-          "stage": "web-ide",
-          "title": "nkp.nav.web-ide"
         },
         {
-          "stage": "deploy-app",
-          "title": "nkp.nav.deploy-app"
-        },
-        {
-          "stage": "expose-service",
-          "title": "nkp.nav.expose-service"
-        }
-      ]
-    },
-    {
-      "id": "expose-prod",
-      "title": "nkp.nav.chapter.expose-prod",
-      "optional": true,
-      "items": [
-        {
-          "stage": "loadbalancer",
-          "title": "nkp.nav.loadbalancer"
-        },
-        {
-          "stage": "ingress",
-          "title": "nkp.nav.ingress"
+          "title": "nkp.nav.group.deploy-app",
+          "items": [
+            {
+              "stage": "web-ide",
+              "title": "nkp.nav.web-ide"
+            },
+            {
+              "stage": "deploy-app",
+              "title": "nkp.nav.deploy-app"
+            },
+            {
+              "stage": "expose-service",
+              "title": "nkp.nav.expose-service"
+            },
+            {
+              "title": "nkp.nav.group.expose-prod",
+              "items": [
+                {
+                  "stage": "loadbalancer",
+                  "title": "nkp.nav.loadbalancer"
+                },
+                {
+                  "stage": "ingress",
+                  "title": "nkp.nav.ingress"
+                }
+              ]
+            }
+          ]
         }
       ]
     }

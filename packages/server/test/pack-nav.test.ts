@@ -98,4 +98,39 @@ describe('resolvePackNav', () => {
     expect(chapters).toEqual([]);
     expect(warnings).toEqual(['pack nav names a stage the pack does not have: ghost']);
   });
+  // The bootcamp's own sidebar nests "Expose app on production" under another
+  // section, and that section is a heading with no page of its own.
+  test('a heading carries no stage and borrows its first child\'s position', () => {
+    const [chapter] = resolvePackNav(
+      pack([
+        {
+          id: 'a',
+          title: 'c.a',
+          items: [
+            { title: 't.one', items: [{ stage: 'two', title: 't.two' }, { stage: 'three', title: 't.three' }] },
+          ],
+        },
+      ]),
+      'en',
+    );
+    const heading = chapter!.items[0]!;
+    expect(heading.stage).toBeUndefined();
+    expect(heading.hasCheck).toBe(false);
+    expect(heading.index).toBe(1);
+    expect(heading.items.map((i) => i.stage)).toEqual(['two', 'three']);
+  });
+
+  test('a heading left with no rows under it is dropped, loudly', () => {
+    const warnings: string[] = [];
+    const chapters = resolvePackNav(
+      pack([{ id: 'a', title: 'c.a', items: [{ title: 't.one', items: [{ stage: 'ghost', title: 't.two' }] }] }]),
+      'en',
+      (m) => warnings.push(m),
+    );
+    expect(chapters).toEqual([]);
+    expect(warnings).toEqual([
+      'pack nav names a stage the pack does not have: ghost',
+      'pack nav has a heading with no reachable rows under it: t.one',
+    ]);
+  });
 });

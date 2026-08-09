@@ -3295,10 +3295,28 @@ a.terminal-link:visited {
   padding: 0;
 }
 /* The guide line is the hierarchy: one hairline per level, running through
-   the glyph gutter the rows share. */
+   the glyph gutter the rows share. Every level below the first indents the
+   same way, so the menu goes as deep as the source material without new rules. */
 .rail-row-d0 > .rail-link { padding-left: 22px; }
-.rail-row-d1 { border-left: 1px solid #1b232b; margin-left: 22px; }
-.rail-row-d1 > .rail-link { padding-left: 16px; }
+.rail-row-d0 > .rail-group-label { padding-left: 22px; }
+.rail-row:not(.rail-row-d0) { border-left: 1px solid #1b232b; margin-left: 22px; }
+.rail-row:not(.rail-row-d0) > .rail-link,
+.rail-row:not(.rail-row-d0) > .rail-group-label { padding-left: 16px; }
+
+/* A section heading: named like a row, weighted like a label, never a target.
+   Letter-spacing is what tells the eye it is not a step. */
+.rail-group-label {
+  display: block;
+  padding-top: 7px;
+  padding-bottom: 3px;
+  padding-right: 10px;
+  border-left: 2px solid transparent;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #55636f;
+}
+.rail-group-label.is-done { color: #6f8494; }
 
 .rail-link {
   width: 100%;

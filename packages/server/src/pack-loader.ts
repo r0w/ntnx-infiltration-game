@@ -18,12 +18,14 @@ import {
 } from '@ntnx-game/engine';
 
 /**
- * One row in a pack's reading menu. `stage` names a stage in `stages`;
- * `title` is a locale key, resolved per session. Rows nest one level, which
- * is as deep as the NKP bootcamp's own sidebar goes.
+ * One row in a pack's reading menu. `title` is a locale key, resolved per
+ * session. `stage` names a stage in `stages` — omit it for a section heading
+ * that only groups the rows under it, which the NKP bootcamp's own sidebar
+ * needs: "Expose app on production" is a heading three levels down, not a page.
+ * Rows nest as deep as the source material does.
  */
 export interface PackNavItem {
-  stage: string;
+  stage?: string;
   title: string;
   items?: PackNavItem[];
 }

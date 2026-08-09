@@ -149,9 +149,10 @@ export interface PackInfo {
   }>;
 }
 
-/** One row of the pack's reading menu. Nests one level, like the bootcamp. */
+/** One row of the pack's reading menu. Nests as deep as the source material. */
 export interface PackNavItem {
-  stage: string;
+  /** Absent on a section heading, which groups rows without being one. */
+  stage?: string;
   title: string;
   /** Position in pack order — compared against the player's own position. */
   index: number;

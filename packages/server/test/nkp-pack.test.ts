@@ -15,7 +15,7 @@ const ROOT = resolve(import.meta.dir, '../../..');
 const PACK = join(ROOT, 'packs/nkp-bootcamp');
 const FIXTURES = join(PACK, 'fixtures.json');
 
-type NavItem = { stage: string; title: string; items?: NavItem[] };
+type NavItem = { stage?: string; title: string; items?: NavItem[] };
 type NavChapter = { id: string; title: string; items: NavItem[] };
 type Manifest = { stages: string[]; supportedLocales: string[]; nav?: NavChapter[] };
 const manifest = JSON.parse(readFileSync(join(PACK, 'pack.json'), 'utf8')) as Manifest;
@@ -36,9 +36,15 @@ const stages: Stage[] = manifest.stages.map(
 function navKeys(items: NavItem[]): string[] {
   return items.flatMap((i) => [i.title, ...navKeys(i.items ?? [])]);
 }
-/** Menu rows in reading order, nested rows folded in where they appear. */
+/**
+ * Menu rows in reading order, nested rows folded in where they appear.
+ * Section headings carry no stage, so they contribute only their children.
+ */
 function navStages(items: NavItem[]): string[] {
-  return items.flatMap((i) => [i.stage, ...navStages(i.items ?? [])]);
+  return items.flatMap((i) => [
+    ...(i.stage === undefined ? [] : [i.stage]),
+    ...navStages(i.items ?? []),
+  ]);
 }
 const messageKeys = [
   ...stages.flatMap((s) => s.messages),
