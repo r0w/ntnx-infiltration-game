@@ -9,9 +9,11 @@
   "version": "0.0.0",
   "description": "Nutanix Cloud Platform infiltration scenario — successor to ntnx-escape-game.",
   "boot": "./boot/index.ts",
+  "sshConsole": true,
   "checks": "./checks/index.ts",
   "actions": "./actions/index.ts",
   "acts": "./acts/index.ts",
+  "autoFill": "./acts/auto-fill.ts",
   "cleanups": "./acts/index.ts",
   "stagesDir": "./stages",
   "stages": [

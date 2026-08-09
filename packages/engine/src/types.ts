@@ -332,6 +332,8 @@ export type PackTransport = 'kube';
 
 /** The transports the server built for this pack, by name. */
 export interface PackTransports {
+  /** Prism Central. Always built — every pack gets one, used or not. */
+  nutanix: NutanixClient;
   kube?: KubeClient;
 }
 
@@ -343,6 +345,62 @@ export interface PackBootContext {
   env: Record<string, string | undefined>;
   logger: Logger;
   transports: PackTransports;
+}
+
+/**
+ * What a pack's capability probe found: which optional features the cluster
+ * offers, so stages that `requires` them are gated rather than left to fail.
+ *
+ * The flags are the pack's own vocabulary — see {@link CapabilityFlag} — and so
+ * is the probing. A game on another product asks that product what it can do.
+ */
+export interface PackCapabilities {
+  flags: CapabilityFlag[];
+  /** True when the cluster answered nothing at all, so boot can say so loudly. */
+  unreachable: boolean;
+  /** One row per question asked, shown in `/admin` so an operator can see
+   *  *why* a stage is gated rather than only that it is. */
+  details: CapabilityProbeDetail[];
+}
+
+/**
+ * One question a capability probe asked and what came back. Deliberately
+ * product-neutral: `method` and `path` describe an HTTP probe because that is
+ * what both games do, but nothing here names Prism.
+ */
+export interface CapabilityProbeDetail {
+  flag: CapabilityFlag;
+  detected: boolean;
+  method: string;
+  path: string;
+  detail: string;
+  durationMs: number;
+  /**
+   * True when the probe failed before getting a response (DNS, TCP, TLS, or
+   * abort/timeout), false when it got an error status back or succeeded. This
+   * is what separates "the cluster is unreachable" from "that feature is not
+   * deployed here" — the second is normal, the first means VPN or endpoint.
+   */
+  transportError: boolean;
+  /** Lowest syscall code (`ENETUNREACH` / `ECONNREFUSED` / …) when known. */
+  transportCode?: string;
+}
+
+/**
+ * One slow-to-read cluster fact, cached in `cluster_config` so checks don't
+ * re-query it on every player attempt.
+ *
+ * `write` is the pack's call because the two facts the infiltration game caches
+ * want different things: a node-serial list is read once and kept, while the
+ * LCM count is re-read at every boot because it moves. Neither ever overwrites
+ * a value an operator typed in `/admin` — that rule is the server's, and it
+ * holds whatever a pack asks for.
+ */
+export interface PackClusterFact {
+  key: string;
+  value: unknown;
+  /** `if-absent` (default) leaves any existing row alone; `refresh` replaces a probed one. */
+  write?: 'if-absent' | 'refresh';
 }
 
 /**
@@ -363,6 +421,21 @@ export interface PackBoot {
   variables?(
     ctx: PackBootContext,
   ): Promise<Record<string, unknown>> | Record<string, unknown>;
+  /**
+   * Ask the cluster which optional features it offers, for the stages that
+   * `requires` them. A pack that gates nothing omits this and the server asks
+   * nothing — which is not merely an optimisation: these queries carry no
+   * deadline, so one slow answer would hold a game short of listening for the
+   * facts it never reads.
+   */
+  capabilities?(ctx: PackBootContext): Promise<PackCapabilities> | PackCapabilities;
+  /**
+   * Slow facts worth caching once instead of on every check. Return only what
+   * was actually read: an omitted key leaves whatever is already stored, which
+   * is how a mid-flight reading (an LCM inventory in progress) declines to pin
+   * a wrong answer for the whole event.
+   */
+  clusterFacts?(ctx: PackBootContext): Promise<PackClusterFact[]> | PackClusterFact[];
   /**
    * Which variables identify the player named in an operator endpoint's path
    * segment (`/api/act/cleanup-all/user01`). The server always seeds

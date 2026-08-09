@@ -59,9 +59,11 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
   game carries its own.
 - Screenshots in the terminal are wider and centred, so the detail a step points
   at is readable without enlarging.
-- Each game now carries its own settings and its own Kubernetes access instead
-  of the server holding both games' at once; the kubeconfig setting is named
-  `KUBECONFIG_PATH`, with the old `NKP_KUBECONFIG` still accepted.
+- Each game now carries its own settings, its own cluster questions and its own
+  Kubernetes access instead of the server holding both games' at once; the
+  kubeconfig setting is named `KUBECONFIG_PATH`, with the old `NKP_KUBECONFIG`
+  still accepted.
+- The bootcamp no longer serves the infiltration game's ops console at `/ssh`.
 - The Pack tab now opens with the whole run in play order, colour-coded by what
   each stage will do, and the stage list can be filtered and searched.
 - The prerequisites runbook now asks which project to use instead of assuming

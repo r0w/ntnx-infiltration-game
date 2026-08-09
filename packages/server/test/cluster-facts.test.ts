@@ -5,7 +5,8 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { NutanixClient } from '@ntnx-game/engine';
 import { ClusterConfigQueries } from '../src/db/queries';
-import { refreshLcmCount } from '../src/cluster-config-probe';
+import { storeClusterFacts } from '../src/cluster-facts';
+import { readClusterFacts } from '../../../packs/ntnx-infiltration/boot/cluster-facts';
 
 const SCHEMA = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), '../src/db/schema.sql'),
@@ -48,29 +49,47 @@ function newCfg(): ClusterConfigQueries {
   return new ClusterConfigQueries(db);
 }
 
-// Stage 29 judges against this row while an inventory rebuilds the live count,
-// so it must stay true: refreshed whenever LCM is quiet, never with noise, and
-// never over the operator's own value — that value IS the escape hatch for the
-// day our count stops matching the LCM page.
-describe('refreshLcmCount', () => {
+/**
+ * The reading and the storing are now two halves — the pack asks its cluster,
+ * the server decides what may be overwritten — so what these pin is the pair
+ * composed, which is the only thing stage 29 actually depends on.
+ *
+ * Stage 29 judges against this row while an inventory rebuilds the live count,
+ * so it must stay true: refreshed whenever LCM is quiet, never with noise, and
+ * never over the operator's own value — that value IS the escape hatch for the
+ * day our count stops matching the LCM page.
+ *
+ * The fake PC below answers no discover-unconfigured-nodes call, so the serials
+ * fact is simply absent from every run here. That is the other half of the
+ * contract: a fact the cluster will not give up is omitted, not guessed.
+ */
+async function probeInto(cfg: ClusterConfigQueries, nutanix: NutanixClient): Promise<void> {
+  await storeClusterFacts({
+    facts: await readClusterFacts(nutanix, silentLogger),
+    cfg,
+    logger: silentLogger,
+  });
+}
+
+describe('the LCM count stage 29 judges against', () => {
   test('refreshes the probe value when LCM is quiet', async () => {
     const cfg = newCfg();
     cfg.set('lcm_available_updates', 4, 'probe');
-    await refreshLcmCount({ nutanix: fakePc(6), cfg, logger: silentLogger });
+    await probeInto(cfg, fakePc(6));
     expect(cfg.get('lcm_available_updates')).toBe(6);
   });
 
   test('writes nothing while an inventory is rebuilding the list', async () => {
     const cfg = newCfg();
     cfg.set('lcm_available_updates', 6, 'probe');
-    await refreshLcmCount({ nutanix: fakePc(6, true), cfg, logger: silentLogger });
+    await probeInto(cfg, fakePc(6, true));
     expect(cfg.get('lcm_available_updates')).toBe(6); // kept, not overwritten with the wiped 0
   });
 
   test('never overwrites the operator', async () => {
     const cfg = newCfg();
     cfg.set('lcm_available_updates', 7, 'admin');
-    await refreshLcmCount({ nutanix: fakePc(6), cfg, logger: silentLogger });
+    await probeInto(cfg, fakePc(6));
     const row = cfg.getRow<number>('lcm_available_updates');
     expect(row).toEqual({ value: 7, source: 'admin' });
   });
@@ -78,7 +97,7 @@ describe('refreshLcmCount', () => {
   test('is a no-op in mock mode', async () => {
     const cfg = newCfg();
     const mock = { mode: 'mock', request: async () => ({}) } as unknown as NutanixClient;
-    await refreshLcmCount({ nutanix: mock, cfg, logger: silentLogger });
+    await probeInto(cfg, mock);
     expect(cfg.get('lcm_available_updates')).toBeUndefined();
   });
 });

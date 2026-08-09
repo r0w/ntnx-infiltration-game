@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { createNutanixClient, probeCapabilities } from '@ntnx-game/nutanix';
+import { createNutanixClient } from '@ntnx-game/nutanix';
 import { createKubeClient, createLiveKubeFleet } from '@ntnx-game/kube-transport';
 import { loadConfig } from './config';
 import { consoleLogger } from './logger';
@@ -93,16 +93,25 @@ async function main() {
     }
   }
 
-  // Both Prism interrogations below answer questions only the infiltration
-  // game's stages ask, and neither carries a deadline — so for a pack that
-  // never reads the answers they are not just wasted work, they are a way for
-  // the server to never start listening. See PackManifest.clusterFacts.
-  const wantsClusterFacts = pack.manifest.clusterFacts !== false;
-  const probe = wantsClusterFacts
-    ? await probeCapabilities({ nutanix, logger: consoleLogger })
+  const bootCtx = {
+    mode: transportMode,
+    env: process.env,
+    logger: consoleLogger,
+    transports: { nutanix, kube },
+  };
+
+  // Which optional features this cluster offers, for the stages that require
+  // them. The pack does the asking, because the questions are its own: a game
+  // on another product probes that product. A pack that gates nothing answers
+  // nothing, and boot skips a round of no-deadline queries it would only throw
+  // away — the difference between a slow start and never listening at all.
+  const probe = pack.boot.capabilities
+    ? await pack.boot.capabilities(bootCtx)
     : { flags: [], unreachable: false, details: [] };
-  if (!wantsClusterFacts) {
-    consoleLogger.info('cluster-facts probes skipped', { pack: pack.manifest.id });
+  if (!pack.boot.capabilities) {
+    consoleLogger.info('capability probe skipped (pack gates nothing)', {
+      pack: pack.manifest.id,
+    });
   }
 
   // Loud aggregate diagnostic when the cluster is fully unreachable in
@@ -118,22 +127,21 @@ async function main() {
     });
   }
 
-  // Snapshot slow-to-query cluster facts (rackable-unit serials, LCM
-  // update count) into SQLite so checks don't hit the live endpoints
-  // on every player attempt. Skipped in mock mode; failures degrade
-  // to "live query at check-time" via the existing fallback paths.
-  // Operator-edited rows are sticky (probe never overwrites them).
-  if (transportMode === 'live' && !probe.unreachable && wantsClusterFacts) {
+  // Snapshot the pack's slow-to-read cluster facts into SQLite so checks don't
+  // hit the live endpoints on every player attempt. Failures degrade to "live
+  // query at check-time" via the existing fallback paths, and an operator's
+  // `/admin` edit is never overwritten — see storeClusterFacts.
+  if (transportMode === 'live' && !probe.unreachable && pack.boot.clusterFacts) {
     try {
       const { ClusterConfigQueries } = await import('./db/queries');
-      const { probeClusterConfig } = await import('./cluster-config-probe');
-      await probeClusterConfig({
-        nutanix,
+      const { storeClusterFacts } = await import('./cluster-facts');
+      await storeClusterFacts({
+        facts: await pack.boot.clusterFacts(bootCtx),
         cfg: new ClusterConfigQueries(db),
         logger: consoleLogger,
       });
     } catch (err) {
-      consoleLogger.warn('cluster-config probe failed', {
+      consoleLogger.warn('cluster-facts probe failed', {
         err: err instanceof Error ? err.message : String(err),
       });
     }
@@ -168,15 +176,7 @@ async function main() {
   // env settings, or addresses probed off the cluster it was asked for. A pack
   // without a boot module adds nothing.
   if (pack.boot.variables) {
-    Object.assign(
-      initialVariables,
-      await pack.boot.variables({
-        mode: transportMode,
-        env: process.env,
-        logger: consoleLogger,
-        transports: { kube },
-      }),
-    );
+    Object.assign(initialVariables, await pack.boot.variables(bootCtx));
   }
 
   // NIG Central stats emitter — inert unless NIG_CENTRAL_URL is set.

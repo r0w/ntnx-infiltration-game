@@ -2,6 +2,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import type {
   ActFunction,
+  CheckContext,
   ActionFunction,
   CheckFunction,
   CleanupFunction,
@@ -53,20 +54,6 @@ export interface PackManifest {
   title?: string;
   version: string;
   description?: string;
-  /**
-   * Whether this pack's stages read Nutanix cluster facts.
-   *
-   * When true (the default), boot runs two Prism interrogations: the capability
-   * probe, which decides what a cluster can play (NCM present? spare node?
-   * Intelligent Operations on?), and the cluster-config snapshot, which caches
-   * slow answers like rackable-unit serials and the LCM update count. Both
-   * exist to answer questions only the infiltration game's stages ask.
-   *
-   * Set `false` and boot skips both. That is not merely an optimisation: these
-   * queries have no deadline, so one slow answer holds the server short of
-   * listening, and a pack that never reads the answers would wait for nothing.
-   */
-  clusterFacts?: boolean;
   /**
    * Park on a "press Enter" after every screenshot. See
    * {@link StageRunnerOptions.pauseAfterImages}. Off by default.
@@ -127,6 +114,20 @@ export interface PackManifest {
    */
   acts?: string;
   /**
+   * Path (relative to pack root) to the module exporting `autoFill` — a map
+   * from variable name to a resolver that reads the answer off the cluster.
+   * Powers the dev/test "fill it for me" button on a stage the player would
+   * otherwise have to type into. Optional: no entry, no auto-fill.
+   */
+  autoFill?: string;
+  /**
+   * Whether this pack ships the SSH/ops console at `/ssh`. It belongs to the
+   * infiltration game, whose stage 19 has the player lock SSH down to one
+   * address; a bootcamp has no use for it and should not serve its endpoints.
+   * Off by default.
+   */
+  sshConsole?: boolean;
+  /**
    * Path (relative to pack root) to the module exporting `cleanups` — a map
    * from stage name to {@link CleanupFunction}. Optional: stages without a
    * cleanup aren't undone by the bulk-cleanup admin endpoint.
@@ -164,8 +165,13 @@ export interface LoadedPack {
   cleanups: CleanupRegistry;
   /** The pack's boot hooks, `{}` when it declares none. */
   boot: PackBoot;
+  /** Variable name → the resolver that reads its answer off the cluster. */
+  autoFill: Record<string, AutoFillResolver>;
   bundle: LocaleBundle;
 }
+
+/** Reads one stage's expected answer off the cluster. `null` = cannot tell. */
+export type AutoFillResolver = (ctx: CheckContext) => Promise<string | number | null>;
 
 export async function loadPack(packsDir: string, packId: string): Promise<LoadedPack> {
   const dir = resolve(packsDir, packId);
@@ -183,10 +189,11 @@ export async function loadPack(packsDir: string, packId: string): Promise<Loaded
     ? await loadCleanups(resolve(dir, manifest.cleanups))
     : new CleanupRegistry();
   const boot = manifest.boot ? await loadBoot(resolve(dir, manifest.boot)) : {};
+  const autoFill = manifest.autoFill ? await loadAutoFill(resolve(dir, manifest.autoFill)) : {};
   const bundle = manifest.locales
     ? await loadLocaleBundle(resolve(dir, manifest.locales), manifest)
     : emptyBundleFromManifest(manifest);
-  return { manifest, dir, stages, checks, actions, acts, cleanups, boot, bundle };
+  return { manifest, dir, stages, checks, actions, acts, cleanups, boot, autoFill, bundle };
 }
 
 /**
@@ -197,11 +204,31 @@ export async function loadPack(packsDir: string, packId: string): Promise<Loaded
 async function loadBoot(modulePath: string): Promise<PackBoot> {
   const mod = (await import(modulePath)) as Record<string, unknown>;
   const exported = (mod.boot ?? mod.default ?? mod) as Partial<PackBoot>;
+  const hook = <K extends keyof PackBoot>(name: K): PackBoot[K] =>
+    typeof exported[name] === 'function' ? exported[name] : undefined;
   return {
-    variables: typeof exported.variables === 'function' ? exported.variables : undefined,
-    identityFromPath:
-      typeof exported.identityFromPath === 'function' ? exported.identityFromPath : undefined,
+    variables: hook('variables'),
+    capabilities: hook('capabilities'),
+    clusterFacts: hook('clusterFacts'),
+    identityFromPath: hook('identityFromPath'),
   };
+}
+
+/** Same contract as the registries: a module that exports nothing usable is
+ *  an empty map, because auto-fill is a convenience and never load-bearing. */
+async function loadAutoFill(modulePath: string): Promise<Record<string, AutoFillResolver>> {
+  const out: Record<string, AutoFillResolver> = {};
+  try {
+    const mod = (await import(modulePath)) as Record<string, unknown>;
+    const exported = (mod.autoFill ?? {}) as Record<string, unknown>;
+    for (const [variable, fn] of Object.entries(exported)) {
+      if (typeof fn === 'function') out[variable] = fn as AutoFillResolver;
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes('Cannot find module')) throw err;
+  }
+  return out;
 }
 
 async function loadStages(dir: string, order: string[]): Promise<StageDefinition[]> {

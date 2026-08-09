@@ -1,4 +1,6 @@
-import type { PackBootContext } from '@ntnx-game/engine';
+import type { PackBootContext, PackCapabilities, PackClusterFact } from '@ntnx-game/engine';
+import { probeCapabilities } from '@ntnx-game/nutanix';
+import { readClusterFacts } from './cluster-facts';
 
 /**
  * Boot hooks for the infiltration game.
@@ -26,4 +28,27 @@ export function variables({ env }: PackBootContext): Record<string, unknown> {
     ProdUsername: env.GAME_PROD_USERNAME ?? '',
     ProdPassword: env.GAME_PROD_PASSWORD ?? '',
   };
+}
+
+/**
+ * Which optional Prism features this cluster has, so the stages that need them
+ * are gated rather than left to fail in front of a player: NCM for the
+ * playbook and blueprint stages, a spare node for the cluster expansion,
+ * Intelligent Operations for the security dashboard, and so on.
+ *
+ * The questions are Prism's, which is why they are asked from here. Another
+ * game on another product asks its own, and the engine only ever sees the
+ * answers.
+ */
+export async function capabilities(ctx: PackBootContext): Promise<PackCapabilities> {
+  const probe = await probeCapabilities({
+    nutanix: ctx.transports.nutanix,
+    logger: ctx.logger,
+  });
+  return { flags: probe.flags, unreachable: probe.unreachable, details: probe.details };
+}
+
+/** See {@link readClusterFacts}: the two slow answers stages 28 and 29 judge against. */
+export function clusterFacts(ctx: PackBootContext): Promise<PackClusterFact[]> {
+  return readClusterFacts(ctx.transports.nutanix, ctx.logger);
 }

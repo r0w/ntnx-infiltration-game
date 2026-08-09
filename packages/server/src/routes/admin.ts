@@ -1,13 +1,13 @@
 import { Hono } from 'hono';
 import type { Database } from 'bun:sqlite';
-import type { CapabilityFlag, NutanixClient } from '@ntnx-game/engine';
+import type { CapabilityFlag, KubeClient, NutanixClient } from '@ntnx-game/engine';
 import { readLcmUpdates } from '@ntnx-game/engine';
 import { probeCapabilities, type CapabilityProbeDetail } from '@ntnx-game/nutanix';
 import { HttpError, type SessionService } from '../session-service';
 import { AttemptQueries, SessionQueries, ScoreboardPeerQueries, type AdminSessionRow, type AttemptRow, type ScoreboardPeerRow } from '../db/queries';
 import type { LoadedPack } from '../pack-loader';
 import { analyzeDeps, cascadeDisable, type BrokenStage } from '../dep-analysis';
-import { probeClusterConfig } from '../cluster-config-probe';
+import { storeClusterFacts } from '../cluster-facts';
 import { readEnabledWipLocales, writeEnabledWipLocales } from '../effective-locales';
 import {
   decodePackConfig,
@@ -36,6 +36,8 @@ import { EMAIL_RE, substituteSeat, substituteVars } from '@ntnx-game/shared';
 export interface AdminRoutesDeps {
   db: Database;
   pack: LoadedPack;
+  /** Handed to the pack's cluster-fact refresh, for a pack that reads k8s. */
+  kube?: KubeClient;
   /** Read from config; default `nutanix/4u`. See config.ts for rationale. */
   adminPassword: string;
   /**
@@ -828,13 +830,21 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     if (deps.nutanix.mode !== 'live') {
       throw new HttpError(400, `cluster-config refresh disabled in ${deps.nutanix.mode} mode`);
     }
-    // Force-refresh: drop existing rows so the probe re-populates from
-    // the cluster (the probe's setIfAbsent semantics protect operator
-    // edits, but here the operator explicitly asked to re-fetch).
-    deps.service.clusterConfig.delete('discoverable_node_serials');
-    deps.service.clusterConfig.delete('lcm_available_updates');
-    await probeClusterConfig({
-      nutanix: deps.nutanix,
+    if (!deps.pack.boot.clusterFacts) {
+      throw new HttpError(400, 'this game caches no cluster facts');
+    }
+    // Force-refresh: drop the rows the pack is about to re-read, so its
+    // `if-absent` facts re-populate too. The operator asked for it explicitly,
+    // which is the one case that outranks their own stored value.
+    const facts = await deps.pack.boot.clusterFacts({
+      mode: deps.nutanix.mode,
+      env: process.env,
+      logger: consoleLogger,
+      transports: { nutanix: deps.nutanix, kube: deps.kube },
+    });
+    for (const f of facts) deps.service.clusterConfig.delete(f.key);
+    await storeClusterFacts({
+      facts,
       cfg: deps.service.clusterConfig,
       logger: consoleLogger,
     });

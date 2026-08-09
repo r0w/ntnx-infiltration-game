@@ -2,7 +2,6 @@
   "id": "nkp-bootcamp",
   "name": "NKP",
   "title": "NKP Fundamentals",
-  "clusterFacts": false,
   "pauseAfterImages": true,
   "imageCaptions": true,
   "speakers": {

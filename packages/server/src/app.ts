@@ -188,12 +188,18 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
       clusterProfile: deps.clusterProfile,
     }),
   );
-  app.route('/api/ssh', buildSshRoutes());
+  // The ops console belongs to the infiltration game, whose stage 19 has the
+  // player lock SSH down to one address. A pack that does not ship it should
+  // not serve endpoints that spawn `ping` on its behalf.
+  if (deps.pack.manifest.sshConsole === true) {
+    app.route('/api/ssh', buildSshRoutes());
+  }
   app.route(
     '/api/admin',
     buildAdminRoutes({
       db: deps.db,
       pack: deps.pack,
+      kube: deps.kube,
       adminPassword: deps.adminPassword,
       service,
       nutanix: deps.nutanix,

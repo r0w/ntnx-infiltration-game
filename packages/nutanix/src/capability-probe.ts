@@ -1,25 +1,8 @@
-import type { CapabilityFlag, Logger, NutanixClient } from '@ntnx-game/engine';
+import type { CapabilityProbeDetail, CapabilityFlag, Logger, NutanixClient } from '@ntnx-game/engine';
 import { discoverableNodeSerials } from '@ntnx-game/engine';
 import { NutanixTransportError } from './errors';
 
-export interface CapabilityProbeDetail {
-  flag: CapabilityFlag;
-  detected: boolean;
-  method: string;
-  path: string;
-  detail: string;
-  durationMs: number;
-  /**
-   * True when the probe failed before getting an HTTP response (DNS,
-   * TCP, TLS, or abort/timeout). False when the probe got a 4xx/5xx
-   * back, OR when it succeeded. Distinguishes "PC is unreachable"
-   * from "endpoint not deployed on this PC" — the latter is normal,
-   * the former usually means VPN/firewall/wrong endpoint.
-   */
-  transportError: boolean;
-  /** Lowest syscall code (`ENETUNREACH` / `ECONNREFUSED` / …) when known. */
-  transportCode?: string;
-}
+export type { CapabilityProbeDetail };
 
 export interface CapabilityProbeResult {
   flags: CapabilityFlag[];

@@ -89,6 +89,37 @@ describe('pack boot module', () => {
   });
 });
 
+describe('what a pack asks its cluster', () => {
+  test('the infiltration game probes capabilities; the bootcamp asks nothing', async () => {
+    const ncp = await loadPack(PACKS, 'ntnx-infiltration');
+    const nkp = await loadPack(PACKS, 'nkp-bootcamp');
+    expect(typeof ncp.boot.capabilities).toBe('function');
+    expect(typeof ncp.boot.clusterFacts).toBe('function');
+    // The bootcamp gates no stage on an optional Prism feature and caches no
+    // Prism fact, so boot must not spend a round of deadline-free queries on
+    // answers nobody reads. Absent hooks, not a flag the server interprets.
+    expect(nkp.boot.capabilities).toBeUndefined();
+    expect(nkp.boot.clusterFacts).toBeUndefined();
+  });
+
+  test('the infiltration game answers the three prompts it can fill', async () => {
+    const ncp = await loadPack(PACKS, 'ntnx-infiltration');
+    expect(Object.keys(ncp.autoFill).sort()).toEqual(['NodeSerial', 'NumberUpdates', 'Runway']);
+  });
+
+  test('the bootcamp fills nothing, and asking is not an error', async () => {
+    const nkp = await loadPack(PACKS, 'nkp-bootcamp');
+    expect(nkp.autoFill).toEqual({});
+  });
+
+  test('only the game that owns the ops console declares it', async () => {
+    const ncp = await loadPack(PACKS, 'ntnx-infiltration');
+    const nkp = await loadPack(PACKS, 'nkp-bootcamp');
+    expect(ncp.manifest.sshConsole).toBe(true);
+    expect(nkp.manifest.sshConsole).toBeUndefined();
+  });
+});
+
 describe('who the operator endpoints act for', () => {
   test('the bootcamp accepts every spelling of a learner number', async () => {
     const pack = await loadPack(PACKS, 'nkp-bootcamp');

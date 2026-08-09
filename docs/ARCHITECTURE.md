@@ -35,7 +35,7 @@ The runner picks the next stage that is active, whose required capabilities are 
 
 | Axis | Source | Effect |
 |---|---|---|
-| Capabilities | `capability-probe.ts` at session start | A stage's `requires: ['NCM','IO',…]` auto-disables it if the cluster lacks them |
+| Capabilities | the pack's `capabilities()` hook at boot | A stage's `requires: ['NCM','IO',…]` auto-disables it if the cluster lacks them |
 | Impact | `CLUSTER_PROFILE` (`hpoc` \| `other`) | `"impact":"destructive"` stages run only on `hpoc` |
 
 Both write `status='disabled'` into `stage_history`, so an operator can see why a stage was skipped.
@@ -66,12 +66,13 @@ display and boot switches, all defaulting to the infiltration game's behaviour:
 | `pauseAfterImages` | Park on a "press Enter" after each image so it is not scrolled away |
 | `imageCaptions` | Print each image's alt text under it, not just in the lightbox |
 | `title` | The name players see, so a second pack is not branded as the first |
-| `clusterFacts` (false) | Skip the two Prism boot probes a pack that reads no cluster facts does not need |
 | `nav` | A contents menu down the side of the terminal, in the source material's chapters |
 | `speakers` | Who fills a stage's `prompt` role, e.g. `{"tank": "instructor"}` |
 | `identity` | Which captured variable names a player, and what `/admin` calls it |
 | `transports` | Which transports beyond `ctx.nutanix` this game needs, e.g. `["kube"]` |
 | `boot` | Path to the pack's boot module — see below |
+| `autoFill` | Path to its auto-fill resolvers, for the dev/test fill button |
+| `sshConsole` | Whether this game ships the ops console at `/ssh` |
 
 ### What a game knows at boot
 
@@ -88,8 +89,28 @@ wants at boot is its own, and lives in `packs/<id>/boot/`:
   (`/api/act/cleanup-all/user01`) into whatever that game's handlers read. The
   server always seeds `Trigram`; a pack that calls its players something else,
   or that normalises the value, says so here.
+- **`capabilities(ctx)`** asks the cluster which optional features it offers,
+  for the stages that `requires` them. The questions are the product's, so the
+  pack asks them: the infiltration game probes Prism for NCM, a spare node,
+  Intelligent Operations; a game on another product asks its own.
+- **`clusterFacts(ctx)`** returns the slow answers worth caching once rather
+  than re-reading on every attempt. The pack decides what and how fresh; the
+  server keeps one rule for itself, that a value an operator typed in `/admin`
+  is never overwritten by a probe.
 
-Both are optional, and the split is the point: before it, adding the second game
+Alongside them, `pack.json` names an **`autoFill`** module: variable → a
+resolver that reads that prompt's answer off the cluster, for the dev and test
+"fill it for me" button. Those three resolvers named stages 28, 29 and 31 of one
+game from inside a shared route until they moved here.
+
+The last two hooks replaced a boolean. `clusterFacts: false` in the manifest
+used to tell the server to skip both Prism interrogations, which meant the
+server knew there were exactly two, that they were Prism's, and that one pack
+wanted neither. Now a pack that gates nothing simply exports nothing, and the
+skip is the absence of a hook rather than a flag someone has to remember to
+set.
+
+Every hook is optional, and the split is the point: before it, adding the second game
 meant an `if` in `packages/server/src/index.ts` for its kubeconfig, another for
 its console URL, a `DashboardUrl` default seeded into every session including the
 game that has no dashboard, and a regex naming `UserNum` in an operator route. A
