@@ -68,6 +68,7 @@ display and boot switches, all defaulting to the infiltration game's behaviour:
 | `title` | The name players see, so a second pack is not branded as the first |
 | `clusterFacts` (false) | Skip the two Prism boot probes a pack that reads no cluster facts does not need |
 | `nav` | A contents menu down the side of the terminal, in the source material's chapters |
+| `speakers` | Who fills a stage's `prompt` role, e.g. `{"tank": "instructor"}` |
 
 ### The contents menu
 
@@ -92,6 +93,30 @@ the two orders together (`packages/server/test/nkp-pack.test.ts`).
 The panel stacks under the lightbox, so a screenshot opened from it still
 enlarges over the top. Escape then peels one layer at a time: the lightbox
 publishes `isOpen` and the panel below stands down while it is up.
+
+### Acts write, checks read
+
+A check's transport is read-only by contract; an act's is not. `KubeClient`
+carries `apply` (server-side apply, hence idempotent), `patch` (merge) and
+`remove`, and only `ActContext.kube` hands them out — a check that mutated the
+cluster it judges would be marking its own homework. The mock store is mutable
+too, so a fixture-backed run can go act → check without a cluster.
+
+Two constraints shape the NKP acts. Kommander's Continuous Deployment tab is
+**not reproducible over the API**: it writes the project's config into
+Kommander's own management git repository, and KubeFed federates only core
+types, so a Kustomization created on the management cluster deploys there. The
+acts write the Flux objects on each cluster the app must reach instead — a
+different path to the same end state, which is what the checks assert. And
+`serviceAccountName` must equal the namespace name, because Kommander creates
+one SA per project namespace under that name and its Gatekeeper policy
+(`kustomization-must-have-sa`) defaults to it.
+
+The operator endpoints (`/api/act/…`) take either identity: the path segment
+seeds `Trigram` and, when it looks like `user01` / `01`, `UserNum`. Bulk
+`auto-play` chains every act into one request, so no act may wait anywhere near
+Bun's 255 s ceiling; the checks fail *neutral* on "still starting" and the run
+simply asks again.
 
 ## Two transports, one shape
 

@@ -51,6 +51,7 @@ bun test -t "lunch lock"                           # by name
 | `auto-fill-current.test.ts` | Auto-fillable vars (NodeSerial, NumberUpdates, Runway…) resolve in mock |
 | `nkp-pack.test.ts` | The NKP pack holds together: play order, stage ids, every check reachable, every message key and image present, and all twelve checks pass on the fixtures |
 | `e2e-nkp-mock.test.ts` | A learner plays the whole NKP bootcamp in mock and reaches the last stage |
+| `speakers.test.ts` (engine) | Which name a stage's `prompt` role renders under, and that renaming one role leaves the others alone |
 | `read-stage.test.ts` | Re-reading a step: reachable across chapters, the run untouched, prompts stripped, and anything ahead refused |
 | `pack-nav.test.ts` | The contents menu resolves: translated titles with fallback, nesting, run index, lab flag, and a row naming a missing stage dropped with a warning |
 | `cluster-config-probe.test.ts` | The cached LCM count stage 29 judges against |
