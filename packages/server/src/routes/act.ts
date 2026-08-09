@@ -9,6 +9,7 @@ import type {
   Variables,
 } from '@ntnx-game/engine';
 import { withVariableInterpolation } from '@ntnx-game/nutanix';
+import { withVariableInterpolation as withKubeInterpolation } from '@ntnx-game/kube-transport';
 import { HttpError } from '../session-service';
 import type { LoadedPack } from '../pack-loader';
 import { consoleLogger } from '../logger';
@@ -76,6 +77,10 @@ export function buildActRoutes(deps: ActRoutesDeps): Hono {
   ): boolean {
     const byStage: Record<string, string> = {
       login: 'Trigram',
+      // The bootcamp's identity stage. `makeContext` already seeds UserNum
+      // from the path segment, so the check has everything it needs and the
+      // operator gets a verdict on the first stage instead of a skip.
+      welcome: 'UserNum',
       'switch-to-admin-user': 'Username',
       'expand-cluster': 'NodeSerial',
       'lcm-check-updates': 'NumberUpdates',
@@ -123,7 +128,10 @@ export function buildActRoutes(deps: ActRoutesDeps): Hono {
       all: () => [...cacheStore.values()],
     };
     return {
-      kube: deps.kube,
+      // Same interpolation the session path applies, for the same reason: mock
+      // fixtures are keyed `user{UserNum}` and only resolve once the operator's
+      // identifier is in scope. No-op on a live cluster.
+      kube: deps.kube ? withKubeInterpolation(deps.kube, () => Object.fromEntries(varStore)) : undefined,
       // Wrap with variable interpolation so mock fixtures keyed
       // `/.../{Trigram}-vm` continue to match after the act resolves
       // `Trigram` in its requests. No-op on non-mock transports
@@ -290,6 +298,11 @@ export function buildActRoutes(deps: ActRoutesDeps): Hono {
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
           const res = await checkFn({
             nutanix: ctx.nutanix,
+            // A CheckContext is not an ActContext, so it has to be spelled out
+            // — and the k8s transport was the field that got forgotten. Without
+            // it every NKP check fails "transport unavailable" while the acts
+            // beside them are writing to the cluster perfectly well.
+            kube: ctx.kube,
             vars: ctx.vars,
             cache: ctx.cache,
             args: stage.check?.args ?? {},
