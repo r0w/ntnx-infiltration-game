@@ -40,6 +40,10 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- The bootcamp now prints the real ingress addresses of the cluster you are on,
+  so a step reads `wordpress07.10.54.93.18.sslip.io` instead of asking you to
+  substitute a placeholder. If an address cannot be read, the original wording
+  is used.
 - The contents menu now opens folded and unfolds only as far as where you are,
   so a bootcamp does not greet a learner with every step at once.
 - The contents menu no longer carries a "back to where you are" button: reading

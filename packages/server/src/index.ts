@@ -169,6 +169,19 @@ async function main() {
     DashboardUrl: process.env.NKP_DASHBOARD_URL || 'https://your-nkp-console/dkp/kommander/dashboard',
   };
 
+  // A pack that reads a cluster over Kubernetes can be told the real ingress
+  // addresses, so its steps name them instead of asking the learner to
+  // substitute a placeholder. Unresolvable values fall back to the bootcamp's
+  // own wording — see kube-facts.ts.
+  if (kube) {
+    const { probeKubeFacts } = await import('./kube-facts');
+    Object.assign(initialVariables, await probeKubeFacts(kube, consoleLogger));
+    consoleLogger.info('kube facts resolved', {
+      mgmt: initialVariables.MgmtIngressIP,
+      workload01: initialVariables.Workload1IngressIP,
+    });
+  }
+
   // NIG Central stats emitter — inert unless NIG_CENTRAL_URL is set.
   const { Telemetry } = await import('./telemetry');
   const telemetry = new Telemetry({
