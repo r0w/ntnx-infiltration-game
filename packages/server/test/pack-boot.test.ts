@@ -11,7 +11,10 @@
 import { describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
 import { createKubeClient } from '@ntnx-game/kube-transport';
+import type { NutanixClient } from '@ntnx-game/engine';
 import { loadPack } from '../src/pack-loader';
+import { NutanixTransportError } from '@ntnx-game/nutanix';
+import { makePackProbes } from '../src/pack-probes';
 
 const PACKS = resolve(import.meta.dir, '../../../packs');
 const silent = { debug() {}, info() {}, warn() {}, error() {} };
@@ -143,5 +146,62 @@ describe('who the operator endpoints act for', () => {
   test('the infiltration game names nobody else — the trigram is the identity', async () => {
     const pack = await loadPack(PACKS, 'ntnx-infiltration');
     expect(pack.boot.identityFromPath).toBeUndefined();
+  });
+});
+
+/**
+ * The probes the server hands over, actually run.
+ *
+ * Asserting that a hook exists proves nothing about the wiring behind it — and
+ * the wiring is exactly what broke on deploy once, when a pack tried to import
+ * what it cannot resolve. Running the hook end to end is what catches a context
+ * that arrives without its probes.
+ */
+describe('the probes the server runs on a pack’s behalf', () => {
+  const silentLog = { debug() {}, info() {}, warn() {}, error() {} };
+
+  /** A PC that answers only the NCM probe, so exactly one flag should come back. */
+  function pcWithNcmOnly(): NutanixClient {
+    return {
+      mode: 'live',
+      async request<T>(_method: string, path: string): Promise<T> {
+        if (path.includes('/api/ncm/')) return {} as T;
+        throw new Error(`404 for ${path}`);
+      },
+    } as unknown as NutanixClient;
+  }
+
+  test('the infiltration game’s capabilities hook reports what the cluster answered', async () => {
+    const pack = await loadPack(PACKS, 'ntnx-infiltration');
+    const result = await pack.boot.capabilities!({
+      mode: 'live',
+      env: {},
+      logger: silentLog,
+      transports: { nutanix: pcWithNcmOnly() },
+      probes: makePackProbes(pcWithNcmOnly(), silentLog),
+    });
+    expect(result.flags).toEqual(['NCM']);
+    expect(result.unreachable).toBe(false);
+    // One row per question asked, so /admin can say why a stage is gated.
+    expect(result.details.length).toBeGreaterThan(1);
+  });
+
+  test('a cluster that answers nothing is reported unreachable, not simply featureless', async () => {
+    // A transport failure, not an HTTP error: only the first kind means the
+    // cluster never answered, and only the real error class carries that.
+    const dead = {
+      mode: 'live',
+      async request(method: string, path: string): Promise<never> {
+        throw new NutanixTransportError(method, path, Object.assign(new Error('fetch failed'), {
+          cause: { code: 'ENETUNREACH' },
+        }));
+      },
+    } as unknown as NutanixClient;
+    const probes = makePackProbes(dead, silentLog);
+    const result = await probes.nutanixCapabilities();
+    expect(result.flags).toEqual([]);
+    // The distinction matters: "no features" is a normal cluster, "unreachable"
+    // is a VPN or a wrong endpoint, and boot says so loudly only for the second.
+    expect(result.unreachable).toBe(true);
   });
 });

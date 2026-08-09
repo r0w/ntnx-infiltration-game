@@ -111,3 +111,63 @@ describe('the LCM count stage 29 judges against', () => {
     expect(cfg.get('lcm_available_updates')).toBeUndefined();
   });
 });
+
+/**
+ * The storage half, tested directly rather than only through a pack.
+ *
+ * These three rules are the server's, and they are what stops a probe from
+ * quietly undoing an operator's decision on event day. The `if-absent` path in
+ * particular is never reached above, because the fake PC answers no
+ * discover-unconfigured-nodes call.
+ */
+describe('how a cluster fact is allowed to be written', () => {
+  test('if-absent caches once and never touches an existing value', async () => {
+    const cfg = newCfg();
+    await storeClusterFacts({
+      facts: [{ key: 'discoverable_node_serials', value: ['A'], write: 'if-absent' }],
+      cfg,
+      logger: silentLogger,
+    });
+    expect(cfg.get('discoverable_node_serials')).toEqual(['A']);
+    await storeClusterFacts({
+      facts: [{ key: 'discoverable_node_serials', value: ['B'], write: 'if-absent' }],
+      cfg,
+      logger: silentLogger,
+    });
+    expect(cfg.get('discoverable_node_serials')).toEqual(['A']);
+  });
+
+  test('if-absent is the default, so a pack that says nothing cannot clobber', async () => {
+    const cfg = newCfg();
+    cfg.set('k', 'first', 'probe');
+    await storeClusterFacts({ facts: [{ key: 'k', value: 'second' }], cfg, logger: silentLogger });
+    expect(cfg.get('k')).toBe('first');
+  });
+
+  test('refresh replaces a probed value', async () => {
+    const cfg = newCfg();
+    cfg.set('k', 1, 'probe');
+    await storeClusterFacts({
+      facts: [{ key: 'k', value: 2, write: 'refresh' }],
+      cfg,
+      logger: silentLogger,
+    });
+    expect(cfg.get('k')).toBe(2);
+  });
+
+  test('but never the operator’s, whichever mode the pack asked for', async () => {
+    for (const write of ['if-absent', 'refresh'] as const) {
+      const cfg = newCfg();
+      cfg.set('k', 'mine', 'admin');
+      await storeClusterFacts({ facts: [{ key: 'k', value: 'theirs', write }], cfg, logger: silentLogger });
+      expect(`${write}: ${cfg.get('k')}`).toBe(`${write}: mine`);
+    }
+  });
+
+  test('a fact the pack omitted leaves the stored one alone', async () => {
+    const cfg = newCfg();
+    cfg.set('k', 'kept', 'probe');
+    await storeClusterFacts({ facts: [], cfg, logger: silentLogger });
+    expect(cfg.get('k')).toBe('kept');
+  });
+});

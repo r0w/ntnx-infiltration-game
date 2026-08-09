@@ -1,6 +1,6 @@
 # Tests
 
-**511 tests across 47 files**, all unit + integration, no browser. `bun test` from the repo root runs the lot in ~9 s. CI-friendly: no network, in-memory SQLite, mock Nutanix adapter.
+**531 tests across 49 files**, all unit + integration, no browser. `bun test` from the repo root runs the lot in ~9 s. CI-friendly: no network, in-memory SQLite, mock Nutanix adapter.
 
 ```bash
 bun test                                          # everything
@@ -49,6 +49,7 @@ bun test -t "lunch lock"                           # by name
 | `cluster-profile.test.ts` | Explicit `hpoc`/`other`, fallback to `other` when unset |
 | `ssh.test.ts` | `/api/ssh/ping` argv validation + probe error remapping |
 | `auto-fill-current.test.ts` | Auto-fillable vars (NodeSerial, NumberUpdates, Runway…) resolve in mock |
+| `operator-endpoints.test.ts` | `cleanup-all`: auth, the pack's own cleanup order, a failure reported rather than swallowed, the learner it addresses, and a segment naming nobody deleting nothing. Plus the ops console mounted only for the game that declares it |
 | `pack-imports.test.ts` | The one rule that only breaks in production: a pack may type-import a workspace package, never value-import one |
 | `pack-boot.test.ts` | The per-pack boot seam: which transports and capabilities a pack asks for, the variables it seeds (and its fallbacks), the prompts it can auto-fill, and how each pack reads a player out of an operator URL |
 | `depends-on.test.ts` | `dependsOn` vs `needs`, the fixed-point cascade, seeded variables, and the real cascades both shipped packs declare |
