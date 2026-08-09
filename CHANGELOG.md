@@ -25,6 +25,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 - A collapsible contents menu down the left of the NKP bootcamp, with the
   chapters of the original. It shows where you are, and opens any step you have
   already reached so you can read it again without leaving your place.
+- Each game names its own operator: Tank still speaks in the infiltration game,
+  the bootcamp is narrated by the instructor.
 - The blueprint launch screen now asks which game to install, NCP or NKP.
 - The Pack tab can export the stage setup as one string, import it on another
   instance, and reset every stage back to the pack defaults.
@@ -45,6 +47,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 - The NKP bootcamp's takeaways, both chapter recaps and the conclusion, now
   carry the wording of the original instead of a summary of it.
+- The NKP bootcamp puts back ten steps and notes that had been summarised away,
+  including the warning not to break a shared environment, and how to find the
+  MetalLB pool, the node IPs and the Traefik address.
 - A screenshot with a long caption no longer sits off to the left of it.
 - The install no longer stops when the cluster serves an older v4 API than
   expected, or when erasure coding has to be turned off on an Objects container.

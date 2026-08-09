@@ -39,6 +39,16 @@ export interface StageRunnerOptions {
    * paces itself with hand-placed prompts, does not. Off by default.
    */
   pauseAfterImages?: boolean;
+  /**
+   * Display names for the speaker labels stages carry in `prompt`.
+   *
+   * A stage names a *role* (`system`, `tank`); who fills that role belongs to
+   * the pack, not to the stage. The infiltration game's operator is Tank, a
+   * character; the bootcamp's is whoever is teaching, and calling them Tank
+   * would be a joke a learner is not in on. Unmapped labels render as
+   * written, so a pack that says nothing keeps its own names.
+   */
+  speakers?: Readonly<Record<string, string>>;
 }
 
 export class StageRunner {
@@ -46,6 +56,7 @@ export class StageRunner {
   private stages: readonly StageDefinition[];
 
   private readonly pauseAfterImages: boolean;
+  private readonly speakers: Readonly<Record<string, string>>;
 
   constructor(
     stages: readonly StageDefinition[],
@@ -55,6 +66,7 @@ export class StageRunner {
     this.stages = stages;
     this.logger = opts.logger;
     this.pauseAfterImages = opts.pauseAfterImages ?? false;
+    this.speakers = opts.speakers ?? {};
   }
 
   listStages(): readonly StageDefinition[] {
@@ -117,7 +129,8 @@ export class StageRunner {
     }
 
     const paced = this.pauseAfterImages ? pauseAfterEachImage(rawUnits) : rawUnits;
-    const units = stage.prompt ? injectSpeakerTag(paced, stage.prompt) : paced;
+    const speaker = stage.prompt ? (this.speakers[stage.prompt] ?? stage.prompt) : null;
+    const units = speaker ? injectSpeakerTag(paced, speaker) : paced;
     let firstAwaitInputIdx = -1;
     for (let i = 0; i < units.length; i++) {
       if (units[i].kind === 'await-input') {

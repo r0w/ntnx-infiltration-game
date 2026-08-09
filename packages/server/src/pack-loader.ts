@@ -88,6 +88,12 @@ export interface PackManifest {
    * match `stages` for that reading to hold.
    */
   nav?: PackNavChapter[];
+  /**
+   * Display names for the speaker labels stages carry in `prompt`, e.g.
+   * `{ "tank": "instructor" }`. See {@link StageRunnerOptions.speakers}.
+   * Absent, or a label the map does not mention, renders as written.
+   */
+  speakers?: Record<string, string>;
   checks: string;
   actions?: string;
   /**

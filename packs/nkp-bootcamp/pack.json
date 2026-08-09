@@ -5,6 +5,9 @@
   "clusterFacts": false,
   "pauseAfterImages": true,
   "imageCaptions": true,
+  "speakers": {
+    "tank": "instructor"
+  },
   "version": "0.1.0",
   "description": "Nutanix Kubernetes Platform Fundamentals, hands-on: multi-tenancy with Workspaces and Projects, persistent storage with Nutanix Volumes and Files, observability, and GitOps across a fleet.",
   "checks": "./checks/index.ts",

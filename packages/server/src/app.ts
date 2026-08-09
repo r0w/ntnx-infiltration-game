@@ -50,6 +50,7 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
   const runner = new StageRunner(deps.pack.stages, deps.pack.checks, {
     logger: consoleLogger,
     pauseAfterImages: deps.pack.manifest.pauseAfterImages === true,
+    speakers: deps.pack.manifest.speakers,
   });
   const service = new SessionService({
     db: deps.db,
