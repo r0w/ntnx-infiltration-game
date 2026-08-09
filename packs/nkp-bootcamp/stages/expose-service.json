@@ -14,5 +14,8 @@
   },
   "needs": [
     "UserNum"
+  ],
+  "dependsOn": [
+    "deploy-app"
   ]
 }

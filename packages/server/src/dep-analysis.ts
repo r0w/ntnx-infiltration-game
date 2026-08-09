@@ -31,6 +31,8 @@ export interface BrokenStage {
   stageName: string;
   /** Variables the stage `needs` that no remaining producer can supply. */
   missingVars: string[];
+  /** Stages it `dependsOn` that are off — the cluster state it needs is gone. */
+  missingStages?: string[];
 }
 
 export interface DepAnalysisResult {
@@ -82,17 +84,22 @@ export function analyzeDeps(input: DepAnalysisInput): DepAnalysisResult {
   }
 
   const broken: BrokenStage[] = [];
+  const known = new Set(input.stages.map((s) => s.name));
   for (const s of input.stages) {
     if (off.has(s.name)) continue;
-    const needs = s.needs ?? [];
-    if (needs.length === 0) continue;
-    const missing = needs.filter(
+    const missing = (s.needs ?? []).filter(
       (v) => !ENV_SEEDED.has(v) && !firstProducer.has(v),
     );
-    if (missing.length === 0) continue;
+    // A prerequisite the pack does not ship is a typo, not a broken stage:
+    // flagging it would disable a working stage over a bad manifest.
+    const missingStages = (s.dependsOn ?? []).filter(
+      (n) => known.has(n) && off.has(n),
+    );
+    if (missing.length === 0 && missingStages.length === 0) continue;
     broken.push({
       stageName: s.name,
       missingVars: missing,
+      ...(missingStages.length > 0 ? { missingStages } : {}),
     });
   }
 

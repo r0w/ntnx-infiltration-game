@@ -56,6 +56,12 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- The bootcamp's learners now appear in `/admin` Users: each pack says which
+  captured value names a player, so a user number counts as an identity.
+- When a bootcamp check fails, `/admin` now says what it found, like the
+  infiltration game does.
+- Turning off a bootcamp stage in the Pack tab now also turns off the stages
+  whose cluster resources it creates.
 - Placeholders such as `<any_node_IP>` now show as written, in the text and in
   the YAML you copy, instead of appearing as `&lt;`.
 - The NKP NodePort step now follows the bootcamp's own wording and its full

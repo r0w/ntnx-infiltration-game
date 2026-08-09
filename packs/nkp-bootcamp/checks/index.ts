@@ -1,4 +1,4 @@
-import type { CheckContext, CheckResult, KubeClient, KubeResourceRef } from '@ntnx-game/engine';
+import type { CheckContext, CheckFunction, CheckResult, KubeClient, KubeResourceRef } from '@ntnx-game/engine';
 
 // ── the fleet, as the bootcamp stages it ────────────────────────────────────
 // Names verified live on DM3-POC102 (NKP 2.17): the Default Workspace's
@@ -569,7 +569,23 @@ async function CheckSimpleAppIngress(ctx: CheckContext): Promise<CheckResult> {
   return { pass: true, detail: `https://${host}` };
 }
 
-export const checks = {
+/**
+ * `hint` is what the player reads; `detail` is what `/admin` and the logs keep,
+ * and the operator's "what is missing" chip reads the latter. In the
+ * infiltration game the two differ on purpose: the hint must not spoil the
+ * puzzle. A bootcamp has nothing to spoil, so the sentence written for the
+ * learner is exactly the one the operator wants, and a failing check with no
+ * detail of its own lends out its hint rather than leaving the operator blind.
+ */
+function alsoTellTheOperator(fn: CheckFunction): CheckFunction {
+  return async (ctx) => {
+    const r = await fn(ctx);
+    if (r.pass || r.detail !== undefined || r.hint === undefined) return r;
+    return { ...r, detail: r.hint };
+  };
+}
+
+const raw = {
   CheckUserNum,
   CheckProject,
   CheckBlockStorage,
@@ -583,3 +599,7 @@ export const checks = {
   CheckLoadBalancer,
   CheckSimpleAppIngress,
 };
+
+export const checks = Object.fromEntries(
+  Object.entries(raw).map(([name, fn]) => [name, alsoTellTheOperator(fn)]),
+) as typeof raw;

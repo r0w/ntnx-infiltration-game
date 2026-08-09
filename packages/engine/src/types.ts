@@ -131,6 +131,15 @@ export interface StageDefinition {
    */
   needs?: string[];
   /**
+   * Stages that must run for this one to be playable, named directly rather
+   * than through the variables they capture. `needs` models data; this models
+   * *state on the cluster*. The bootcamp's block-storage lab does not consume
+   * a variable from create-project, it consumes the namespace that stage
+   * creates, so turning create-project off silently breaks it. Naming the
+   * prerequisite lets the Pack tab cascade the disable instead.
+   */
+  dependsOn?: string[];
+  /**
    * Session variables the stage destroys on completion. Fires AFTER the stage's
    * captures so a stage can theoretically invalidate and replace the same var
    * (not a current use case, but the ordering is deterministic). Used to model
