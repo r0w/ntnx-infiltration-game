@@ -538,6 +538,8 @@ export class SessionService {
     const ctx = this.buildCheckContext(session);
     const actCtx: ActContext = {
       nutanix: ctx.nutanix,
+      // The check context narrows this to reads; an act needs the writer.
+      kube: this.kube,
       vars: ctx.vars,
       cache: ctx.cache,
       session: ctx.session,

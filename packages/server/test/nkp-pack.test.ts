@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { VariableStore, type CheckContext, type NutanixClient } from '@ntnx-game/engine';
 import { createKubeClient, withVariableInterpolation } from '@ntnx-game/kube-transport';
 import { checks } from '../../../packs/nkp-bootcamp/checks';
+import { acts, cleanups } from '../../../packs/nkp-bootcamp/acts';
 
 // Two things rot silently in a pack and only show up when someone plays it:
 // a check that no longer matches the shape of its fixture (mock auto-play
@@ -122,6 +123,23 @@ describe('nkp pack structure', () => {
 
   // The menu says where the player is by comparing its own row order against
   // the run. Both properties below are what makes that reading true.
+  // Auto-play does two things per stage: run the act, then press Enter. A
+  // checked stage with no act presses Enter at a cluster where nothing has
+  // happened, and the run stalls on a check that can never pass.
+  test('every stage with a check has an act to perform it', () => {
+    const checked = stages.filter((s) => s.check).map((s) => s.name);
+    // The first stage is the learner typing their own number: nothing to do
+    // on the cluster, and auto-play fills it from the prompt instead.
+    const expected = checked.filter((n) => n !== 'welcome');
+    expect(expected.filter((n) => !(n in acts))).toEqual([]);
+  });
+
+  test('every act names a stage the pack actually has', () => {
+    const names = new Set(manifest.stages);
+    expect(Object.keys(acts).filter((n) => !names.has(n))).toEqual([]);
+    expect(Object.keys(cleanups).filter((n) => !names.has(n))).toEqual([]);
+  });
+
   test('the menu lists every stage, once', () => {
     const listed = (manifest.nav ?? []).flatMap((c) => navStages(c.items));
     expect([...listed].sort()).toEqual([...manifest.stages].sort());

@@ -27,6 +27,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
   already reached so you can read it again without leaving your place.
 - Each game names its own operator: Tank still speaks in the infiltration game,
   the bootcamp is narrated by the instructor.
+- Auto-play can now walk the whole NKP bootcamp on a real fleet: every lab step
+  it validates, it can also perform.
 - The blueprint launch screen now asks which game to install, NCP or NKP.
 - The Pack tab can export the stage setup as one string, import it on another
   instance, and reset every stage back to the pack defaults.

@@ -277,12 +277,30 @@ export interface KubeResourceRef {
    * cluster. A check names the cluster it means; the transport routes.
    */
   cluster?: string;
+  /**
+   * A single object's name. Optional for `list` (which reads the collection),
+   * required by the write verbs, which address one object.
+   */
+  name?: string;
 }
 
 export interface KubeClient {
   readonly mode: 'mock' | 'live';
   /** List resources of a kind, returning the `.items` array (empty if none). */
   list(ref: KubeResourceRef): Promise<Array<Record<string, unknown>>>;
+  /**
+   * Create or update one object from a full manifest (server-side apply).
+   *
+   * Idempotent by construction, which is what an act needs: auto-play may run
+   * a stage twice, and a learner may have done half of it by hand already.
+   * Absent on a read-only client — a check must never mutate a cluster, so
+   * `CheckContext.kube` is narrowed to the reading half.
+   */
+  apply?(ref: KubeResourceRef, manifest: Record<string, unknown>): Promise<void>;
+  /** Merge-patch one object, the `kubectl patch -p '{…}'` of the bootcamp. */
+  patch?(ref: KubeResourceRef, patch: Record<string, unknown>): Promise<void>;
+  /** Delete one object. Missing is success: cleanup is idempotent too. */
+  remove?(ref: KubeResourceRef): Promise<void>;
   /** Cluster names this client can reach, management first. For diagnostics. */
   readonly clusters: readonly string[];
 }
@@ -439,6 +457,12 @@ export type ActionFunction = (ctx: ActionContext) => Promise<void>;
  */
 export interface ActContext {
   nutanix: NutanixClient;
+  /**
+   * Kubernetes transport, present only for packs that need it (NKP). Unlike
+   * the check context's, this one carries the write verbs: an act's whole job
+   * is to perform the cluster-side step the learner would have done by hand.
+   */
+  kube?: KubeClient;
   vars: Variables;
   cache: ClusterCache;
   session: Pick<GameSession, 'id' | 'trigram' | 'locale' | 'clusterProfile'>;
