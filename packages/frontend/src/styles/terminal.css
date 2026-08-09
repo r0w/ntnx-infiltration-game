@@ -3303,20 +3303,50 @@ a.terminal-link:visited {
 .rail-row:not(.rail-row-d0) > .rail-link,
 .rail-row:not(.rail-row-d0) > .rail-group-label { padding-left: 16px; }
 
-/* A section heading: named like a row, weighted like a label, never a target.
-   Letter-spacing is what tells the eye it is not a step. */
+/* A section heading: named like a row, weighted like a label, never a step.
+   Letter-spacing is what tells the eye it is not one. Clicking it folds the
+   section, which is the only thing a heading can usefully do. */
 .rail-group-label {
-  display: block;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  width: 100%;
   padding-top: 7px;
   padding-bottom: 3px;
   padding-right: 10px;
+  background: none;
+  border: none;
   border-left: 2px solid transparent;
+  font: inherit;
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  text-align: left;
   color: #55636f;
+  cursor: pointer;
 }
 .rail-group-label.is-done { color: #6f8494; }
+.rail-group-label:hover { color: #9fb3c2; }
+
+/* A row that is also a section. The caret sits *inside* the padding the link
+   already reserves on its left, so labels keep the single left edge they share
+   with rows that have no caret, and the caret cannot fall outside the rail. */
+.rail-row-head { position: relative; }
+.rail-fold {
+  position: absolute;
+  left: 2px;
+  top: 3px;
+  width: 13px;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 9px;
+  line-height: 18px;
+  color: #4a5a68;
+  cursor: pointer;
+}
+.rail-fold:hover { color: #9fb3c2; }
 
 .rail-link {
   width: 100%;
@@ -3364,19 +3394,6 @@ a.terminal-link:visited {
 }
 .rail-link:disabled { opacity: 0.45; }
 
-.stage-rail-live {
-  margin: 0;
-  padding: 9px 14px;
-  background: none;
-  border: none;
-  border-top: 1px solid #1b232b;
-  color: var(--dim);
-  font: inherit;
-  font-size: 11px;
-  text-align: left;
-  cursor: pointer;
-}
-.stage-rail-live:hover { color: var(--accent); background: #121a20; }
 
 /* Narrow viewports: the rail floats over the terminal instead of eating a
    third of the reading column. */

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { PackNavChapter, PackNavItem } from './api';
-import { jumpToLive } from './stage-anchors';
 
 const OPEN_KEY = 'ntnx-stage-rail-open';
 
@@ -37,7 +36,10 @@ export function StageRail({
       return true;
     }
   });
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  // Shut by default: a bootcamp fully unfolded is a wall of rows. Only the
+  // way down to where the player is stands open, and it opens further as they
+  // advance. Nothing here ever closes a section the player opened by hand.
+  const [openIds, setOpenIds] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(() => {
     try {
@@ -47,8 +49,18 @@ export function StageRail({
     }
   }, [open]);
 
-  const toggleChapter = useCallback((id: string) => {
-    setCollapsed((prev) => {
+  useEffect(() => {
+    const path = activePath(chapters, activeStage, currentIndex);
+    setOpenIds((prev) => {
+      if (path.every((k) => prev.has(k))) return prev;
+      const next = new Set(prev);
+      for (const k of path) next.add(k);
+      return next;
+    });
+  }, [chapters, activeStage, currentIndex]);
+
+  const toggle = useCallback((id: string) => {
+    setOpenIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -94,36 +106,37 @@ export function StageRail({
           <Chapter
             key={ch.id}
             chapter={ch}
-            collapsed={collapsed.has(ch.id)}
-            onToggle={() => toggleChapter(ch.id)}
+            chapterKey={chapterKey(ch.id)}
+            openIds={openIds}
+            onToggle={toggle}
             currentIndex={currentIndex}
             activeStage={activeStage}
             onRead={onRead}
           />
         ))}
       </div>
-      <button type="button" className="stage-rail-live" onClick={jumpToLive}>
-        back to where you are ↓
-      </button>
     </nav>
   );
 }
 
 function Chapter({
   chapter,
-  collapsed,
+  chapterKey: key,
+  openIds,
   onToggle,
   currentIndex,
   activeStage,
   onRead,
 }: {
   chapter: PackNavChapter;
-  collapsed: boolean;
-  onToggle: () => void;
+  chapterKey: string;
+  openIds: ReadonlySet<string>;
+  onToggle: (id: string) => void;
   currentIndex: number;
   activeStage: string | null;
   onRead: (stage: string, title: string) => void;
 }) {
+  const collapsed = !openIds.has(key);
   // Headings are structure, not steps: the counter only tallies real stages.
   const flat = useMemo(
     () => flatten(chapter.items).filter((i) => i.stage !== undefined),
@@ -137,7 +150,7 @@ function Chapter({
       <button
         type="button"
         className="rail-chapter-head"
-        onClick={onToggle}
+        onClick={() => onToggle(key)}
         aria-expanded={!collapsed}
       >
         <span className="rail-caret" aria-hidden="true">{collapsed ? '▸' : '▾'}</span>
@@ -151,7 +164,10 @@ function Chapter({
             <Row
               key={item.stage ?? `group-${i}`}
               item={item}
+              rowKey={childKey(key, i)}
               depth={0}
+              openIds={openIds}
+              onToggle={onToggle}
               currentIndex={currentIndex}
               activeStage={activeStage}
               onRead={onRead}
@@ -165,13 +181,19 @@ function Chapter({
 
 function Row({
   item,
+  rowKey,
   depth,
+  openIds,
+  onToggle,
   currentIndex,
   activeStage,
   onRead,
 }: {
   item: PackNavItem;
+  rowKey: string;
   depth: number;
+  openIds: ReadonlySet<string>;
+  onToggle: (id: string) => void;
   currentIndex: number;
   activeStage: string | null;
   onRead: (stage: string, title: string) => void;
@@ -184,13 +206,18 @@ function Row({
   const canRead = stage !== undefined && item.index <= currentIndex;
   const state = isActive ? 'here' : isDone ? 'done' : 'ahead';
 
-  const children = item.items.length > 0 && (
+  const hasChildren = item.items.length > 0;
+  const shown = openIds.has(rowKey);
+  const children = hasChildren && shown && (
     <ul className="rail-list">
       {item.items.map((sub, i) => (
         <Row
           key={sub.stage ?? `group-${i}`}
           item={sub}
+          rowKey={childKey(rowKey, i)}
           depth={depth + 1}
+          openIds={openIds}
+          onToggle={onToggle}
           currentIndex={currentIndex}
           activeStage={activeStage}
           onRead={onRead}
@@ -200,11 +227,20 @@ function Row({
   );
 
   // A heading is structure, not a destination: it names the section its rows
-  // belong to and is never clickable, however far the player has got.
+  // belong to and is never clickable through to a stage. Since it has nothing
+  // else to do, the whole label is what folds it.
   if (stage === undefined) {
     return (
       <li className={`rail-row rail-row-d${depth} rail-row-group`}>
-        <span className={`rail-group-label is-${isDone ? 'done' : 'ahead'}`}>{item.title}</span>
+        <button
+          type="button"
+          className={`rail-group-label is-${isDone ? 'done' : 'ahead'}`}
+          onClick={() => onToggle(rowKey)}
+          aria-expanded={shown}
+        >
+          <span className="rail-caret" aria-hidden="true">{shown ? '▾' : '▸'}</span>
+          {item.title}
+        </button>
         {children}
       </li>
     );
@@ -212,22 +248,75 @@ function Row({
 
   return (
     <li className={`rail-row rail-row-d${depth}`}>
-      <button
-        type="button"
-        className={`rail-link is-${state}${canRead ? '' : ' is-static'}`}
-        onClick={canRead ? () => onRead(stage, item.title) : undefined}
-        disabled={!canRead}
-        title={canRead ? 'Read this step again' : 'Not there yet'}
-      >
-        <span className="rail-glyph" aria-hidden="true">
-          {isActive ? '▸' : isDone ? '✓' : '·'}
-        </span>
-        <span className="rail-label">{item.title}</span>
-        {item.hasCheck && <span className="rail-tag rail-tag-lab">lab</span>}
-      </button>
+      <div className="rail-row-head">
+        {/* A row that is both a step and a section needs two targets: the
+            label opens the reading panel, the caret folds what is under it. */}
+        {hasChildren && (
+          <button
+            type="button"
+            className="rail-fold"
+            onClick={() => onToggle(rowKey)}
+            aria-expanded={shown}
+            aria-label={shown ? `Collapse ${item.title}` : `Expand ${item.title}`}
+          >
+            <span aria-hidden="true">{shown ? '▾' : '▸'}</span>
+          </button>
+        )}
+        <button
+          type="button"
+          className={`rail-link is-${state}${canRead ? '' : ' is-static'}`}
+          onClick={canRead ? () => onRead(stage, item.title) : undefined}
+          disabled={!canRead}
+          title={canRead ? 'Read this step again' : 'Not there yet'}
+        >
+          <span className="rail-glyph" aria-hidden="true">
+            {isActive ? '▸' : isDone ? '✓' : '·'}
+          </span>
+          <span className="rail-label">{item.title}</span>
+          {item.hasCheck && <span className="rail-tag rail-tag-lab">lab</span>}
+        </button>
+      </div>
       {children}
     </li>
   );
+}
+
+const chapterKey = (id: string) => `ch:${id}`;
+const childKey = (parent: string, i: number) => `${parent}/${i}`;
+
+/**
+ * The keys that must be open for the player's own position to be visible:
+ * its chapter, and every heading between that chapter and the row.
+ *
+ * The row itself is not included — reaching it is the point, opening it is
+ * not. With nothing to match (an empty run), the first chapter stands open so
+ * the menu never reads as broken.
+ */
+export function activePath(
+  chapters: PackNavChapter[],
+  activeStage: string | null,
+  currentIndex: number,
+): string[] {
+  const isTarget = (item: PackNavItem) =>
+    activeStage !== null
+      ? item.stage === activeStage
+      : item.stage !== undefined && item.index === currentIndex;
+
+  const walk = (items: PackNavItem[], parent: string): string[] | null => {
+    for (let i = 0; i < items.length; i++) {
+      const key = childKey(parent, i);
+      if (isTarget(items[i]!)) return [];
+      const deeper = walk(items[i]!.items, key);
+      if (deeper) return [key, ...deeper];
+    }
+    return null;
+  };
+
+  for (const ch of chapters) {
+    const found = walk(ch.items, chapterKey(ch.id));
+    if (found) return [chapterKey(ch.id), ...found];
+  }
+  return chapters.length > 0 ? [chapterKey(chapters[0]!.id)] : [];
 }
 
 function flatten(items: PackNavItem[]): PackNavItem[] {

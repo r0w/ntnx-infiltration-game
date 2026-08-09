@@ -40,6 +40,10 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- The contents menu now opens folded and unfolds only as far as where you are,
+  so a bootcamp does not greet a learner with every step at once.
+- The contents menu no longer carries a "back to where you are" button: reading
+  a step opens a panel, so the run behind it never moves.
 - The two games are called NCP and NKP in `/admin` and on the launch screen.
 - The game's name in the browser tab and header now comes from the pack, so each
   game carries its own.
