@@ -54,8 +54,8 @@ describe('mock kube transport', () => {
     const deps = { group: 'apps', version: 'v1', plural: 'deployments' } as const;
     const one = await kube.list({ ...deps, cluster: 'workload01' });
     const two = await kube.list({ ...deps, cluster: 'workload02' });
-    // workload01 also carries WordPress and the simple app; workload02 only
-    // gets what GitOps federated to it.
+    // workload01 also carries WordPress; workload02 only gets what GitOps
+    // federated to it.
     expect(one.length).toBeGreaterThan(two.length);
     expect(two.length).toBeGreaterThan(0);
     expect(await kube.list({ ...deps, cluster: 'workload03' })).toEqual([]);

@@ -454,18 +454,22 @@ async function CheckDynamicProject(ctx: CheckContext): Promise<CheckResult> {
 
 // ── optional labs: the simple NGINX app ─────────────────────────────────────
 //
-// These four run from a terminal, where the namespace depends on whatever
-// context the learner's kubeconfig carries, and the bootcamp's own output
-// shows `default`. The object name already carries the learner's number, so we
-// search workload01 across namespaces and match on the name rather than
-// insisting on a namespace the lab never asks them to set.
+// These four run from the web IDE's terminal, whose kubeconfig is the
+// *management* cluster's — the lab's own output proves it: the ingress list it
+// shows carries `kommander/dex` and `kommander/traefik-dashboard`, and the
+// address every one of them shares is the NKP UI address. That is also the
+// address the Ingress host must carry, so the app has to live where Traefik
+// answers on it. The namespace depends on whatever context the learner's
+// kubeconfig holds, and the bootcamp's output shows `default`; the object name
+// already carries the learner's number, so we search across namespaces and
+// match on the name rather than insisting on a namespace the lab never sets.
 
 function simpleAppName(num: string): string {
   return `user${num}-nkp-simple-app`;
 }
 
 async function findSimpleApp(kube: KubeClient, num: string, plural: string, group?: string): Promise<Obj | undefined> {
-  const items = await kube.list({ group, version: 'v1', plural, cluster: WORKLOAD1 });
+  const items = await kube.list({ group, version: 'v1', plural });
   return findByName(items, simpleAppName(num));
 }
 
@@ -475,7 +479,7 @@ async function CheckSimpleApp(ctx: CheckContext): Promise<CheckResult> {
   if ('fail' in s) return s.fail;
 
   const dep = await findSimpleApp(kubeOf(ctx), s.num, 'deployments', 'apps');
-  if (!dep) return { pass: false, hint: `No Deployment named "${simpleAppName(s.num)}" on ${WORKLOAD1} yet.` };
+  if (!dep) return { pass: false, hint: `No Deployment named "${simpleAppName(s.num)}" on the management cluster yet.` };
 
   const containers =
     ((dep.spec as { template?: { spec?: { containers?: Array<{ image?: string }> } } })?.template?.spec?.containers) ?? [];

@@ -46,6 +46,97 @@
             ]
           }
         }
+      ],
+      "apps/v1/deployments": [
+        {
+          "metadata": {
+            "name": "user{UserNum}-nkp-simple-app",
+            "namespace": "default"
+          },
+          "spec": {
+            "replicas": 1,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "name": "user{UserNum}-nkp-simple-app",
+                    "image": "nginx:1.27"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "availableReplicas": 1
+          }
+        }
+      ],
+      "v1/services": [
+        {
+          "metadata": {
+            "name": "user{UserNum}-nkp-simple-app",
+            "namespace": "default"
+          },
+          "spec": {
+            "type": "LoadBalancer",
+            "ports": [
+              {
+                "port": 80,
+                "nodePort": 31347
+              }
+            ]
+          },
+          "status": {
+            "loadBalancer": {
+              "ingress": [
+                {
+                  "ip": "10.54.30.41"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "networking.k8s.io/v1/ingresses": [
+        {
+          "metadata": {
+            "name": "user{UserNum}-nkp-simple-app",
+            "namespace": "default"
+          },
+          "spec": {
+            "ingressClassName": "kommander-traefik",
+            "rules": [
+              {
+                "host": "user{UserNum}.10.54.30.16.sslip.io",
+                "http": {
+                  "paths": [
+                    {
+                      "path": "/",
+                      "pathType": "Prefix",
+                      "backend": {
+                        "service": {
+                          "name": "user{UserNum}-nkp-simple-app",
+                          "port": {
+                            "number": 80
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "status": {
+            "loadBalancer": {
+              "ingress": [
+                {
+                  "ip": "10.54.30.16"
+                }
+              ]
+            }
+          }
+        }
       ]
     },
     "workload01": {
@@ -150,28 +241,6 @@
           },
           "status": {
             "availableReplicas": 2
-          }
-        },
-        {
-          "metadata": {
-            "name": "user{UserNum}-nkp-simple-app",
-            "namespace": "user{UserNum}"
-          },
-          "spec": {
-            "replicas": 1,
-            "template": {
-              "spec": {
-                "containers": [
-                  {
-                    "name": "user{UserNum}-nkp-simple-app",
-                    "image": "nginx:1.27"
-                  }
-                ]
-              }
-            }
-          },
-          "status": {
-            "availableReplicas": 1
           }
         },
         {
@@ -498,30 +567,6 @@
               ]
             }
           }
-        },
-        {
-          "metadata": {
-            "name": "user{UserNum}-nkp-simple-app",
-            "namespace": "user{UserNum}"
-          },
-          "spec": {
-            "type": "LoadBalancer",
-            "ports": [
-              {
-                "port": 80,
-                "nodePort": 31347
-              }
-            ]
-          },
-          "status": {
-            "loadBalancer": {
-              "ingress": [
-                {
-                  "ip": "10.54.30.41"
-                }
-              ]
-            }
-          }
         }
       ],
       "networking.k8s.io/v1/ingresses": [
@@ -553,36 +598,15 @@
                 }
               }
             ]
-          }
-        },
-        {
-          "metadata": {
-            "name": "user{UserNum}-nkp-simple-app",
-            "namespace": "user{UserNum}"
           },
-          "spec": {
-            "ingressClassName": "kommander-traefik",
-            "rules": [
-              {
-                "host": "user{UserNum}.10.54.30.16.sslip.io",
-                "http": {
-                  "paths": [
-                    {
-                      "path": "/",
-                      "pathType": "Prefix",
-                      "backend": {
-                        "service": {
-                          "name": "user{UserNum}-nkp-simple-app",
-                          "port": {
-                            "number": 80
-                          }
-                        }
-                      }
-                    }
-                  ]
+          "status": {
+            "loadBalancer": {
+              "ingress": [
+                {
+                  "ip": "10.54.30.19"
                 }
-              }
-            ]
+              ]
+            }
           }
         }
       ]

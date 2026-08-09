@@ -19,7 +19,13 @@ import type { ActContext, KubeClient, KubeResourceRef } from '@ntnx-game/engine'
 const WORKSPACE_NS = 'kommander-default-workspace';
 const WORKLOAD1 = 'workload01';
 const WORKLOAD2 = 'workload02';
-/** Where the optional terminal labs land: the bootcamp never sets a context. */
+/**
+ * Where the optional terminal labs land: `default` on the *management* cluster.
+ * The web IDE's kubeconfig is the management one (the lab's own `kubectl get
+ * ingresses -A` output lists `kommander/dex` and friends), and the Ingress host
+ * it has the learner write is the management Traefik address — so the app must
+ * live on the cluster that answers there, or the URL 404s.
+ */
 const SIMPLE_APP_NS = 'default';
 
 type Obj = Record<string, unknown>;
@@ -96,21 +102,27 @@ async function ingressIp(kube: KubeClient, cluster?: string): Promise<string> {
 async function actCreateProject(ctx: ActContext): Promise<void> {
   const kube = kubeOf(ctx);
   const ns = `user${userNum(ctx)}`;
-  await kube.apply!(
-    { group: 'workspaces.kommander.mesosphere.io', version: 'v1alpha1', plural: 'projects', namespace: WORKSPACE_NS, name: ns },
-    {
-      apiVersion: 'workspaces.kommander.mesosphere.io/v1alpha1',
-      kind: 'Project',
-      metadata: { name: ns, namespace: WORKSPACE_NS },
-      // `workspaceRef` names the Workspace CR (`default-workspace`), not the
-      // namespace it lives in — read off a project the console itself made.
-      spec: {
-        namespaceName: ns,
-        placement: { clusters: [{ name: WORKLOAD1 }] },
-        workspaceRef: { name: 'default-workspace' },
-      },
-    },
-  );
+  const at = {
+    group: 'workspaces.kommander.mesosphere.io', version: 'v1alpha1', plural: 'projects', namespace: WORKSPACE_NS, name: ns,
+  } as const satisfies KubeResourceRef;
+
+  // A replay must not walk the run backwards. If the dynamic-assignment lab
+  // has already switched this project to a label selector, forcing the manual
+  // list back un-federates workload02, and its namespace spends the next
+  // minutes terminating while every later act tries to write into it.
+  const existing = (await kube.list({ ...at, name: undefined })).find((p) => nameOf(p) === ns);
+  const selector = (existing?.spec as { placement?: { clusterSelector?: unknown } } | undefined)
+    ?.placement?.clusterSelector;
+  const placement = selector ? { clusterSelector: selector } : { clusters: [{ name: WORKLOAD1 }] };
+
+  await kube.apply!(at, {
+    apiVersion: 'workspaces.kommander.mesosphere.io/v1alpha1',
+    kind: 'Project',
+    metadata: { name: ns, namespace: WORKSPACE_NS },
+    // `workspaceRef` names the Workspace CR (`default-workspace`), not the
+    // namespace it lives in — read off a project the console itself made.
+    spec: { namespaceName: ns, placement, workspaceRef: { name: 'default-workspace' } },
+  });
   // The namespace has to reach workload01 before any later act can write into it.
   await waitFor(
     kube,
@@ -372,7 +384,7 @@ async function actSimpleApp(ctx: ActContext): Promise<void> {
   const kube = kubeOf(ctx);
   const app = simpleAppName(userNum(ctx));
   await kube.apply!(
-    { group: 'apps', version: 'v1', plural: 'deployments', namespace: SIMPLE_APP_NS, cluster: WORKLOAD1, name: app },
+    { group: 'apps', version: 'v1', plural: 'deployments', namespace: SIMPLE_APP_NS, name: app },
     {
       apiVersion: 'apps/v1', kind: 'Deployment',
       metadata: { name: app, namespace: SIMPLE_APP_NS, labels: { app } },
@@ -385,7 +397,7 @@ async function actSimpleApp(ctx: ActContext): Promise<void> {
   );
   await waitFor(
     kube,
-    { group: 'apps', version: 'v1', plural: 'deployments', namespace: SIMPLE_APP_NS, cluster: WORKLOAD1 },
+    { group: 'apps', version: 'v1', plural: 'deployments', namespace: SIMPLE_APP_NS },
     (items) => {
       const d = items.find((i) => nameOf(i) === app);
       return ((d?.status as { availableReplicas?: number } | undefined)?.availableReplicas ?? 0) >= 1;
@@ -398,7 +410,7 @@ async function actNodePort(ctx: ActContext): Promise<void> {
   const kube = kubeOf(ctx);
   const app = simpleAppName(userNum(ctx));
   await kube.apply!(
-    { version: 'v1', plural: 'services', namespace: SIMPLE_APP_NS, cluster: WORKLOAD1, name: app },
+    { version: 'v1', plural: 'services', namespace: SIMPLE_APP_NS, name: app },
     {
       apiVersion: 'v1', kind: 'Service',
       metadata: { name: app, namespace: SIMPLE_APP_NS, labels: { app } },
@@ -412,12 +424,12 @@ async function actLoadBalancer(ctx: ActContext): Promise<void> {
   const kube = kubeOf(ctx);
   const app = simpleAppName(userNum(ctx));
   await kube.patch!(
-    { version: 'v1', plural: 'services', namespace: SIMPLE_APP_NS, cluster: WORKLOAD1, name: app },
+    { version: 'v1', plural: 'services', namespace: SIMPLE_APP_NS, name: app },
     { spec: { type: 'LoadBalancer' } },
   );
   await waitFor(
     kube,
-    { version: 'v1', plural: 'services', namespace: SIMPLE_APP_NS, cluster: WORKLOAD1 },
+    { version: 'v1', plural: 'services', namespace: SIMPLE_APP_NS },
     (items) => {
       const svc = items.find((i) => nameOf(i) === app);
       const lb = (svc?.status as { loadBalancer?: { ingress?: Array<{ ip?: string }> } } | undefined)?.loadBalancer?.ingress;
@@ -433,7 +445,7 @@ async function actSimpleAppIngress(ctx: ActContext): Promise<void> {
   const app = simpleAppName(num);
   const ip = await ingressIp(kube);
   await kube.apply!(
-    { group: 'networking.k8s.io', version: 'v1', plural: 'ingresses', namespace: SIMPLE_APP_NS, cluster: WORKLOAD1, name: app },
+    { group: 'networking.k8s.io', version: 'v1', plural: 'ingresses', namespace: SIMPLE_APP_NS, name: app },
     {
       apiVersion: 'networking.k8s.io/v1', kind: 'Ingress',
       metadata: { name: app, namespace: SIMPLE_APP_NS },
@@ -479,7 +491,7 @@ async function cleanupSimpleApp(ctx: ActContext): Promise<void> {
   const kube = kubeOf(ctx);
   const app = simpleAppName(userNum(ctx));
   const at = (plural: string, group?: string): KubeResourceRef => ({
-    group, version: 'v1', plural, namespace: SIMPLE_APP_NS, cluster: WORKLOAD1, name: app,
+    group, version: 'v1', plural, namespace: SIMPLE_APP_NS, name: app,
   });
   await kube.remove!(at('ingresses', 'networking.k8s.io'));
   await kube.remove!(at('services'));
