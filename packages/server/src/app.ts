@@ -111,6 +111,9 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
       name: deps.pack.manifest.name,
       title: deps.pack.manifest.title ?? 'ntnx infiltration game',
       imageCaptions: deps.pack.manifest.imageCaptions === true,
+      // What this pack calls a player, so the terminal can offer to switch it
+      // in the pack's own words instead of the first pack's.
+      identity: deps.pack.manifest.identity,
       mode: serverMode,
       // Surfaced so the DevPanel can dim/highlight destructive stages
       // only on shared clusters (clusterProfile === 'other'); on hpoc

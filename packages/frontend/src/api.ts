@@ -123,6 +123,9 @@ export interface PackInfo {
   title: string;
   /** Print each screenshot's description under it. See PackManifest.imageCaptions. */
   imageCaptions: boolean;
+  /** What this pack calls a player — `trigram` in the infiltration game, `user`
+   *  in the bootcamp. The terminal offers to switch it in the pack's own word. */
+  identity?: { variable: string; label: string };
   /**
    * Operator-facing server mode. `mock` = fixtures, `test` = real PC + dev
    * tools, `live` = real PC + production demo (dev tools + auto-play

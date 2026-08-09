@@ -1101,29 +1101,45 @@ export class SessionService {
 
   /**
    * Reset the session's identity capture without starting from scratch:
-   * rewind to before the login prompts (so they replay), drop the
-   * Trigram / PIN / Username variables, keep everything else (locale,
-   * sessionId). Wired to the "switch agent" frontend affordance (↓ during
-   * login, header link) — cheaper than a full reset (which also forces the
-   * language picker), and avoids inventing a second sessionId.
+   * rewind to just before the stage that asks who the player is, so its
+   * prompts replay, and drop what the run had captured. Locale and sessionId
+   * survive — cheaper than a full reset (which also forces the language
+   * picker), and it avoids inventing a second sessionId.
+   *
+   * Which stage that is comes from the pack. The infiltration game opens on a
+   * prelude and asks for the trigram second; the bootcamp asks for the user
+   * number in its very first stage. Rewinding to "stage 0, already passed"
+   * suited the first and silently broke the second: the only stage that
+   * captures `UserNum` was marked done without ever capturing it, every later
+   * stage then gated off on the variable it needs, and the runner — finding
+   * nothing left to play — declared the run complete.
    */
   switchIdentity(sessionId: string): { currentStage: string | null } {
     const session = this.getSession(sessionId);
-    const firstStage = this.runner.listStages()[0];
-    const loreName = firstStage?.name ?? null;
-    // Delete every history row from the second stage onward (the lore stage
-    // stays passed so the runner jumps straight to the login prompt).
+    const stages = this.runner.listStages();
+    // The first stage that captures anything is the one that asks who the
+    // player is: `login` in the infiltration game, `welcome` in the bootcamp.
+    // Reading it off the stages needs no per-pack wiring and cannot drift.
+    const found = stages.findIndex((s) => (s.captures ?? []).length > 0);
+    const identityIdx = found >= 0 ? found : 1;
+    // Everything from the identity stage onward replays; the stage before it
+    // (if any) stays passed, so the run resumes exactly at the prompt.
     const names = this.stageNames();
-    if (names.length >= 2) {
-      this.history.deleteFrom(session.id, names[1]!, names);
-    }
+    const rewindTo = names[identityIdx];
+    if (rewindTo) this.history.deleteFrom(session.id, rewindTo, names);
+    const resumeAt = identityIdx > 0 ? (names[identityIdx - 1] ?? null) : null;
+
     this.clearFlowState(session.id);
     this.sessions.clearFinished(session.id);
-    this.sessions.updateCurrentStage(session.id, loreName);
-    for (const name of ['Trigram', 'PIN', 'Username']) {
-      this.variables.delete(session.id, name);
+    this.sessions.updateCurrentStage(session.id, resumeAt);
+    // Whatever the replayed part of the run had learned, read off the stages
+    // rather than named here: a second pack identifies its players by a
+    // different variable (`UserNum`, not `Trigram`), and a hardcoded list left
+    // it behind — the prompt replayed while the old identity still applied.
+    for (const stage of stages.slice(identityIdx)) {
+      for (const name of stage.captures ?? []) this.variables.delete(session.id, name);
     }
-    return { currentStage: loreName };
+    return { currentStage: resumeAt };
   }
 
   /**

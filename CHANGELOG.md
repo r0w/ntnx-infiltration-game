@@ -66,6 +66,10 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Asking to switch player in the bootcamp no longer jumps straight to the end
+  screen: it puts you back at the question, with the previous answer cleared.
+- The terminal now offers to switch player in the words of the game you are
+  playing, "user" in the bootcamp rather than "agent".
 - The NKP app you deploy from the terminal now lands on the cluster whose
   address its Ingress carries, so `https://user09.<ingress>.sslip.io` really
   serves NGINX instead of returning a 404.

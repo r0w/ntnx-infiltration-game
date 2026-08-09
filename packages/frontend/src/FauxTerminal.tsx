@@ -49,6 +49,8 @@ export interface FauxTerminalProps {
    * starts.
    */
   onSwitchIdentity?: () => void;
+  /** The pack's word for a player: `trigram`, `user`. */
+  identityLabel?: string;
 }
 
 export function FauxTerminal({
@@ -67,6 +69,7 @@ export function FauxTerminal({
   onAutoPlayOk,
   onAdvance,
   onSwitchIdentity,
+  identityLabel,
 }: FauxTerminalProps) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -326,7 +329,7 @@ export function FauxTerminal({
               />
               {onSwitchIdentity && (
                 <span className="terminal-input-hint c-dim">
-                  &nbsp;&nbsp;[↓ switch agent]
+                  &nbsp;&nbsp;[↓ switch {identityLabel ?? 'agent'}]
                 </span>
               )}
             </form>

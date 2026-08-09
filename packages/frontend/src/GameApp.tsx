@@ -373,6 +373,7 @@ export function GameApp() {
         onAutoPlayOk={handleAutoPlayOk}
         onAdvance={handleAdvance}
         onSwitchIdentity={inIdentityCapture ? handleSwitchIdentity : undefined}
+        identityLabel={pack?.identity?.label}
       />
       </div>
       {session.error && <div className="app-error">{session.error}</div>}
