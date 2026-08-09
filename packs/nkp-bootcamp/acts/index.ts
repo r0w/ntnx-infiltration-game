@@ -332,7 +332,11 @@ async function actBoutiqueRunning(ctx: ActContext): Promise<void> {
       const up = flux.filter((d) => ((d.status as { availableReplicas?: number } | undefined)?.availableReplicas ?? 0) > 0);
       return up.length >= 12;
     },
-    { tries: 90, everyMs: 4000 },
+    // Bun caps a request at 255 s, and the bulk `/api/act/auto-play` endpoint
+    // chains every act into one. No single wait may approach that: the check
+    // that follows fails *neutral* on "still starting", so auto-play simply
+    // asks again rather than the whole run dying on a timeout.
+    { tries: 40, everyMs: 4000 },
   );
 }
 
@@ -350,7 +354,7 @@ async function actDynamicProject(ctx: ActContext): Promise<void> {
     kube,
     { version: 'v1', plural: 'namespaces', cluster: WORKLOAD2 },
     (items) => items.some((i) => nameOf(i) === ns),
-    { tries: 60, everyMs: 3000 },
+    { tries: 25, everyMs: 3000 },
   );
   // The namespace federates on its own; the Flux objects do not (see
   // deployBoutiqueOn), so the new cluster gets them here.
