@@ -69,6 +69,7 @@ display and boot switches, all defaulting to the infiltration game's behaviour:
 | `clusterFacts` (false) | Skip the two Prism boot probes a pack that reads no cluster facts does not need |
 | `nav` | A contents menu down the side of the terminal, in the source material's chapters |
 | `speakers` | Who fills a stage's `prompt` role, e.g. `{"tank": "instructor"}` |
+| `identity` | Which captured variable names a player, and what `/admin` calls it |
 
 ### The contents menu
 
@@ -93,6 +94,42 @@ the two orders together (`packages/server/test/nkp-pack.test.ts`).
 The panel stacks under the lightbox, so a screenshot opened from it still
 enlarges over the top. Escape then peels one layer at a time: the lightbox
 publishes `isOpen` and the panel below stands down while it is up.
+
+### Who the operator sees, and what a stage needs
+
+Two things the infiltration game could hardcode and a second pack could not.
+
+**Identity.** `/admin` used to read `Trigram` directly, so a pack that asks for
+a user number listed every session as nameless — and the Users tab hides
+nameless sessions by default, so the bootcamp's learners were invisible and
+could not be cleaned up from the UI. `identity` in the manifest names the
+variable and its label; the field on the wire is still called `trigram`,
+because renaming it would ripple through the scoreboard and the session table
+for no gain.
+
+**Prerequisites.** `needs` models data moving between stages, and the Pack tab
+cascades a disable through it. A bootcamp lab does not consume a *variable*
+from the stage before it, it consumes the *namespace* that stage created, so a
+disabled create-project left the storage labs looking fine and failing on the
+cluster. `dependsOn` names the stage instead, and the same fixed-point cascade
+covers it. A prerequisite the pack does not ship is ignored, not fatal: a typo
+in a manifest should not disable a working stage.
+
+One asymmetry worth knowing: a check's `hint` is written for the player and
+`detail` for the operator and the logs, and `/admin` reads only `detail`. The
+infiltration game keeps them different on purpose, since the hint must not
+spoil a puzzle. A bootcamp has nothing to spoil, so its checks lend the hint
+out as the detail rather than leaving the operator with an empty chip.
+
+### Saying more than the source
+
+The published bootcamp writes `<ingress_lb_ip>` and tells the reader to look
+the value up, because one document serves every lab. A running game holds a
+kubeconfig, so at boot it reads the management and workload ingress addresses
+and seeds them as variables the pack's text interpolates — the learner reads
+their own hostname. When an address cannot be read, the variable falls back to
+the bootcamp's own placeholder, so the step degrades to the published wording
+instead of rendering a hole into the middle of a hostname.
 
 ### Acts write, checks read
 
