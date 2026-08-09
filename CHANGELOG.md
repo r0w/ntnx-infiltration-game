@@ -49,6 +49,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 - The contents menu no longer carries a "back to where you are" button: reading
   a step opens a panel, so the run behind it never moves.
 - The two games are called NCP and NKP in `/admin` and on the launch screen.
+- The blueprint's two application profiles now carry the games' names, `NCP` and
+  `NKPFundamentals`, instead of `DefaultProfile` and `NkpProfile`.
 - The game's name in the browser tab and header now comes from the pack, so each
   game carries its own.
 - Screenshots in the terminal are wider and centred, so the detail a step points

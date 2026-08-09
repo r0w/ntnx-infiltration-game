@@ -518,7 +518,7 @@ class NkpDeployment(Deployment):
 
 # ── Profile — runtime + day-2 actions ─────────────────────────────────
 
-class DefaultProfile(Profile):
+class NCP(Profile):
     deployments = [GameDeployment]
 
     # Cycle fix: install-state vars on Profile (NOT Service). Set by
@@ -692,7 +692,7 @@ class DefaultProfile(Profile):
         )
 
 
-class NkpProfile(Profile):
+class NKPFundamentals(Profile):
     """The NKP Fundamentals bootcamp, played against a pre-staged NKP fleet.
 
     Picking this profile on the launch screen swaps both the content pack and
@@ -701,7 +701,7 @@ class NkpProfile(Profile):
     """
     deployments = [NkpDeployment]
 
-    # ⚠ Same bottom-to-top rendering as DefaultProfile: the LAST variable
+    # ⚠ Same bottom-to-top rendering as the NCP profile: the LAST variable
     # defined here appears FIRST on the launch screen. Desired order
     # (top→bottom): Container image repository, Image tag, Run mode,
     # NKP console URL, NKP bootstrap VM IP, username, password,
@@ -852,5 +852,5 @@ class NtnxInfiltrationGame(Blueprint):
     packages = [Ubuntu2204, GameContent, NkpContent]
     substrates = [VM, NkpVM]
     # NCP first, so it is the default selection on the launch screen.
-    profiles = [DefaultProfile, NkpProfile]
+    profiles = [NCP, NKPFundamentals]
     credentials = [BP_CRED_NUTANIX]
