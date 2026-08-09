@@ -1,6 +1,15 @@
 # Operator guide
 
-Everything you need to host the **Nutanix Infiltration Game** at an event, a demo, or a training session.
+Everything you need to host a game at an event, a demo, or a training session.
+
+The blueprint installs **one of two games**, picked on its launch screen. One
+deployment runs one game: the install and the cluster it needs differ too much
+to switch afterwards.
+
+- **NCP** - the **Nutanix Infiltration Game**, 39 stages against Prism Central.
+  That is the game this guide describes unless it says otherwise.
+- **NKPFundamentals** - the **NKP Fundamentals bootcamp**, 26 stages against a
+  Kubernetes fleet. See [the other game](#the-other-game-nkp-fundamentals).
 
 To develop the game itself, see [`../README.md`](../README.md). For the blueprint internals, see [`../tooling/blueprint/README.md`](../tooling/blueprint/README.md).
 
@@ -74,6 +83,50 @@ The substrate section asks for the cluster and first NIC subnet (any real ones o
 - **`live`** - the event mode: real cluster, dev tools hidden from players.
 - **`test`** - same, but dev tools shown and auto-play can fire the acts for you. Good for a dry run.
 - **`mock`** - no cluster, fixtures back every stage. The local dev mode; you won't deploy in it.
+
+## The other game: NKP Fundamentals
+
+The same blueprint installs a second game, the **NKP Fundamentals bootcamp**. It
+replays the [public bootcamp](https://bootcamps.nutanix.com/nkp-fundamentals/)
+as a validated run: the learner carves out their own Project, gives WordPress
+persistent storage on Nutanix Volumes and Files, and hands deployment over to
+GitOps, and each step is checked against the real fleet before it advances.
+
+Pick the **NKPFundamentals** profile on the launch screen. The form is shorter
+than the NCP one, because there is no world to build:
+
+| Field | Value |
+|---|---|
+| Prism Central IP / username / password | as for the other game |
+| NKP bootstrap VM username / password | the `nkp-boot` VM; on an HPoC the password is the Prism Central one |
+| NKP bootstrap VM IP | **optional** - leave blank and the install finds the VM named `nkp-boot` on Prism Central |
+| NKP console URL | **optional** - leave blank and the game builds it from the management ingress address it reads off the fleet at boot |
+| Run mode, Image tag, Container image repository, Time zone | as for the other game |
+
+Prerequisites differ too:
+
+- **A staged NKP fleet.** A management cluster plus `workload01` and
+  `workload02`, both labelled `infraId: pc`, with the `nutanix-files`
+  StorageClass and a MetalLB pool. That is what the bootcamp's own staging
+  automation builds; the game does not build it.
+- **Run the prerequisites runbook anyway.** Calm validates the whole blueprint
+  and it carries both games, so without the AD endpoint the NCP profile's
+  `Add AD users` task is invalid and *neither* profile can launch. The blueprint
+  stays in DRAFT and the launch fails with an empty error list.
+- **One kubeconfig opens the fleet.** The install fetches the management
+  kubeconfig from `nkp-boot`; the workload clusters are read from the CAPI
+  secrets on it.
+
+What changes in `/admin`: learners are identified by their **user number**
+rather than a trigram, the Pack tab shows 26 stages, and there is no `/ssh`
+console (it belongs to the infiltration game). Wiping one learner's work is a
+single call, `POST /api/act/cleanup-all/user01` - deleting their Project takes
+the federated namespace and everything the labs put in it.
+
+Known environment gap: on a shared bootcamp HPoC the learners' admin VMs ship
+`kubectl` without a kubeconfig, so the optional terminal labs cannot be typed by
+hand until someone generates one from the NKP console's workspace token page.
+The bootcamp itself has no fetch step either - it assumes a staged terminal.
 
 ## Day-2 actions
 
