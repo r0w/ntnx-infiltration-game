@@ -36,6 +36,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- The two games are called NCP and NKP in `/admin` and on the launch screen.
 - The game's name in the browser tab and header now comes from the pack, so each
   game carries its own.
 - Screenshots in the terminal are wider and centred, so the detail a step points

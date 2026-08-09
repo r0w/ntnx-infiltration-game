@@ -1,9 +1,9 @@
 {
   "id": "ntnx-infiltration",
-  "name": "NTNX Infiltration",
+  "name": "NCP",
   "title": "ntnx infiltration game",
   "version": "0.0.0",
-  "description": "Nutanix Cloud Platform infiltration scenario \u2014 successor to ntnx-escape-game.",
+  "description": "Nutanix Cloud Platform infiltration scenario — successor to ntnx-escape-game.",
   "checks": "./checks/index.ts",
   "actions": "./actions/index.ts",
   "acts": "./acts/index.ts",
