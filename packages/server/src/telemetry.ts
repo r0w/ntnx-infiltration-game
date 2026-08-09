@@ -22,6 +22,9 @@ export interface TelemetryDeps {
   token?: string;
   packId: string;
   packVersion: string;
+  /** Operator-facing name of the game, so Central can label it without
+   *  keeping a table of pack ids. */
+  packTitle?: string;
   /** Operator-facing server mode — lets Central separate live events from
    *  mock/test validation runs. */
   serverMode: 'mock' | 'test' | 'live';
@@ -114,6 +117,7 @@ export class Telemetry {
       firstBootDate,
       packId: deps.packId,
       packVersion: deps.packVersion,
+      packTitle: deps.packTitle ?? deps.packId,
       gameVersion: version.version,
       mode: deps.serverMode,
       clusterProfile: deps.clusterProfile,

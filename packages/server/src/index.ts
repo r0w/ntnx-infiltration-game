@@ -191,6 +191,7 @@ async function main() {
     token: cfg.nigCentralToken,
     packId: pack.manifest.id,
     packVersion: pack.manifest.version,
+    packTitle: pack.manifest.title ?? pack.manifest.name,
     serverMode: cfg.mode,
     clusterProfile,
     hostIp: cfg.gameFrontendHost,

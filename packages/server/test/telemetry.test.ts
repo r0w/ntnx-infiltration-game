@@ -72,11 +72,14 @@ describe('Telemetry', () => {
       expect(outboxCount(db)).toBe(0);
       expect(received.length).toBe(1);
       const payload = received[0] as {
-        deployment: { id: string; packId: string; mode: string };
+        deployment: { id: string; packId: string; packTitle: string; mode: string };
         events: Array<{ type: string; stageId?: string; ts: number }>;
       };
       expect(payload.deployment.id).toBe(t.deploymentId);
       expect(payload.deployment.packId).toBe('test-pack');
+      // Central labels its per-game view with this; without it two packs are
+      // one indistinguishable pile of numbers.
+      expect(payload.deployment.packTitle).toBe('test-pack');
       expect(payload.deployment.mode).toBe('test');
       expect(payload.events.map((e) => e.type)).toEqual(['session_started', 'stage_passed']);
       expect(payload.events[1]!.stageId).toBe('eg-006');
