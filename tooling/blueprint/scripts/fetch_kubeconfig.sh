@@ -19,9 +19,39 @@ DEST="$APPDIR/data/nkp-kubeconfig"
 
 sudo mkdir -p "$APPDIR/data"
 
+# Left blank on the launch screen: ask Prism Central. The bootstrap VM is named
+# `nkp-boot` by the bootcamp's own automation, and the operator has already
+# typed the Prism credentials one field higher up, so there is nothing here a
+# human knows that the cluster does not.
 if [[ -z "$BOOT_IP" ]]; then
-    echo "[fetch_kubeconfig] NKP_BOOT_IP is empty — nothing to fetch."
-    echo "[fetch_kubeconfig] The game will start, but every cluster check will fail."
+    echo "[fetch_kubeconfig] no bootstrap IP given — looking for the nkp-boot VM on Prism Central"
+    BOOT_IP="$(curl -sk --max-time 60 \
+        -u "@@{PC_USERNAME}@@:@@{PC_PASSWORD}@@" \
+        -X POST "https://@@{PC_IP}@@:9440/api/nutanix/v3/vms/list" \
+        -H 'Content-Type: application/json' \
+        -d '{"kind":"vm","length":500}' \
+      | python3 -c '
+import json, sys
+try:
+    vms = json.load(sys.stdin).get("entities", [])
+except Exception:
+    sys.exit(0)
+for vm in vms:
+    st = vm.get("status") or {}
+    if (st.get("name") or "") != "nkp-boot":
+        continue
+    for nic in (st.get("resources") or {}).get("nic_list") or []:
+        for ep in nic.get("ip_endpoint_list") or []:
+            if ep.get("ip"):
+                print(ep["ip"])
+                sys.exit(0)
+')"
+    [[ -n "$BOOT_IP" ]] && echo "[fetch_kubeconfig] found nkp-boot at ${BOOT_IP}"
+fi
+
+if [[ -z "$BOOT_IP" ]]; then
+    echo "[fetch_kubeconfig] no bootstrap VM address, and no VM named nkp-boot on this Prism Central."
+    echo "[fetch_kubeconfig] Fill in the NKP bootstrap VM IP on the launch screen and re-run."
     exit 1
 fi
 

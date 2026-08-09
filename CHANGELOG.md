@@ -51,6 +51,10 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 - The two games are called NCP and NKP in `/admin` and on the launch screen.
 - The blueprint's two application profiles now carry the games' names, `NCP` and
   `NKPFundamentals`, instead of `DefaultProfile` and `NkpProfile`.
+- Installing the NKP bootcamp no longer asks for the console URL or the
+  bootstrap VM address: the install finds the `nkp-boot` VM on Prism Central,
+  and the game builds the console link from the address it already reads off the
+  fleet. Both fields stay on the screen for anyone who wants to pin them.
 - The game's name in the browser tab and header now comes from the pack, so each
   game carries its own.
 - Screenshots in the terminal are wider and centred, so the detail a step points

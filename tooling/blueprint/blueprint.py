@@ -743,14 +743,20 @@ class NKPFundamentals(Profile):
         is_mandatory=True, runtime=True,
     )
     NKP_BOOT_IP = CalmVariable.Simple(
-        "", label="NKP bootstrap VM IP",
-        description="The nkp-boot VM. Its ~/.kube/config unlocks the whole fleet",
-        is_mandatory=True, runtime=True,
+        "", label="NKP bootstrap VM IP (optional)",
+        description=(
+            "The nkp-boot VM, whose ~/.kube/config unlocks the whole fleet. "
+            "Leave blank and the install finds the VM named nkp-boot on Prism Central"
+        ),
+        is_mandatory=False, runtime=True,
     )
     NKP_DASHBOARD_URL = CalmVariable.Simple(
-        "", label="NKP console URL",
-        description="e.g. https://10.0.0.16/dkp/kommander/dashboard — shown to players in-game",
-        is_mandatory=True, runtime=True,
+        "", label="NKP console URL (optional)",
+        description=(
+            "Shown to players in-game. Leave blank and the game builds it from the "
+            "management ingress address it reads off the fleet at boot"
+        ),
+        is_mandatory=False, runtime=True,
     )
     MODE = CalmVariable.WithOptions(
         ["test", "live"], label="Run mode",

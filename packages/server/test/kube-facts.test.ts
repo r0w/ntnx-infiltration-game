@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { probeKubeFacts } from '../src/kube-facts';
+import { INGRESS_PLACEHOLDER, kommanderDashboardUrl, probeKubeFacts } from '../src/kube-facts';
 import type { KubeClient } from '@ntnx-game/engine';
 
 /**
@@ -59,5 +59,30 @@ describe('kube facts', () => {
   test('an empty fleet keeps the placeholder rather than an empty string', async () => {
     const facts = await probeKubeFacts(kubeOf({}), silent);
     expect(facts.Workload1IngressIP).toBe('<ingress_lb_ip>');
+  });
+});
+
+// The Kommander console answers on the management ingress, which the probe above
+// already knows — so the launch screen should not have to ask for it twice.
+describe('kommander console url', () => {
+  test('is built from the management ingress the fleet reported', () => {
+    const url = kommanderDashboardUrl({ MgmtIngressIP: '10.54.93.15', Workload1IngressIP: '10.54.93.18' });
+    expect(url).toBe('https://10.54.93.15/dkp/kommander/dashboard');
+  });
+
+  test('an operator-pinned address always wins', () => {
+    const url = kommanderDashboardUrl(
+      { MgmtIngressIP: '10.54.93.15', Workload1IngressIP: '10.54.93.18' },
+      'https://nkp.lab.example/dkp/kommander/dashboard',
+    );
+    expect(url).toBe('https://nkp.lab.example/dkp/kommander/dashboard');
+  });
+
+  test('an unreadable fleet falls back rather than linking to the placeholder', () => {
+    const url = kommanderDashboardUrl(
+      { MgmtIngressIP: INGRESS_PLACEHOLDER, Workload1IngressIP: INGRESS_PLACEHOLDER },
+      '  ',
+    );
+    expect(url).toBe('https://your-nkp-console/dkp/kommander/dashboard');
   });
 });

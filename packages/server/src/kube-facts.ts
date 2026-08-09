@@ -21,7 +21,8 @@ export interface KubeFacts {
 }
 
 /** What the bootcamp itself writes where the value is unknown. */
-const PLACEHOLDER = '<ingress_lb_ip>';
+export const INGRESS_PLACEHOLDER = '<ingress_lb_ip>';
+const PLACEHOLDER = INGRESS_PLACEHOLDER;
 
 /**
  * The address a cluster's ingress answers on: the first LoadBalancer IP an
@@ -77,4 +78,20 @@ export async function probeKubeFacts(
     read(workloadCluster, workloadCluster),
   ]);
   return { MgmtIngressIP: mgmt, Workload1IngressIP: workload };
+}
+
+/**
+ * The Kommander console URL the game links to.
+ *
+ * The console answers on the management cluster's ingress, which we have just
+ * read off the fleet — so there is nothing for an operator to type unless they
+ * want a different address (a DNS name, a different route). An explicit value
+ * always wins; an unresolved address leaves the placeholder, because a link to
+ * `https://<ingress_lb_ip>/…` is at least honest about not knowing.
+ */
+export function kommanderDashboardUrl(facts: KubeFacts, configured?: string): string {
+  const given = (configured ?? '').trim();
+  if (given) return given;
+  if (facts.MgmtIngressIP === PLACEHOLDER) return 'https://your-nkp-console/dkp/kommander/dashboard';
+  return `https://${facts.MgmtIngressIP}/dkp/kommander/dashboard`;
 }

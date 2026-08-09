@@ -164,8 +164,9 @@ async function main() {
     ProdUsername: cfg.gameProdUsername,
     ProdPassword: cfg.gameProdPassword,
     frontendHost: cfg.gameFrontendHost,
-    // NKP pack: the real Kommander dashboard URL (clickable in-game). Falls back
-    // to a placeholder so the prompt renders before an operator sets it.
+    // NKP pack: the Kommander console URL (clickable in-game). Derived from the
+    // fleet just below when the operator did not pin one; this value only
+    // survives for a pack with no Kubernetes transport to ask.
     DashboardUrl: process.env.NKP_DASHBOARD_URL || 'https://your-nkp-console/dkp/kommander/dashboard',
   };
 
@@ -174,11 +175,14 @@ async function main() {
   // substitute a placeholder. Unresolvable values fall back to the bootcamp's
   // own wording — see kube-facts.ts.
   if (kube) {
-    const { probeKubeFacts } = await import('./kube-facts');
-    Object.assign(initialVariables, await probeKubeFacts(kube, consoleLogger));
+    const { probeKubeFacts, kommanderDashboardUrl } = await import('./kube-facts');
+    const facts = await probeKubeFacts(kube, consoleLogger);
+    Object.assign(initialVariables, facts);
+    initialVariables.DashboardUrl = kommanderDashboardUrl(facts, process.env.NKP_DASHBOARD_URL);
     consoleLogger.info('kube facts resolved', {
-      mgmt: initialVariables.MgmtIngressIP,
-      workload01: initialVariables.Workload1IngressIP,
+      mgmt: facts.MgmtIngressIP,
+      workload01: facts.Workload1IngressIP,
+      dashboard: initialVariables.DashboardUrl,
     });
   }
 
