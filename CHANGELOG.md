@@ -52,6 +52,12 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Placeholders such as `<any_node_IP>` now show as written, in the text and in
+  the YAML you copy, instead of appearing as `&lt;`.
+- The NKP NodePort step now follows the bootcamp's own wording and its full
+  command sequence, including the `NODE_PORT` variable it relies on.
+- The NKP contents menu now nests like the bootcamp's own: one Optional Labs
+  chapter, with Expose app on production inside Deploy and expose an app.
 - The NKP bootcamp's takeaways, both chapter recaps and the conclusion, now
   carry the wording of the original instead of a summary of it.
 - The NKP bootcamp puts back ten steps and notes that had been summarised away,

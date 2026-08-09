@@ -23,6 +23,12 @@ export interface ParsedMessage {
  *   <red>text</red>, <green>, ...   — foreground color (one active at a time)
  *   <dim>text</dim>, <bold>text</bold>  — style modifiers (stackable with colors + each other)
  *   <a href='url'>text</a>          — clickable link (renders target=_blank)
+ *   &lt; &gt; &amp;              — literal `<`, `>`, `&`
+ *
+ * A bare `<` starts a tag, so prose that needs a literal angle bracket (a
+ * placeholder like `<any_node_IP>`) writes it escaped. Decoding happens inside
+ * code blocks too: they are opaque to *tags*, but an undecoded `&lt;` there
+ * would be copied straight into the learner's terminal.
  *
  * Colors are exclusive: nesting `<red><green>x</green></red>` makes "x" green;
  * the outer red resumes after the inner close. Styles (dim, bold) stack
@@ -93,6 +99,19 @@ export function parseMessage(
       continue;
     }
 
+    // Entity: &lt; &gt; &amp;
+    if (ch === '&') {
+      const entity = decodeEntityAt(template, i);
+      if (entity) {
+        textBuf += entity.char;
+        i = entity.end;
+        continue;
+      }
+      textBuf += ch;
+      i++;
+      continue;
+    }
+
     // Tag: <tagname .../>  or <tagname>  or </tagname>
     if (ch === '<') {
       const tag = parseTagAt(template, i);
@@ -119,7 +138,7 @@ export function parseMessage(
             const lang = tag.attrs.lang;
             units.push({
               kind: 'code',
-              text: stripSurroundingNewlines(interpolated),
+              text: decodeEntities(stripSurroundingNewlines(interpolated)),
               ...(lang ? { lang } : {}),
             });
             i = closeMatch.end;
@@ -340,6 +359,46 @@ function findCloseTag(template: string, from: number, name: string): { start: nu
   const idx = template.toLowerCase().indexOf(needle.toLowerCase(), from);
   if (idx === -1) return null;
   return { start: idx, end: idx + needle.length };
+}
+
+/**
+ * The three entities worth supporting: the two that the tag grammar makes
+ * unwritable, plus `&amp;` so an author can write a literal `&lt;` if they
+ * ever need to show the escape itself. Longest first is unnecessary here —
+ * none is a prefix of another.
+ */
+const ENTITIES: ReadonlyArray<readonly [string, string]> = [
+  ['&lt;', '<'],
+  ['&gt;', '>'],
+  ['&amp;', '&'],
+];
+
+/** Match an entity at `start` (which must be `&`), or null if none fits. */
+function decodeEntityAt(template: string, start: number): { char: string; end: number } | null {
+  for (const [entity, char] of ENTITIES) {
+    if (template.startsWith(entity, start)) return { char, end: start + entity.length };
+  }
+  return null;
+}
+
+/** Same decoding for a whole string — used on code blocks, which skip the loop. */
+function decodeEntities(s: string): string {
+  if (!s.includes('&')) return s;
+  let out = '';
+  let i = 0;
+  while (i < s.length) {
+    if (s[i] === '&') {
+      const entity = decodeEntityAt(s, i);
+      if (entity) {
+        out += entity.char;
+        i = entity.end;
+        continue;
+      }
+    }
+    out += s[i];
+    i++;
+  }
+  return out;
 }
 
 /**
