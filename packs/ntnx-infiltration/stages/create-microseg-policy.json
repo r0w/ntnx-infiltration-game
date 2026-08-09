@@ -24,5 +24,8 @@
   },
   "needs": [
     "Trigram"
+  ],
+  "dependsOn": [
+    "create-category"
   ]
 }

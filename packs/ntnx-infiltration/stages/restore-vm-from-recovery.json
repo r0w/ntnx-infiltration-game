@@ -22,5 +22,10 @@
   ],
   "needs": [
     "Trigram"
+  ],
+  "dependsOn": [
+    "create-vm",
+    "verify-prod-user-isolation",
+    "incident-freeze"
   ]
 }

@@ -7,5 +7,9 @@
   "messages": [
     "stage-022.line-01",
     "stage-022.line-02"
+  ],
+  "dependsOn": [
+    "create-protection-policy",
+    "create-approval-policy"
   ]
 }

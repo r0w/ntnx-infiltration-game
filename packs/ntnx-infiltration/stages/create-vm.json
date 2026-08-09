@@ -27,5 +27,10 @@
   ],
   "needs": [
     "Trigram"
+  ],
+  "dependsOn": [
+    "create-project",
+    "create-subnet",
+    "add-ubuntu-image"
   ]
 }

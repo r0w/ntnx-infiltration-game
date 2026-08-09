@@ -20,5 +20,8 @@
   },
   "needs": [
     "Trigram"
+  ],
+  "dependsOn": [
+    "clone-app-blueprint"
   ]
 }

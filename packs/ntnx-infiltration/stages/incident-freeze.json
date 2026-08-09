@@ -12,5 +12,8 @@
   "invalidates": [
     "VMUUID",
     "HostUUID"
+  ],
+  "dependsOn": [
+    "create-vm"
   ]
 }

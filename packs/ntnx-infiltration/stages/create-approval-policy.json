@@ -25,5 +25,8 @@
   },
   "needs": [
     "Trigram"
+  ],
+  "dependsOn": [
+    "create-protection-policy"
   ]
 }

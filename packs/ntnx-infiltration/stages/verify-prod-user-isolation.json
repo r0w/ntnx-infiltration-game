@@ -10,5 +10,8 @@
     "stage-013.line-03",
     "stage-013.line-04",
     "stage-013.line-05"
+  ],
+  "dependsOn": [
+    "create-vm"
   ]
 }

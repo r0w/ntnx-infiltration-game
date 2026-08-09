@@ -12,5 +12,9 @@
   ],
   "needs": [
     "Trigram"
+  ],
+  "dependsOn": [
+    "create-ncm-playbook",
+    "create-vm"
   ]
 }

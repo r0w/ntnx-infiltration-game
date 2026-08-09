@@ -476,8 +476,8 @@ export const acts = {
 
 // ── cleanups ────────────────────────────────────────────────────────────────
 // Deleting the Project takes the federated namespace, and everything the labs
-// put in it, with it. The simple-app objects live in `default` on workload01,
-// outside the project, so they are removed one by one.
+// put in it, with it. The simple-app objects live in `default` on the
+// management cluster, outside the project, so they are removed one by one.
 
 async function cleanupProject(ctx: ActContext): Promise<void> {
   const kube = kubeOf(ctx);
