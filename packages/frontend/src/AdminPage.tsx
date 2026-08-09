@@ -31,6 +31,21 @@ type AdminTab = 'users' | 'logs' | 'pack' | 'cluster' | 'emails' | 'scoreboard';
 
 const STORAGE_KEY = 'ntnx-infiltration-admin-pw';
 
+/**
+ * Why a stage would break if the operator went ahead. Two different losses read
+ * differently: a variable nothing produces any more, and the cluster state a
+ * prerequisite stage left behind. Most stages have only the second, so naming
+ * just the variables printed a bare "missing".
+ */
+function cascadeReason(b: { missingVars: string[]; missingStages?: string[] }): string {
+  const parts: string[] = [];
+  if (b.missingVars.length > 0) parts.push(`missing ${b.missingVars.join(', ')}`);
+  if (b.missingStages && b.missingStages.length > 0) {
+    parts.push(`needs ${b.missingStages.join(', ')} to have run`);
+  }
+  return parts.join(' · ') || 'no longer satisfiable';
+}
+
 export function AdminPage() {
   const [password, setPassword] = useState<string | null>(() => {
     try {
@@ -979,13 +994,13 @@ function AdminDashboard({
           </p>
           <p className="modal-warn">
             <span className="c-yellow">disabling this</span> would leave the
-            stages below unable to satisfy their <code>needs</code>:
+            stages below without something they need:
           </p>
           <ul className="modal-cascade-list">
             {packDisableTarget.preview.cascade.map((b) => (
               <li key={b.stageName}>
                 <strong>{b.stageName}</strong>{' '}
-                <span className="c-dim">missing {b.missingVars.join(', ')}</span>
+                <span className="c-dim">{cascadeReason(b)}</span>
               </li>
             ))}
           </ul>

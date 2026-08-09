@@ -346,7 +346,13 @@ export interface AdminPackPayload {
 
 export interface AdminPackTogglePreview {
   requested: string;
-  cascade: Array<{ stageName: string; missingVars: string[] }>;
+  /**
+   * Why each stage would break. A stage can lose a variable, the cluster state
+   * a `dependsOn` prerequisite left behind, or both — the second reason is the
+   * only one most of the infiltration game's stages have, so a dialog reading
+   * `missingVars` alone says "missing" and nothing else.
+   */
+  cascade: Array<{ stageName: string; missingVars: string[]; missingStages?: string[] }>;
 }
 
 export interface AdminPackConfigPayload {
