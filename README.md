@@ -66,14 +66,17 @@ For `test` / `live`, set `PC_ENDPOINT` / `PC_USER` / `PC_PASSWORD` in `.env`. Se
 
 ```
 packages/
-  engine/       state machine, parser, gating, locale resolution - zero I/O, fully unit-tested
-  server/       Hono + bun:sqlite, session service, routes, pack loader
-  nutanix/      NutanixClient facade - mock + live (REST + SDK-per-domain) + capability probe
-  frontend/     Vite + React faux terminal
-  shared/       wire types
-packs/
-  ntnx-infiltration/   39 stages, locales/ (en, fr, de, + es/it as WIP), checks, fixtures, scripts/
+  engine/         state machine, parser, gating, locale resolution - zero I/O, fully unit-tested
+  server/         Hono + bun:sqlite, session service, routes, pack loader
+  nutanix/        NutanixClient facade - mock + live (REST + SDK-per-domain) + capability probe
+  kube-transport/ KubeClient facade - mock (fixtures) + live multi-cluster fleet
+  frontend/       Vite + React faux terminal
+  shared/         wire types
+packs/                 one directory per game; a deployment runs one of them (GAME_PACK)
+  ntnx-infiltration/   39 stages, locales/ (en, fr, de, + es/it as WIP), checks, acts, boot, fixtures
+  nkp-bootcamp/        26 stages, locales/ (en, fr), checks, acts, boot, assets, fixtures
 tooling/
+  audit-stage-deps.ts   stage dependency audit, any pack
   blueprint/    Calm DSL Python blueprint + post-compile patcher
 docs/
   OPERATOR.md       host-it-at-an-event guide (quickstart + detailed operator)
@@ -101,6 +104,7 @@ docs/
 4. Export the check function from `packs/<pack>/checks/index.ts`.
 5. (For mock mode) Add a fixture to `packs/<pack>/fixtures.json` keyed by `"METHOD path"`.
 6. Tag with `"impact": "destructive"` if the stage mutates cluster-wide state - it then only runs when the cluster profile is `hpoc`. Tag `"requires": ["NCM"]` (or `IO`, `CalmDSL`, `NodeRemove`) if the stage depends on an optional feature.
+7. Declare `"dependsOn": ["create-vm"]` for each earlier stage whose *cluster state* this one consumes - `needs` only models variables, so without this the `/admin` cascade lets an operator disable a prerequisite and leave this stage looking fine. Then run `bun tooling/audit-stage-deps.ts <pack> --apply` to refresh the derived `needs` / `captures`.
 
 The frontend `DevPanel` lets you jump to any stage without replaying the whole game. Captured variables and the cluster cache are preserved across jumps. Restart the backend after editing pack JSON - Bun caches the pack at boot.
 
@@ -112,7 +116,7 @@ Drop `packs/<pack>/locales/<code>.json` with every key from `en.json` translated
 
 ```bash
 bun test           # full suite across engine + server + nutanix + frontend
-bun run typecheck  # tsc --noEmit, all 4 workspace packages
+bun run typecheck  # tsc --noEmit, all 6 workspace packages + the packs' own TS
 ```
 
 CI runs both on every push and PR. No live cluster needed - everything is mock-backed.

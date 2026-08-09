@@ -1,7 +1,7 @@
 name: ci
 
 # Run the test suite + typecheck on every push to main / develop and on
-# every PR targeting either. Catches regressions across all 4 workspace
+# every PR targeting either. Catches regressions across all 6 workspace
 # packages without needing an HPoC — everything below runs against the
 # mock adapter. `develop` is the active integration branch; `main`
 # stays clean for vetted merges only.
@@ -41,7 +41,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Typecheck (4 packages)
+      - name: Typecheck (6 packages + the content packs)
         run: bun run typecheck
 
       - name: Run tests (all packages)

@@ -1,6 +1,6 @@
 # Tests
 
-**329 tests across 28 files**, all unit + integration, no browser. `bun test` from the repo root runs the lot in ~9 s. CI-friendly: no network, in-memory SQLite, mock Nutanix adapter.
+**511 tests across 47 files**, all unit + integration, no browser. `bun test` from the repo root runs the lot in ~9 s. CI-friendly: no network, in-memory SQLite, mock Nutanix adapter.
 
 ```bash
 bun test                                          # everything
@@ -49,6 +49,9 @@ bun test -t "lunch lock"                           # by name
 | `cluster-profile.test.ts` | Explicit `hpoc`/`other`, fallback to `other` when unset |
 | `ssh.test.ts` | `/api/ssh/ping` argv validation + probe error remapping |
 | `auto-fill-current.test.ts` | Auto-fillable vars (NodeSerial, NumberUpdates, Runway…) resolve in mock |
+| `pack-boot.test.ts` | The per-pack boot seam: which transports a pack asks for, the variables it seeds (and its fallbacks), and how each pack reads a player out of an operator URL |
+| `depends-on.test.ts` | `dependsOn` vs `needs`, the fixed-point cascade, seeded variables, and the real cascades both shipped packs declare |
+| `nkp-kube-facts.test.ts` | The bootcamp's boot probe: real ingress addresses when the fleet answers, the published placeholder when it does not, and the console URL built from either |
 | `nkp-pack.test.ts` | The NKP pack holds together: play order, stage ids, every check reachable, every message key and image present, and all twelve checks pass on the fixtures |
 | `e2e-nkp-mock.test.ts` | A learner plays the whole NKP bootcamp in mock and reaches the last stage |
 | `speakers.test.ts` (engine) | Which name a stage's `prompt` role renders under, and that renaming one role leaves the others alone |
@@ -56,7 +59,7 @@ bun test -t "lunch lock"                           # by name
 | `pack-nav.test.ts` | The contents menu resolves: translated titles with fallback, nesting, run index, lab flag, and a row naming a missing stage dropped with a warning |
 | `cluster-config-probe.test.ts` | The cached LCM count stage 29 judges against |
 | `pack-helpers.test.ts` | Stage-29 verdict deferral window after an LCM inventory |
-| `pack-integrity.test.ts` | Pack invariants: dependency-audit orphans, fixture placeholders |
+| `pack-integrity.test.ts` | Pack invariants, for **every** pack in the repo: dependency-audit orphans, `needs`/`captures` drift, `dependsOn` naming a stage the pack lacks or plays later, fixture placeholders |
 | `recovery-point-action.test.ts` | Recovery-point `<action/>` actually fires |
 | `effective-locales.test.ts` | WIP-locale filtering per mode + operator override |
 | `languages-gating.test.ts` | e2e WIP-locale gate (hidden in `live` unless enabled) |

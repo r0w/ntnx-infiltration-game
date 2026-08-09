@@ -10,7 +10,7 @@
     "build:frontend": "cd packages/frontend && bun run build",
     "build:server": "bun build packages/server/src/index.ts --target=bun --outdir=dist/server",
     "test": "bun test",
-    "typecheck": "cd packages/engine && bun run typecheck && cd ../server && bun run typecheck && cd ../nutanix && bun run typecheck && cd ../frontend && bun run typecheck"
+    "typecheck": "tsc -p packages/engine --noEmit && tsc -p packages/shared --noEmit && tsc -p packages/nutanix --noEmit && tsc -p packages/kube-transport --noEmit && tsc -p packages/server --noEmit && tsc -p packages/frontend --noEmit && tsc -p packs --noEmit"
   },
   "devDependencies": {
     "typescript": "^5.6.3",
