@@ -206,6 +206,7 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
     buildActRoutes({
       pack: deps.pack,
       nutanix: deps.nutanix,
+      kube: deps.kube,
       adminPassword: deps.adminPassword,
       clusterProfile: deps.clusterProfile,
       initialVariables: deps.initialVariables,

@@ -29,6 +29,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
   the bootcamp is narrated by the instructor.
 - Auto-play can now walk the whole NKP bootcamp on a real fleet: every lab step
   it validates, it can also perform.
+- Wiping a bootcamp learner's work is one call: `/api/act/cleanup-all/user01`
+  removes their project and everything in it, ready for another run.
 - The blueprint launch screen now asks which game to install, NCP or NKP.
 - The Pack tab can export the stage setup as one string, import it on another
   instance, and reset every stage back to the pack defaults.

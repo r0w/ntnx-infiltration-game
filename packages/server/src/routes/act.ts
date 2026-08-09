@@ -4,6 +4,7 @@ import type {
   ClusterCache,
   ClusterCacheEntry,
   ClusterProfile,
+  KubeClient,
   NutanixClient,
   Variables,
 } from '@ntnx-game/engine';
@@ -15,6 +16,8 @@ import { consoleLogger } from '../logger';
 export interface ActRoutesDeps {
   pack: LoadedPack;
   nutanix: NutanixClient;
+  /** Kubernetes transport, for packs whose acts and cleanups write to k8s. */
+  kube?: KubeClient;
   adminPassword: string;
   clusterProfile: ClusterProfile;
   /**
@@ -90,6 +93,15 @@ export function buildActRoutes(deps: ActRoutesDeps): Hono {
     const varStore = new Map<string, unknown>();
     for (const [k, v] of Object.entries(deps.initialVariables ?? {})) varStore.set(k, v);
     varStore.set('Trigram', trigram);
+    // The path segment is "who to act for", and each pack spells that
+    // differently: the infiltration game scopes its objects by trigram, the
+    // bootcamp by user number. Seed both from the one identifier so
+    // `/cleanup-all/user01` (or `/01`) reaches the NKP handlers, and nothing
+    // changes for a pack that only ever reads Trigram.
+    const asUserNum = trigram.trim().toLowerCase().replace(/^user/, '');
+    if (/^\d{1,2}$/.test(asUserNum)) {
+      varStore.set('UserNum', asUserNum.padStart(2, '0'));
+    }
     for (const [k, v] of Object.entries(extraVars)) varStore.set(k, v);
     const vars: Variables = {
       get: (name) => varStore.get(name),
@@ -111,6 +123,7 @@ export function buildActRoutes(deps: ActRoutesDeps): Hono {
       all: () => [...cacheStore.values()],
     };
     return {
+      kube: deps.kube,
       // Wrap with variable interpolation so mock fixtures keyed
       // `/.../{Trigram}-vm` continue to match after the act resolves
       // `Trigram` in its requests. No-op on non-mock transports
