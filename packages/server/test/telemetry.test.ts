@@ -94,6 +94,20 @@ describe('Telemetry', () => {
     await t.flush(); // must not throw
     expect(outboxCount(db)).toBe(1);
   });
+
+  // In a container localIp() is the docker bridge, identical on every host, so
+  // two deployments would merge into one record at Central.
+  test('the deployment id uses the VM address when the deploy passed one', () => {
+    const db = openDatabase({ path: ':memory:' });
+    const t = new Telemetry({ ...baseDeps, db, url: 'http://127.0.0.1:9', hostIp: '10.54.93.123' });
+    expect(t.deploymentId.startsWith('10.54.93.123-')).toBe(true);
+  });
+
+  test('a blank host address falls back to what the process can see', () => {
+    const db = openDatabase({ path: ':memory:' });
+    const t = new Telemetry({ ...baseDeps, db, url: 'http://127.0.0.1:9', hostIp: '  ' });
+    expect(t.deploymentId).toMatch(/^[^-]+-\d{4}-\d{2}-\d{2}$/);
+  });
 });
 
 describe('stage wall-time', () => {

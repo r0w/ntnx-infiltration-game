@@ -60,6 +60,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Usage stats now identify a deployment by the machine it runs on, instead of
+  reporting the same container address from every install.
 - The bootcamp's learners now appear in `/admin` Users: each pack says which
   captured value names a player, so a user number counts as an identity.
 - When a bootcamp check fails, `/admin` now says what it found, like the

@@ -193,6 +193,7 @@ async function main() {
     packVersion: pack.manifest.version,
     serverMode: cfg.mode,
     clusterProfile,
+    hostIp: cfg.gameFrontendHost,
   });
   telemetry.start();
 

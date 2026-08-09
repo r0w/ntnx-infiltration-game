@@ -26,6 +26,21 @@ export interface TelemetryDeps {
    *  mock/test validation runs. */
   serverMode: 'mock' | 'test' | 'live';
   clusterProfile: string;
+  /** The VM's own IPv4, from `GAME_FRONTEND_HOST`. See {@link hostIp}. */
+  hostIp?: string;
+}
+
+/**
+ * The address that identifies this deployment to Central. `GAME_FRONTEND_HOST`
+ * is computed on the VM at install (its egress IPv4) and handed to the
+ * container, so it is the one value that actually differs between deployments.
+ * Without it every containerised game reports the bridge address and separate
+ * deployments merge into one record at Central.
+ */
+function hostIp(configured?: string): string {
+  const given = (configured ?? '').trim();
+  if (given.length > 0) return given;
+  return localIp();
 }
 
 export interface TelemetryEvent {
@@ -52,7 +67,13 @@ const FLUSH_BATCH = 200;
 const SEND_TIMEOUT_MS = 5_000;
 const OUTBOX_CAP = 10_000;
 
-/** First non-internal IPv4 of the host, or 'unknown'. */
+/**
+ * First non-internal IPv4 this process can see, or 'unknown'.
+ *
+ * Inside a container that is the docker bridge address, which is the same on
+ * every deployment — so `hostIp` prefers the VM's own address when the deploy
+ * passed one, and only falls back here.
+ */
 function localIp(): string {
   for (const addrs of Object.values(networkInterfaces())) {
     for (const a of addrs ?? []) {
@@ -83,7 +104,7 @@ export class Telemetry {
     this.url = (deps.url ?? '').trim().replace(/\/+$/, '');
     this.token = deps.token || undefined;
     this.enabled = this.url.length > 0;
-    const ip = localIp();
+    const ip = hostIp(deps.hostIp);
     const firstBootDate = this.enabled ? this.firstBootDate() : '';
     this.deploymentId = `${ip}-${firstBootDate}`;
     const version = getVersionInfo();
