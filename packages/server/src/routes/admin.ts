@@ -550,7 +550,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     const overlay = new Map(
       deps.service.packOverlay.list(deps.pack.manifest.id).map((r) => [r.stageName, r]),
     );
-    const analysis = analyzeDeps({ stages: effective });
+    const analysis = analyzeDeps({ stages: effective, envSeeded: deps.service.seededVariableNames });
     const brokenByName = new Map(analysis.broken.map((b) => [b.stageName, b]));
     const baseByName = new Map(baseStages.map((s) => [s.name, s]));
 
@@ -656,7 +656,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     const stage = deps.pack.stages.find((s) => s.name === stageName);
     if (!stage) throw new HttpError(404, 'stage not found');
     const effective = deps.service.listEffectiveStages();
-    const r = cascadeDisable(effective, new Set([stageName]));
+    const r = cascadeDisable(effective, new Set([stageName]), undefined, deps.service.seededVariableNames);
     const preview: AdminPackTogglePreview = { requested: stageName, cascade: r.cascade };
     return c.json(preview);
   });
@@ -721,7 +721,10 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       missingStages: plan.missingStages,
       newStages: plan.newStages,
       clearedStages: [...before].filter((n) => !appliedSet.has(n)).sort(),
-      brokenStages: analyzeDeps({ stages: deps.service.listEffectiveStages() })
+      brokenStages: analyzeDeps({
+        stages: deps.service.listEffectiveStages(),
+        envSeeded: deps.service.seededVariableNames,
+      })
         .broken.map((b) => b.stageName)
         .sort(),
     };

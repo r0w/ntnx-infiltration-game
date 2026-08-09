@@ -170,6 +170,11 @@ export class SessionService {
   private readonly bundle: LocaleBundle;
   private readonly globalTypingSpeedMs?: number;
   private readonly initialVariables: Record<string, unknown>;
+  /**
+   * Variables that exist before the first stage plays. Read by the Pack tab's
+   * dependency analysis so a stage needing one of them is not called broken.
+   */
+  readonly seededVariableNames: ReadonlySet<string>;
   private readonly sessionDirectory: SessionDirectory;
   private readonly telemetry?: Telemetry;
   /**
@@ -210,6 +215,11 @@ export class SessionService {
     this.bundle = deps.bundle;
     this.globalTypingSpeedMs = deps.globalTypingSpeedMs;
     this.initialVariables = deps.initialVariables ?? {};
+    // `Vlanid` is allocated per session rather than seeded, but it is present
+    // before any stage runs, so the dependency analysis must count it as
+    // available like the rest. Everything else here is whatever the server and
+    // the pack's boot module actually put in — no pack names in code.
+    this.seededVariableNames = new Set([...Object.keys(this.initialVariables), 'Vlanid']);
     this.telemetry = deps.telemetry;
     this.unlockedGateIds = this.rebuildUnlockedSet();
     this.globallyPausedAt = this.packPauses.get(this.packId)?.pausedAt ?? null;

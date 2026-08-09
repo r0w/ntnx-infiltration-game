@@ -1,11 +1,17 @@
 import type { StageDefinition } from '@ntnx-game/engine';
 
 /**
- * Variables seeded from env via SessionService.initialVariables. They count
- * as always-available producers — disabling a stage that depends only on
- * env-seeded values doesn't break anything downstream.
+ * Variables the server seeds before a stage ever runs. They count as
+ * always-available producers — disabling a stage that depends only on seeded
+ * values doesn't break anything downstream.
+ *
+ * The fallback below is what the server itself contributes plus the two the
+ * infiltration game has always relied on; callers that know the running pack's
+ * real seeded set (the boot module's variables are a pack's own) pass it in,
+ * because a second game seeds different names and a hardcoded list would
+ * report its stages broken.
  */
-const ENV_SEEDED = new Set(['PC', 'PCUser', 'PCPassword', 'Vlanid', 'ImageURL']);
+const DEFAULT_ENV_SEEDED = new Set(['PC', 'PCUser', 'PCPassword', 'Vlanid', 'ImageURL']);
 
 export interface DepAnalysisInput {
   /** All stages in the pack (effective overlay applied — `active`/`adminGate`
@@ -25,6 +31,11 @@ export interface DepAnalysisInput {
    * needing the vars they capture should be flagged broken).
    */
   unreachableNames?: ReadonlySet<string>;
+  /**
+   * Variable names already seeded when the run starts (server config + the
+   * pack's boot module). Defaults to the infiltration game's historical set.
+   */
+  envSeeded?: ReadonlySet<string>;
 }
 
 export interface BrokenStage {
@@ -85,10 +96,11 @@ export function analyzeDeps(input: DepAnalysisInput): DepAnalysisResult {
 
   const broken: BrokenStage[] = [];
   const known = new Set(input.stages.map((s) => s.name));
+  const seeded = input.envSeeded ?? DEFAULT_ENV_SEEDED;
   for (const s of input.stages) {
     if (off.has(s.name)) continue;
     const missing = (s.needs ?? []).filter(
-      (v) => !ENV_SEEDED.has(v) && !firstProducer.has(v),
+      (v) => !seeded.has(v) && !firstProducer.has(v),
     );
     // A prerequisite the pack does not ship is a typo, not a broken stage:
     // flagging it would disable a working stage over a bad manifest.
@@ -123,6 +135,7 @@ export function cascadeDisable(
   stages: readonly StageDefinition[],
   initialDisabled: ReadonlySet<string>,
   unreachableNames?: ReadonlySet<string>,
+  envSeeded?: ReadonlySet<string>,
 ): { disabled: Set<string>; cascade: BrokenStage[] } {
   const disabled = new Set(initialDisabled);
   const cascade: BrokenStage[] = [];
@@ -130,7 +143,7 @@ export function cascadeDisable(
   let prevSize = -1;
   while (disabled.size !== prevSize) {
     prevSize = disabled.size;
-    const r = analyzeDeps({ stages, disabledNames: disabled, unreachableNames });
+    const r = analyzeDeps({ stages, disabledNames: disabled, unreachableNames, envSeeded });
     for (const b of r.broken) {
       disabled.add(b.stageName);
       if (!cascadeSeen.has(b.stageName) && !initialDisabled.has(b.stageName)) {
