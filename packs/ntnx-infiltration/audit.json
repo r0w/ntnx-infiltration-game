@@ -1,0 +1,52 @@
+{
+  "_comment": "What the stage-dependency audit cannot read off the JSON. See tooling/audit-stage-deps.ts.",
+  "envSeeded": [
+    "PC",
+    "PCUser",
+    "PCPassword",
+    "Vlanid",
+    "ImageURL",
+    "EmailReport",
+    "ProdUsername",
+    "ProdPassword",
+    "frontendHost",
+    "OldPC",
+    "OldPCUsername",
+    "OldPCPassword"
+  ],
+  "checkCaptures": {
+    "CheckVM": [
+      "VMUUID",
+      "HostUUID"
+    ],
+    "CheckLiveMigration": [
+      "HostUUID"
+    ],
+    "CheckRestoreVM": [
+      "VMUUID"
+    ]
+  },
+  "checkConsumes": {
+    "CheckLiveMigration": [
+      "HostUUID"
+    ],
+    "CheckUpdateBP": [
+      "Vlanid"
+    ],
+    "CheckNewNode": [
+      "NodeSerial"
+    ],
+    "CheckUpdates": [
+      "NumberUpdates"
+    ],
+    "CheckRunway": [
+      "Runway"
+    ]
+  },
+  "ignoreVars": [
+    "Greeting",
+    "frontendPort",
+    "SupportedLanguages",
+    "$continue"
+  ]
+}

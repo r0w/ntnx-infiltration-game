@@ -33,3 +33,37 @@ Calm has two artifact types with different scopes. A **runbook** is a one-shot s
 - Operator walkthrough: [`../docs/OPERATOR.md`](../docs/OPERATOR.md).
 - Blueprint internals: [`blueprint/README.md`](./blueprint/README.md).
 - How the current blueprint came to be (and the earlier generations): [`blueprint/docs/`](./blueprint/docs/) and the `archive/` sources.
+
+## `audit-stage-deps.ts`
+
+Static dependency audit across a content pack. Builds a producer/consumer graph
+of the session variables referenced by stage prose and check captures, then
+flags:
+
+- **Orphans** - variables a stage's prose substitutes (`{Foo}`) but no upstream
+  stage produces (no `<input/>`, no check capture, not seeded at boot).
+- **Unrehydratable producers** - stages whose captures come from user input
+  rather than an API query, so skipping them silently breaks downstream stages
+  that depend on the captured value.
+- **Unsatisfiable prerequisites** - a `dependsOn` naming a stage the pack does
+  not ship, or one played later. Both make the `/admin` cascade quietly wrong.
+
+Run from the repo root:
+
+```bash
+bun tooling/audit-stage-deps.ts                          # every pack, human report
+bun tooling/audit-stage-deps.ts nkp-bootcamp             # one pack
+bun tooling/audit-stage-deps.ts nkp-bootcamp --json      # full graph as JSON
+bun tooling/audit-stage-deps.ts --check                  # every pack, non-zero on drift
+bun tooling/audit-stage-deps.ts ntnx-infiltration --apply   # write derived `needs` + `captures`
+```
+
+`--apply` is the canonical way to refresh the `needs` and `captures` fields on
+every stage after adding or editing one - the runtime gate reads those fields
+to decide whether an upstream is missing. It rewrites files, so it names a
+single pack; every other mode defaults to all of them.
+
+What the audit cannot read off the JSON - which variables a check captures or
+consumes, which names are seeded before the run, which are not session
+variables at all - is declared per pack in `packs/<id>/audit.json`. A pack
+without that file still gets the prose-only graph.
