@@ -19,7 +19,7 @@ PC_USER="@@{PC_USERNAME}@@"
 PC_PWD="@@{PC_PASSWORD}@@"
 CLUSTER_NAME="@@{CLUSTERNAME}@@"
 
-CALM_DSL_IMAGE="${CALM_DSL_IMAGE:-ntnx/calm-dsl:latest}"
+CALM_DSL_IMAGE="${CALM_DSL_IMAGE:-nutanix/calm-dsl:v4.3.1}"
 WORKDIR="$HOME/calm-dsl-staging"
 DSLDIR="$WORKDIR/.calm"
 
