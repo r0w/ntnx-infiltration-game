@@ -1653,6 +1653,35 @@ async function actCreateNcmPlaybook(ctx: ActContext): Promise<void> {
   throw new Error(`actCreateNcmPlaybook: playbook ${name} did not appear within 60 s after POST`);
 }
 
+/** VPC creation precedes VM cloning, so its presence alone is not success. */
+async function waitForCloneApp(ctx: ActContext, appName: string, expectedVpc: string): Promise<void> {
+  // Stay below Bun's 255 s idle timeout; a subsequent act resumes the wait.
+  const deadline = Date.now() + 220_000;
+  while (Date.now() < deadline) {
+    const apps = await ctx.nutanix.rest.request<{ entities?: AnyRec[] }>(
+      'POST', '/api/nutanix/v3/apps/list', { length: 250 },
+    );
+    const app = apps.entities?.find(
+      (a) => a.status?.name === appName || a.metadata?.name === appName,
+    );
+    const state = app?.status?.state?.toLowerCase();
+    if (['error', 'failure', 'failed', 'aborted', 'sys_aborted', 'deleted', 'deleting'].includes(state)) {
+      throw new Error(`actCloneAppBlueprint: application ${appName} is ${state}; inspect its Calm tasks before retrying`);
+    }
+    if (state === 'running') {
+      const vpcs = await ctx.nutanix.rest.request<{ data?: AnyRec[] }>(
+        'GET', '/api/networking/v4.0/config/vpcs?%24limit=100',
+      );
+      if (vpcs.data?.some((v) => v.name === expectedVpc)) {
+        ctx.logger.info(`act app ${appName} running; vpc ${expectedVpc} present`);
+        return;
+      }
+    }
+    await new Promise((r) => setTimeout(r, 8_000));
+  }
+  throw new Error(`actCloneAppBlueprint: application ${appName} has not finished provisioning with vpc ${expectedVpc}; retry to continue waiting`);
+}
+
 /** Stage 35 clone-app-blueprint: launches `CloneProd` blueprint as `{Trigram}-app`. */
 async function actCloneAppBlueprint(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
@@ -1663,27 +1692,9 @@ async function actCloneAppBlueprint(ctx: ActContext): Promise<void> {
     '/api/nutanix/v3/apps/list',
     { length: 250 },
   );
-  const expectedVpcEarly = `${trigram}-vpc`;
   if (existing.entities?.some((a) => a.status?.name === appName || a.metadata?.name === appName)) {
-    // App already exists from a prior call. The check ALSO requires the
-    // runtime-created VPC; a re-fire after the launch but before the
-    // runbook finished should wait for VPC, not return blindly.
-    const earlyDeadline = Date.now() + 220_000;
-    while (Date.now() < earlyDeadline) {
-      const vpcs = await ctx.nutanix.rest.request<{ data?: AnyRec[] }>(
-        'GET',
-        '/api/networking/v4.0/config/vpcs?%24limit=100',
-      );
-      if ((vpcs.data ?? []).find((v) => v.name === expectedVpcEarly)) {
-        ctx.logger.info(`act noop: app ${appName} + vpc ${expectedVpcEarly} already present`);
-        return;
-      }
-      ctx.logger.info(`act waiting: app ${appName} present but vpc ${expectedVpcEarly} not yet`);
-      await new Promise((r) => setTimeout(r, 8_000));
-    }
-    throw new Error(
-      `actCloneAppBlueprint: app ${appName} exists but vpc ${expectedVpcEarly} did not materialize`,
-    );
+    await waitForCloneApp(ctx, appName, `${trigram}-vpc`);
+    return;
   }
   const bps = await ctx.nutanix.rest.request<{ entities?: AnyRec[] }>(
     'POST',
@@ -1792,38 +1803,8 @@ async function actCloneAppBlueprint(ctx: ActContext): Promise<void> {
       },
     },
   );
-  // Calm launch is the slowest act: the runbook spins up a VPC, runs
-  // tasks, etc. The check requires BOTH the app entry AND the runtime-
-  // created `{Trigram}-vpc` to exist. App appears in /list ~5–30 s after
-  // launch; VPC only materializes after the runbook completes (~2–5 min).
-  // Cap the wait below Bun's idleTimeout (255 s max) so the response
-  // writes back before the connection closes: operator can re-fire if
-  // Calm needs more than this budget.
-  const expectedVpc = `${trigram}-vpc`;
-  const deadline = Date.now() + 220_000;
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 8_000));
-    const apps = await ctx.nutanix.rest.request<{ entities?: AnyRec[] }>(
-      'POST',
-      '/api/nutanix/v3/apps/list',
-      { length: 250 },
-    );
-    const appEntry = apps.entities?.find(
-      (a) => a.status?.name === appName || a.metadata?.name === appName,
-    );
-    if (!appEntry) continue;
-    const vpcs = await ctx.nutanix.rest.request<{ data?: AnyRec[] }>(
-      'GET',
-      '/api/networking/v4.0/config/vpcs?%24limit=100',
-    );
-    if ((vpcs.data ?? []).find((v) => v.name === expectedVpc)) {
-      ctx.logger.info(`act app ${appName} + vpc ${expectedVpc} visible`);
-      return;
-    }
-  }
-  throw new Error(
-    `actCloneAppBlueprint: app ${appName} or vpc ${expectedVpc} did not settle within 4 min`,
-  );
+  await waitForCloneApp(ctx, appName, `${trigram}-vpc`);
+
 }
 
 /**
