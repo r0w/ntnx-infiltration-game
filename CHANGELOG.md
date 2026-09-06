@@ -19,6 +19,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Pin Calm DSL to 4.3.1 so prerequisite blueprints deploy reliably.
+
 ## [1.0.0] - 2026-07-28
 
 ### Fixed
