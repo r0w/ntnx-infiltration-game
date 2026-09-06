@@ -19,6 +19,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Restore CloneProd cloning on PC 7.5 with compatible Python SDK versions.
+- Auto-play and the CloneProd check now wait for successful application provisioning.
+
 ## [1.0.2] - 2026-09-06
 
 ### Fixed

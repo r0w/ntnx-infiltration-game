@@ -1647,6 +1647,12 @@ async function CheckCloneApp(ctx: CheckContext): Promise<CheckResult> {
         detail: `Application '${expectedApp}' not launched from CloneProd (saw '${bpName}').`,
       };
     }
+    if (foundApp.status?.state?.toLowerCase() !== 'running') {
+      return {
+        pass: false,
+        detail: `Application '${expectedApp}' is ${foundApp.status?.state ?? 'in an unknown state'}; CloneProd must finish provisioning successfully.`,
+      };
+    }
     if (foundApp.metadata?.uuid) {
       ctx.cache.set({ kind: 'calmApp', logicalName: expectedApp, uuid: foundApp.metadata.uuid });
     }
