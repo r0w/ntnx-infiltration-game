@@ -32,6 +32,11 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
   expected, or when erasure coding has to be turned off on an Objects container.
 - The install no longer stops on clusters running NCM Self-Service 4.4.0, which
   rejected one of the two blueprints the game uploads for later stages.
+
+## [1.0.1] - 2026-09-06
+
+### Fixed
+
 - Pin Calm DSL to 4.3.1 so prerequisite blueprints deploy reliably.
 
 ## [1.0.0] - 2026-07-28
@@ -182,7 +187,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 Baseline release. See the git history for changes up to this point.
 
-[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.5.0...v1.0.0
 [0.5.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.2...v0.4.3
