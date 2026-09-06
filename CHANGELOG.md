@@ -19,6 +19,12 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+## [1.0.2] - 2026-09-06
+
+### Fixed
+
+- Installation now stops with the Nutanix error when network or VM creation fails.
+
 ## [1.0.1] - 2026-09-06
 
 ### Fixed
@@ -173,7 +179,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 Baseline release. See the git history for changes up to this point.
 
-[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.5.0...v1.0.0
 [0.5.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.4.3...v0.5.0
