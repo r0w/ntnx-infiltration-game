@@ -25,4 +25,5 @@ packages:
   - python3-venv
   - python3-pip
 runcmd:
-  - sudo -iu nutanix bash -c 'mkdir -p ~/.calm && python3 -m venv ~/.calm/venv && ~/.calm/venv/bin/pip install --quiet --upgrade pip && ~/.calm/venv/bin/pip install --quiet ntnx-networking-py-client ntnx-vmm-py-client ntnx-prism-py-client jsonpath-ng requests'
+  # PC 7.5 exposes Networking/Prism v4.3 and VMM v4.2; latest SDKs target newer APIs.
+  - sudo -iu nutanix bash -c 'mkdir -p ~/.calm && python3 -m venv ~/.calm/venv && ~/.calm/venv/bin/pip install --quiet --upgrade pip && ~/.calm/venv/bin/pip install --quiet ntnx-networking-py-client==4.3.1 ntnx-vmm-py-client==4.2.2 ntnx-prism-py-client==4.3.1 jsonpath-ng requests'
