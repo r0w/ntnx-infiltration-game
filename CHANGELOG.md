@@ -19,6 +19,10 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+## [1.0.3] - 2026-09-07
+
+### Fixed
+
 - Restore CloneProd cloning on PC 7.5 with compatible Python SDK versions.
 - Auto-play and the CloneProd check now wait for successful application provisioning.
 
@@ -182,7 +186,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 Baseline release. See the git history for changes up to this point.
 
-[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v0.5.0...v1.0.0
