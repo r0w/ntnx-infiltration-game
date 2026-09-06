@@ -113,6 +113,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
   expected, or when erasure coding has to be turned off on an Objects container.
 - The install no longer stops on clusters running NCM Self-Service 4.4.0, which
   rejected one of the two blueprints the game uploads for later stages.
+- Pin Calm DSL to 4.3.1 so prerequisite blueprints deploy reliably.
 
 ## [1.0.0] - 2026-07-28
 

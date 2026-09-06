@@ -40,7 +40,7 @@ image fix lands. Stage 21 (create-approval-policy) stays unplayable
 on `hpoc` until then; gated when `CLUSTER_PROFILE=other`.
 
 Push prereq BPs + Clone fake BPs are wired natively: the sh task pulls
-`ntnx/calm-dsl:latest` docker on the deployed VM and runs `calm create
+`nutanix/calm-dsl:v4.3.1` docker on the deployed VM and runs `calm create
 bp` from there, bypassing both Calm's `/import_file` API rejection of
 .tgz and the escript sandbox. Same pattern as v2's `Push prereq BPs`
 — generated at compile time from
