@@ -20,6 +20,7 @@ Calm injects @@{PC_IP}@@, @@{PC_USERNAME}@@, @@{PC_PASSWORD}@@,
 
 import json
 import sys
+import time
 import urllib3
 import uuid
 
@@ -36,6 +37,45 @@ CLUSTER_UUID = '@@{Game.CLUSTERUUID}@@'
 BASE = "https://%s:9440" % PC_IP
 AUTH = (PC_USERNAME, PC_PASSWORD)
 HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
+
+
+TASK_POLLS = 300
+
+
+def wait_for_task(response, v3=False):
+    """A 202 only accepts the mutation; wait for Nutanix's actual verdict."""
+    payload = response.json()
+    if v3:
+        task_id = payload.get('status', {}).get('execution_context', {}).get('task_uuid')
+        path = '/api/nutanix/v3/tasks/'
+    else:
+        task_id = (payload.get('data') or {}).get('extId')
+        path = '/api/prism/v4.0/config/tasks/'
+    if not task_id:
+        return False, 'mutation response missing task reference; outcome unknown'
+
+    last = 'no task response'
+    for _ in range(TASK_POLLS):
+        try:
+            r = requests.get(BASE + path + task_id, auth=AUTH, headers=HEADERS,
+                             verify=False, timeout=20)
+            r.raise_for_status()
+            task = r.json() if v3 else (r.json().get('data') or {})
+        except (requests.RequestException, ValueError) as exc:
+            last = str(exc)[:200]
+        else:
+            last = task.get('status', 'missing status')
+            if last == 'SUCCEEDED':
+                return True, 'task succeeded'
+            if last in ('FAILED', 'CANCELED', 'CANCELLED'):
+                messages = [task.get('legacyErrorMessage') or '',
+                            task.get('error_detail') or '']
+                messages.extend(m.get('message', '') if isinstance(m, dict) else str(m)
+                                for m in task.get('errorMessages', []))
+                return False, 'task %s: %s' % (last, ' '.join(str(m) for m in messages if m))
+        time.sleep(2)
+    return False, 'task %s did not finish after %d polls (last: %s); outcome unknown' % (
+        task_id, TASK_POLLS, last)
 
 
 def _make_session():
@@ -72,6 +112,16 @@ def list_subnets():
             break
         page += 1
     return out
+
+
+def wait_for_subnet(predicate):
+    """Allow the read model to catch up after the mutation task succeeds."""
+    for _ in range(30):
+        if any(predicate(s) for s in list_subnets()):
+            return True
+        time.sleep(2)
+    print('[FAIL] subnet did not reach the expected state after task success')
+    return False
 
 
 def get_subnet_by_id(ext_id):
@@ -117,6 +167,12 @@ def rename_aux1_to_secondary(subnets):
     if r.status_code >= 400:
         print("[FAIL] rename aux-1 → secondary: %d %s" % (r.status_code, r.text[:200]))
         return None
+    ok, message = wait_for_task(r)
+    if not ok:
+        print("[FAIL] rename aux-1: " + message)
+        return None
+    if not wait_for_subnet(lambda s: s.get('extId') == aux1['extId'] and s.get('name') == 'secondary'):
+        return None
     print("[ok]   renamed 'aux-1' → 'secondary'")
     return body_data
 
@@ -140,6 +196,12 @@ def migrate_secondary_to_advanced(secondary):
     )
     if r.status_code >= 400:
         print("[FAIL] migrate-subnets: %d %s" % (r.status_code, r.text[:200]))
+        return False
+    ok, message = wait_for_task(r)
+    if not ok:
+        print("[FAIL] migrate-subnets: " + message)
+        return False
+    if not wait_for_subnet(lambda s: s.get('extId') == ext_id and s.get('isAdvancedNetworking')):
         return False
     print("[ok]   migrated 'secondary' to advanced-networking")
     return True
@@ -189,6 +251,12 @@ def create_test_network(subnets):
     )
     if r.status_code >= 400:
         print("[FAIL] create TestNetwork: %d %s" % (r.status_code, r.text[:200]))
+        return False
+    ok, message = wait_for_task(r)
+    if not ok:
+        print("[FAIL] create TestNetwork: " + message)
+        return False
+    if not wait_for_subnet(lambda s: s.get('name') == 'TestNetwork' and s.get('isAdvancedNetworking')):
         return False
     print("[ok]   created subnet 'TestNetwork' (VLAN 1, 192.168.1.0/25)")
     return True
