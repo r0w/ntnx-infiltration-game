@@ -54,6 +54,45 @@ AUTH = (PC_USERNAME, PC_PASSWORD)
 HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 
 
+TASK_POLLS = 300
+
+
+def wait_for_task(response, v3=False):
+    """A 202 only accepts the mutation; wait for Nutanix's actual verdict."""
+    payload = response.json()
+    if v3:
+        task_id = payload.get('status', {}).get('execution_context', {}).get('task_uuid')
+        path = '/api/nutanix/v3/tasks/'
+    else:
+        task_id = (payload.get('data') or {}).get('extId')
+        path = '/api/prism/v4.0/config/tasks/'
+    if not task_id:
+        return False, 'mutation response missing task reference; outcome unknown'
+
+    last = 'no task response'
+    for _ in range(TASK_POLLS):
+        try:
+            r = requests.get(BASE + path + task_id, auth=AUTH, headers=HEADERS,
+                             verify=False, timeout=20)
+            r.raise_for_status()
+            task = r.json() if v3 else (r.json().get('data') or {})
+        except (requests.RequestException, ValueError) as exc:
+            last = str(exc)[:200]
+        else:
+            last = task.get('status', 'missing status')
+            if last == 'SUCCEEDED':
+                return True, 'task succeeded'
+            if last in ('FAILED', 'CANCELED', 'CANCELLED'):
+                messages = [task.get('legacyErrorMessage') or '',
+                            task.get('error_detail') or '']
+                messages.extend(m.get('message', '') if isinstance(m, dict) else str(m)
+                                for m in task.get('errorMessages', []))
+                return False, 'task %s: %s' % (last, ' '.join(str(m) for m in messages if m))
+        time.sleep(2)
+    return False, 'task %s did not finish after %d polls (last: %s); outcome unknown' % (
+        task_id, TASK_POLLS, last)
+
+
 def _req_retry(method, url, attempts=5, backoff=4, timeout=20, **kwargs):
     """GET/POST with retry on transient 5xx + network errors. PC's v3/v4 list
     endpoints throw sporadic 500s when the cluster is busy (aplos under load
@@ -171,7 +210,8 @@ def create_vm(spec, cat_uuid, subnet_uuid, image_uuid):
     )
     if r.status_code >= 400:
         return False, "%d %s" % (r.status_code, r.text[:200])
-    return True, "created"
+    ok, message = wait_for_task(r)
+    return (True, "created") if ok else (False, message)
 
 
 def assign_project_and_set_power(vm_name, power_on):
@@ -217,6 +257,9 @@ def assign_project_and_set_power(vm_name, power_on):
     )
     if r.status_code != 202:
         return False, "v3 PUT: %d %s" % (r.status_code, r.text[:200])
+    ok, message = wait_for_task(r, v3=True)
+    if not ok:
+        return False, message
     return True, "project assigned + powered %s" % ("ON" if power_on else "OFF")
 
 
@@ -251,11 +294,12 @@ def main():
         ok, msg = create_vm(spec, cat_uuid, subnet_uuid, image_uuid)
         if not ok:
             print("  [FAIL] %-30s — %s" % (spec['name'], msg))
-            continue
+            return 1
         print("  [ok]   %-30s — %s" % (spec['name'], msg))
         ok, msg = assign_project_and_set_power(spec['name'], power_on)
         if not ok:
             print("        post-create: [FAIL] %s" % msg)
+            return 1
         else:
             print("        post-create: [ok]   %s" % msg)
     return 0

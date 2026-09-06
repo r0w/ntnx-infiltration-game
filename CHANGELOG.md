@@ -19,6 +19,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Installation now stops with the Nutanix error when network or VM creation fails.
+
 ## [1.0.1] - 2026-09-06
 
 ### Fixed
