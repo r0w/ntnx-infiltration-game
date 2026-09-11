@@ -88,7 +88,9 @@ If the installer reports an **unknown outcome**, first check the original task a
 
 ### The launch form
 
-Click **Credentials** and set the `NUTANIX` credential to your PC admin password, then fill the runtime form:
+Click **Credentials** and set the `NUTANIX` credential password, then fill the runtime form. Its **Username** is the game VM's SSH account (`nutanix` by default), not the PCVM account or the Prism Central login. You can change it at launch; that one value creates the guest account and configures all SSH tasks and the jumphost endpoint. Use a non-root Linux username of 1–32 lowercase letters, digits, underscores or hyphens, starting with a letter or underscore.
+
+Keep `nutanix` for the existing deployment behavior. Changing a credential on an already deployed app does not rename its Linux account; retain the existing username for day-2 actions. The `Validate VM SSH user` task prints the selected username before `Check Login`, and SSH tasks show the connected username without printing the password. If `Check Login` fails, inspect `cloud-init status --long` and the account from the VM console, and check the credential password.
 
 | Field | Value |
 |---|---|

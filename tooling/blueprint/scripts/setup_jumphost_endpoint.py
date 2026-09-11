@@ -92,6 +92,7 @@ def main():
             print("[warn] delete stale endpoint returned %d %s" %
                   (d.status_code, d.text[:200]))
 
+    print("[info] jumphost SSH user: %s" % ENDPOINT_USER)
     cred_uuid = str(uuid.uuid4())
     cred_name = "endpoint_cred_game" + cred_uuid[:3]
 
