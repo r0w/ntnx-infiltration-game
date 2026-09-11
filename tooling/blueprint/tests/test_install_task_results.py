@@ -141,7 +141,7 @@ def test_vm_failure_stops_install_before_next_vm(failure):
     ns['get_category_uuid'] = lambda: 'cat'
     ns['get_subnet_uuid'] = lambda _: 'subnet'
     ns['get_image_uuid'] = lambda: 'image'
-    ns['vm_exists'] = lambda _: False
+    ns['find_vm'] = lambda _: None
     ns['create_vm'] = Mock(return_value=(failure != 'create', 'create verdict'))
     ns['assign_project_and_set_power'] = Mock(return_value=(False, 'assignment failed'))
     assert ns['main']() == 1
@@ -152,8 +152,8 @@ def test_vm_failure_stops_install_before_next_vm(failure):
 
 def test_assignment_waits_for_its_task():
     ns = load('create_prod_vms.py')
-    ns['requests'].get.side_effect = [Response({'data': [{'extId': 'vm'}]}),
-        Response({'metadata': {}, 'spec': {'resources': {}}}),
+    ns['find_vm'] = Mock(return_value={'extId': 'vm'})
+    ns['requests'].get.side_effect = [Response({'metadata': {}, 'spec': {'resources': {}}}),
         Response({'status': 'FAILED', 'error_detail': 'assignment denied'})]
     ns['requests'].put.return_value = Response({'status': {'execution_context': {'task_uuid': 'assign'}}}, 202)
     ok, message = ns['assign_project_and_set_power']('vm', False)

@@ -380,27 +380,10 @@ class GameContent(Package):
                     target=ref(Game),
                 )
 
-            # Branch 2 — Activate policy engine (~30s if already on,
-            # up to ~10 min if MSP boot retries — see memory
-            # project_calm_policy_vm_unstable). Best-effort: the
-            # script exits 0 with a loud `[best-effort WARN]` if both
-            # retries time out, so the install runbook keeps going.
-            # Runs parallel-with-Branch-1 so the MSP has the full
-            # ~16-40 min cluster-shrink window to come up; by the time
-            # Branch 1 reaches `Run game container`, the policy engine
-            # is up and stage 21 (create-approval-policy) is playable
-            # without operator intervention.
-            #
-            # BUT: enabling the policy engine deploys a Calm Policy VM
-            # whose host is chosen by AHV/ADS, not us. If it lands on
-            # host-4 while Branch 1 is removing that node, the two
-            # contend. So we gate activation on `Wait for node draining`
-            # first: it blocks until host-4 has left the scheduling pool
-            # (in_maintenance / TO_BE_REMOVED / gone), after which ADS
-            # can only place the Policy VM on the surviving 3 nodes. The
-            # gate returns immediately on non-hpoc / no-4th-host, so the
-            # activation still kicks off promptly there and keeps
-            # overlapping the (much longer) rebalance on hpoc.
+            # Monitor Policy Engine download/startup without restarting it.
+            # Best-effort warnings mean approval-policy stages are not ready.
+            # Wait until host 4 stops accepting VMs before activation so ADS
+            # cannot place the Policy VM on the node being removed.
             with branch(p0):
                 CalmTask.Exec.escript.py3(
                     name="Wait for node draining",
