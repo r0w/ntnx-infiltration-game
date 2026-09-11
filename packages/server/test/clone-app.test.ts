@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { VariableStore, type CheckContext, type NutanixClient } from '@ntnx-game/engine';
+import { createMockAdapter } from '@ntnx-game/nutanix';
 import { acts } from '../../../packs/ntnx-infiltration/acts';
 import { checks } from '../../../packs/ntnx-infiltration/checks';
 
@@ -14,6 +15,9 @@ function context(states: Array<string | undefined>, vpc = true) {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     nutanix: {
       mode: 'live',
+      sdk: createMockAdapter({
+        'GET /api/networking/v4.0/config/vpcs': { data: vpc ? [{ name: 'rbo-vpc', extId: 'vpc' }] : [] },
+      }).sdk,
       rest: {
         async request(_method: string, path: string) {
           if (path.includes('/apps/list')) {

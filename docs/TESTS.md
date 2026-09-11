@@ -1,6 +1,6 @@
 # Tests
 
-**329 tests across 28 files**, all unit + integration, no browser. `bun test` from the repo root runs the lot in ~9 s. CI-friendly: no network, in-memory SQLite, mock Nutanix adapter.
+Unit and integration tests use in-memory SQLite and the mock Nutanix adapter. Run `bun test` from the repo root; `bun run typecheck` also checks the infiltration pack’s checks against the installed SDK types.
 
 ```bash
 bun test                                          # everything
@@ -25,6 +25,7 @@ bun test -t "lunch lock"                           # by name
 
 | File | What it pins |
 |---|---|
+| `check-sdk.test.ts` | SDK pagination, empty responses, error propagation, policy details and approval lookup |
 | `mock-adapter.test.ts` | Fixture matching, miss errors, SDK envelope shim, per-session overlay (`<action name='deleteVM'/>` hides the entity) |
 | `rest-adapter.test.ts` | Auth + headers, TLS toggle, non-2xx → typed error, GET 5xx retry |
 | `capability-probe.test.ts` | The four capability flags on healthy responses; degrades gracefully (never throws) |

@@ -21,10 +21,12 @@ export type MockFixtures = Record<string, unknown>;
  */
 function buildMockSdk(request: NutanixClient['request']): NutanixSdkSurface {
   /** Wrap a raw fixture response `{data: [...]}` into the SDK double-envelope. */
-  async function list<T>(path: string): Promise<{ data: { data: T[]; resultsTotal: number } }> {
+  async function list<T>(path: string, opts?: { $page?: number; $limit?: number }): Promise<{ data: { data: T[]; metadata: { totalAvailableResults: number } } }> {
     const raw = await request<{ data?: T[] }>('GET', path);
     const items = raw?.data ?? [];
-    return { data: { data: items, resultsTotal: items.length } };
+    const start = (opts?.$page ?? 0) * (opts?.$limit ?? items.length);
+    const page = opts?.$limit === undefined ? items : items.slice(start, start + opts.$limit);
+    return { data: { data: page, metadata: { totalAvailableResults: items.length } } };
   }
   async function getOne<T>(path: string): Promise<{ data: { data: T } }> {
     const raw = await request<T>('GET', path);
@@ -46,25 +48,25 @@ function buildMockSdk(request: NutanixClient['request']): NutanixSdkSurface {
   return {
     iam: {
       users: {
-        listUsers: () => list('/api/iam/v4.0/authn/users'),
+        listUsers: (opts?: { $page?: number; $limit?: number }) => list('/api/iam/v4.0/authn/users', opts),
         getUserById: (extId: string) => getOne(`/api/iam/v4.0/authn/users/${extId}`),
         createUser: (body: unknown) => createOne('/api/iam/v4.0/authn/users', body),
         deleteUserById: (extId: string) => deleteOne(`/api/iam/v4.0/authn/users/${extId}`),
       },
       authzPolicies: {
-        listAuthorizationPolicies: () => list('/api/iam/v4.0/authz/authorization-policies'),
+        listAuthorizationPolicies: (opts?: { $page?: number; $limit?: number }) => list('/api/iam/v4.0/authz/authorization-policies', opts),
         createAuthorizationPolicy: (body: unknown) =>
           createOne('/api/iam/v4.0/authz/authorization-policies', body),
         deleteAuthorizationPolicyById: (extId: string) =>
           deleteOne(`/api/iam/v4.0/authz/authorization-policies/${extId}`),
       },
       roles: {
-        listRoles: () => list('/api/iam/v4.0/authz/roles'),
+        listRoles: (opts?: { $page?: number; $limit?: number }) => list('/api/iam/v4.0/authz/roles', opts),
       },
     },
     vmm: {
       vms: {
-        listVms: () => list('/api/vmm/v4.0/ahv/config/vms'),
+        listVms: (opts?: { $page?: number; $limit?: number }) => list('/api/vmm/v4.0/ahv/config/vms', opts),
         getVmById: (extId: string) => getOne(`/api/vmm/v4.0/ahv/config/vms/${extId}`),
         createVm: (body: unknown) => createOne('/api/vmm/v4.0/ahv/config/vms', body),
         deleteVmById: (extId: string) => deleteOne(`/api/vmm/v4.0/ahv/config/vms/${extId}`),
@@ -74,14 +76,14 @@ function buildMockSdk(request: NutanixClient['request']): NutanixSdkSurface {
           update(`/api/vmm/v4.0/ahv/config/vms/${extId}/$actions/migrate`, body),
       },
       images: {
-        listImages: () => list('/api/vmm/v4.0/content/images'),
+        listImages: (opts?: { $page?: number; $limit?: number }) => list('/api/vmm/v4.0/content/images', opts),
         createImage: (body: unknown) => createOne('/api/vmm/v4.0/content/images', body),
         deleteImageById: (extId: string) => deleteOne(`/api/vmm/v4.0/content/images/${extId}`),
       },
     },
     prism: {
       categories: {
-        listCategories: () => list('/api/prism/v4.2/config/categories'),
+        listCategories: (opts?: { $page?: number; $limit?: number }) => list('/api/prism/v4.2/config/categories', opts),
         createCategory: (body: unknown) => createOne('/api/prism/v4.2/config/categories', body),
         deleteCategoryById: (extId: string) =>
           deleteOne(`/api/prism/v4.2/config/categories/${extId}`),
@@ -91,8 +93,11 @@ function buildMockSdk(request: NutanixClient['request']): NutanixSdkSurface {
       },
     },
     networking: {
+      vpcs: {
+        listVpcs: (opts?: { $page?: number; $limit?: number }) => list('/api/networking/v4.0/config/vpcs', opts),
+      },
       subnets: {
-        listSubnets: () => list('/api/networking/v4.0/config/subnets'),
+        listSubnets: (opts?: { $page?: number; $limit?: number }) => list('/api/networking/v4.0/config/subnets', opts),
         createSubnet: (body: unknown) =>
           createOne('/api/networking/v4.0/config/subnets', body),
         deleteSubnetById: (extId: string) =>
@@ -100,8 +105,12 @@ function buildMockSdk(request: NutanixClient['request']): NutanixSdkSurface {
       },
     },
     microseg: {
+      serviceGroups: {
+        listServiceGroups: (opts?: { $page?: number; $limit?: number }) => list('/api/microseg/v4.0/config/service-groups', opts),
+      },
       policies: {
-        listNetworkSecurityPolicies: () => list('/api/microseg/v4.0/config/policies'),
+        getNetworkSecurityPolicyById: async (extId: string) => ({ data: await request('GET', `/api/microseg/v4.0/config/policies/${extId}`) }),
+        listNetworkSecurityPolicies: (opts?: { $page?: number; $limit?: number }) => list('/api/microseg/v4.0/config/policies', opts),
         createNetworkSecurityPolicy: (body: unknown) =>
           createOne('/api/microseg/v4.0/config/policies', body),
         updateNetworkSecurityPolicyById: (extId: string, body: unknown) =>
@@ -112,14 +121,14 @@ function buildMockSdk(request: NutanixClient['request']): NutanixSdkSurface {
     },
     datapolicies: {
       storage: {
-        listStoragePolicies: () => list('/api/datapolicies/v4.2/config/storage-policies'),
+        listStoragePolicies: (opts?: { $page?: number; $limit?: number }) => list('/api/datapolicies/v4.2/config/storage-policies', opts),
         createStoragePolicy: (body: unknown) =>
           createOne('/api/datapolicies/v4.2/config/storage-policies', body),
         deleteStoragePolicyById: (extId: string) =>
           deleteOne(`/api/datapolicies/v4.2/config/storage-policies/${extId}`),
       },
       protection: {
-        listProtectionPolicies: () => list('/api/datapolicies/v4.2/config/protection-policies'),
+        listProtectionPolicies: (opts?: { $page?: number; $limit?: number }) => list('/api/datapolicies/v4.2/config/protection-policies', opts),
         createProtectionPolicy: (body: unknown) =>
           createOne('/api/datapolicies/v4.2/config/protection-policies', body),
         deleteProtectionPolicyById: (extId: string) =>
@@ -138,14 +147,14 @@ function buildMockSdk(request: NutanixClient['request']): NutanixSdkSurface {
     },
     opsmgmt: {
       reportConfigs: {
-        listReportConfigs: () => list('/api/opsmgmt/v4.0/config/report-configs'),
+        listReportConfigs: (opts?: { $page?: number; $limit?: number }) => list('/api/opsmgmt/v4.0/config/report-configs', opts),
         createReportConfig: (body: unknown) =>
           createOne('/api/opsmgmt/v4.0/config/report-configs', body),
         deleteReportConfigById: (extId: string) =>
           deleteOne(`/api/opsmgmt/v4.0/config/report-configs/${extId}`),
       },
       reports: {
-        listReports: () => list('/api/opsmgmt/v4.0/config/reports'),
+        listReports: (opts?: { $page?: number; $limit?: number }) => list('/api/opsmgmt/v4.0/config/reports', opts),
       },
     },
   };
