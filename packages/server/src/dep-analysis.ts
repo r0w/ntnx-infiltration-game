@@ -5,7 +5,7 @@ import type { StageDefinition } from '@ntnx-game/engine';
  * as always-available producers — disabling a stage that depends only on
  * env-seeded values doesn't break anything downstream.
  */
-const ENV_SEEDED = new Set(['PC', 'PCUser', 'PCPassword', 'Vlanid', 'ImageURL']);
+const ENV_SEEDED = new Set(['PC', 'PCUser', 'PCPassword', 'Vlanid', 'ImageURL', 'SecondaryNetwork']);
 
 export interface DepAnalysisInput {
   /** All stages in the pack (effective overlay applied — `active`/`adminGate`

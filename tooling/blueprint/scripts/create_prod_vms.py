@@ -37,7 +37,7 @@ CAT_KEY = "Environment"
 CAT_VALUE = "Production"
 PROJECT_NAME = "production"
 IMAGE_NAME = "Ubuntu2204"
-SECONDARY_SUBNET_NAME = "secondary"
+SECONDARY_SUBNET_NAME = '@@{GAME_SECONDARY_NETWORK}@@'.strip() or "secondary"
 
 VM_SPECS = [
     {"name": "prd-ransom-probe-1",        "numSockets": 2, "memorySizeGB": 4},
@@ -136,21 +136,21 @@ def get_category_uuid():
 
 
 def get_subnet_uuid(name):
-    r = _req_retry(
-        "GET", "%s/api/networking/v4.0/config/subnets?$limit=100" % BASE,
-    )
-    r.raise_for_status()
-    subs = r.json().get('data') or []
-    name_lc = (name or '').lower()
-    for s in subs:
-        if (s.get('name') or '').lower() == name_lc:
-            return s['extId']
-    # Tolerate cluster-prefixed names (e.g. `secondary-<cluster>`), casing
-    # included; same pattern as setup_production_project.get_subnet_uuid.
-    for s in subs:
-        if (s.get('name') or '').lower().startswith(name_lc + '-'):
-            return s['extId']
-    return None
+    subs = []
+    for page in range(200):
+        r = _req_retry("GET", "%s/api/networking/v4.0/config/subnets?$limit=100&$page=%d" % (BASE, page))
+        r.raise_for_status()
+        chunk = r.json().get('data') or []
+        subs.extend(chunk)
+        if len(chunk) < 100:
+            break
+    name_lc = name.lower()
+    matches = [s for s in subs if (s.get('name') or '').lower() == name_lc]
+    if not matches and name_lc == 'secondary':
+        matches = [s for s in subs if (s.get('name') or '').lower().startswith('secondary-')]
+    if len(matches) > 1:
+        raise ValueError("Multiple networks match %r; configure the exact name" % name)
+    return matches[0]['extId'] if matches else None
 
 
 def get_image_uuid():

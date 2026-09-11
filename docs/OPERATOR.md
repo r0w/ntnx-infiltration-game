@@ -125,3 +125,25 @@ The blueprint exposes two actions in Self-Service > Apps:
 - Cluster pre-reqs from the original [`Golgautier/ntnx-escape-game`](https://github.com/Golgautier/ntnx-escape-game) apply as-is; the blueprint mirrors that runbook.
 - Blueprint internals: [`../tooling/blueprint/README.md`](../tooling/blueprint/README.md).
 - Stage list: [`STAGES.md`](./STAGES.md).
+
+### Choosing the secondary network
+
+At blueprint launch, **Secondary network name** (`GAME_SECONDARY_NETWORK`)
+selects the existing routable VLAN used by production VMs and by players for
+projects and their VM's second NIC. Player instructions in every language and
+auto-play use the same setting. The game VM's own NIC is still selected separately
+on the launch screen; `TestNetwork` remains the external network for CloneProd.
+
+The default `secondary` also accepts `secondary-<cluster>` (case-insensitive).
+An exact match wins; if multiple suffixed networks match, enter the full name.
+With the default only, the installer can rename `aux-1` to `secondary` when needed.
+A custom name must already exist and matches exactly, ignoring case. A missing
+or ambiguous network stops setup instead of selecting another VLAN.
+
+The selected VLAN must support Advanced networking for microsegmentation.
+The installer migrates it if necessary, and stops if migration fails.
+Changing its name does not bypass that cluster requirement.
+
+For Docker deployments, set `GAME_SECONDARY_NETWORK` in `.env` and recreate the
+container. Choose the network before installation: changing this setting on an
+existing game does not move previously created VMs or update their projects.

@@ -534,6 +534,11 @@ class DefaultProfile(Profile):
         ["debug", "info", "warn", "error"], label="Server log level",
         default="info", is_mandatory=False, runtime=False, is_hidden=True,
     )
+    GAME_SECONDARY_NETWORK = CalmVariable.Simple(
+        "secondary", label="Secondary network name",
+        description="Existing routable VLAN to use for production and player VMs. Migrated to Advanced networking if needed.",
+        is_mandatory=True, runtime=True,
+    )
     GAME_PROD_USERNAME = CalmVariable.Simple(
         "thebadguy", is_mandatory=False, runtime=False, is_hidden=True,
     )

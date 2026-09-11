@@ -21,7 +21,7 @@ import {
   getTrigram,
   getV4WithEtag,
   getVarString,
-  isSecondarySubnet,
+  selectSecondarySubnet,
   listAllSdk,
   listAllV3,
   listAllV4Rest,
@@ -217,9 +217,9 @@ async function actCreateProject(ctx: ActContext): Promise<void> {
       'actCreateProject: no nutanix_pc account on PC, project will be created without an infrastructure binding (CheckProject will fail)',
     );
   }
-  // Subnet binding mirrors the stage prompt (`Use the VLAN named secondary`).
+  // Use the same network as the player instructions.
   const subnets = await listAllSdk<AnyRec>(($p) => sdk(ctx).networking.subnets.listSubnets($p));
-  const secondary = subnets.find((s) => isSecondarySubnet(s.name));
+  const secondary = selectSecondarySubnet(subnets, getVarString(ctx, 'SecondaryNetwork'));
   const primary = subnets.find((s) => /^primary(-|$)/i.test(s.name ?? ''));
   const pmUuid = await ensureUserUuid(ctx, 'theprojectmanager', 'Paul', 'Project Manager');
   if (!pmUuid) {
@@ -606,15 +606,8 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
   const name = `${trigram}-vm`;
   const subnets = await listAllSdk<AnyRec>(($p) => sdk(ctx).networking.subnets.listSubnets($p));
   const subnet = subnets.find((s) => s.name === `${trigram}-subnet`);
-  // The routable subnet the stage prompt calls `secondary`. Match the bare
-  // name AND the `secondary-<cluster>` form HPoCs ship (see isSecondarySubnet)
-  // — a strict match here left this VM with 1 NIC on those clusters.
-  const secondary = subnets.find((s) => isSecondarySubnet(s.name));
-  if (!secondary) {
-    ctx.logger.warn(
-      `actCreateVm: 'secondary' subnet missing on cluster, VM will be created with 1 NIC and CheckVM (NIC-count) will fail`,
-    );
-  }
+  // Resolve before creating anything; a missing second network cannot produce a playable VM.
+  const secondary = selectSecondarySubnet(subnets, getVarString(ctx, 'SecondaryNetwork'));
   const images = await listAllSdk<AnyRec>(($p) => sdk(ctx).vmm.images.listImages($p));
   const image = images.find((i) => i.name === `${trigram}-ubuntu`);
   const clusters = await ctx.nutanix.rest.request<{ data?: Array<{ extId?: string }> }>(

@@ -48,6 +48,7 @@ describe('pack integrity', () => {
       'PCUser',
       'PCPassword',
       'ImageURL',
+      'SecondaryNetwork',
       'EmailReport',
       'ProdUsername',
       'ProdPassword',
