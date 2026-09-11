@@ -64,6 +64,8 @@ Create a project with a Prism Central administrator who can manage Self-Service 
 5. Import the prerequisites runbook into this project and set **Target project** to its exact name. Use the AD username in UPN format, for example `administrator@ntnxlab.local`. Check that the runbook succeeds and the **AD** endpoint appears in that project.
 6. Import the game blueprint into the same project. Endpoints are project-scoped; a blueprint in another project cannot use this AD endpoint.
 
+![Create Project in the PC 7.6 Admin Center](screenshots/project-create-pc76.png)
+
 The project does not have to be named `lab` in v1.1.0. With v1.0.4 and earlier, use **`lab`**, which those runbooks require. The **production** project and **TestNetwork** are created later by installation; do not select them for this initial setup.
 
 ### Policy Engine is still activating
