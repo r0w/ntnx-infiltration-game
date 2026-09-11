@@ -15,6 +15,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- Choose the network used by production VMs and players at deployment.
+
 - Choose the game VM’s SSH user at launch and see it in deployment logs.
 
 - The Pack tab can export the stage setup as one string, import it on another

@@ -1,3 +1,4 @@
+import { selectSecondarySubnet } from '../network';
 import { checkSdk, listAllSdk } from './sdk';
 import { unwrapOne } from '../acts/helpers';
 import type { CheckContext, CheckResult } from '@ntnx-game/engine';
@@ -535,6 +536,16 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
           }),
         };
       }
+    }
+    const configured = ctx.vars.get('SecondaryNetwork');
+    const secondaryName = typeof configured === 'string' ? configured : 'secondary';
+    const networks = await listAllSdk<{ name?: string; extId?: string }>(
+      p => checkSdk(ctx.nutanix).networking.subnets.listSubnets(p),
+    );
+    const secondary = selectSecondarySubnet(networks, secondaryName);
+    if (!secondary.extId || !nics.some(n =>
+      (n.nicNetworkInfo?.subnet?.extId ?? n.networkInfo?.subnet?.extId) === secondary.extId)) {
+      return { pass: false, detail: `VM '${expected}' has no NIC on '${secondary.name}'.` };
     }
     // Boot disk image binding — same treatment.
     const img = await lookupOrSkip(ctx, 'CheckVM: image', () =>

@@ -131,6 +131,7 @@ async function main() {
     PCUser: cfg.pcUser,
     PCPassword: cfg.pcPassword,
     ImageURL: cfg.gameImageUrl,
+    SecondaryNetwork: cfg.gameSecondaryNetwork,
     EmailReport: cfg.gameEmailReport,
     ProdUsername: cfg.gameProdUsername,
     ProdPassword: cfg.gameProdPassword,

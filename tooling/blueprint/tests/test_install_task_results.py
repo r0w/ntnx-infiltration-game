@@ -26,7 +26,7 @@ class Response:
 def load(name):
     path = SCRIPTS / name
     ns = {}
-    exec(compile(path.read_text().rsplit('\nsys.exit(main())', 1)[0], str(path), 'exec'), ns)
+    exec(compile(path.read_text().replace('@@{GAME_SECONDARY_NETWORK}@@', 'secondary').rsplit('\nsys.exit(main())', 1)[0], str(path), 'exec'), ns)
     ns['requests'] = SimpleNamespace(get=Mock(), post=Mock(), put=Mock(),
                                      RequestException=requests.RequestException)
     ns['time'] = SimpleNamespace(sleep=Mock())

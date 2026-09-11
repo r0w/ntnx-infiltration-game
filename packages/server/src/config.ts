@@ -26,6 +26,7 @@ export interface ServerConfig {
   typingSpeedMs: number;
   publicDir: string | undefined;
   gameImageUrl: string;
+  gameSecondaryNetwork: string;
   /**
    * Suffix appended to the player's `{Trigram}` to form the report-recipient
    * + playbook-recipient email address (`{Trigram}{EmailReport}`). Stage 27
@@ -130,6 +131,7 @@ export function loadConfig(env = process.env): ServerConfig {
     gameImageUrl:
       env.GAME_IMAGE_URL ||
       'https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img',
+    gameSecondaryNetwork: env.GAME_SECONDARY_NETWORK?.trim() || 'secondary',
     gameEmailReport: env.GAME_EMAIL_REPORT || '-secret-message@ntnxlab.com',
     gameProdUsername: env.GAME_PROD_USERNAME ?? '',
     gameProdPassword: env.GAME_PROD_PASSWORD ?? '',
