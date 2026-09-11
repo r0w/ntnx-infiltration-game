@@ -23,6 +23,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- Updated cluster checks for users, VMs, networks and policies.
+
 - The deployment guide explains project creation on fresh HPOCs and recovery from network or Policy Engine delays.
 
 - The Pack tab now opens with the whole run in play order, colour-coded by what
