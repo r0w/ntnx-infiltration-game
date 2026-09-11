@@ -30,7 +30,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
-- Installation waits for Policy Engine downloads without restarting activation and clearly reports incomplete readiness.
+- Installation waits for Policy Engine downloads without restarting activation and reports incomplete readiness during activation and final checks.
 - Production VM creation retries confirmed temporary failures and completes configuration when installation resumes.
 
 - The install no longer stops when the cluster serves an older v4 API than

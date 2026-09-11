@@ -33,6 +33,7 @@ PC_IP = '@@{PC_IP}@@'
 PC_USERNAME = '@@{PC_USERNAME}@@'
 PC_PASSWORD = '@@{PC_PASSWORD}@@'
 CLUSTER_UUID = '@@{Game.CLUSTERUUID}@@'
+CLUSTER_PROFILE = '@@{CLUSTER_PROFILE}@@'
 
 PC_BASE = "https://%s:9440" % PC_IP
 BASE = "%s/api/clustermgmt" % PC_BASE
@@ -140,6 +141,30 @@ def discover_unconfigured_nodes(cluster_uuid, max_polls=60):
         return None, "GET task-response failed: %s" % str(e)[:200]
 
 
+def policy_ready():
+    """Readiness is separate from the activation task's best-effort result."""
+    if CLUSTER_PROFILE != 'hpoc':
+        return True
+    try:
+        r = requests.get(PC_BASE + '/api/calm/v3.0/features/policy',
+                         auth=AUTH, headers=HEADERS, verify=False, timeout=20)
+        r.raise_for_status()
+        feature = r.json()
+        enabled = feature.get('spec', {}).get('feature_status', {}).get('is_enabled') is True
+        config = feature.get('status', {}).get('feature_status', {}).get('config') or {}
+        if enabled and config.get('state') in (None, 'COMPLETED'):
+            print('[ok] Policy Engine enabled; approval-policy stages are ready')
+            return True
+        reason = 'state=%s, enabled=%s, message=%s' % (
+            config.get('state'), enabled, config.get('state_message'))
+    except (requests.RequestException, ValueError) as exc:
+        reason = 'status could not be read: %s' % str(exc)[:150]
+    print('[WARN] Policy Engine is NOT confirmed ready (%s). Installation may continue, '
+          'but approval-policy stages require activation. Check Prism Central > '
+          'Settings > Calm (/dm/settings/policy_enablement), then run Verify State again.' % reason)
+    return False
+
+
 def main():
     issues = []
 
@@ -197,7 +222,10 @@ def main():
         return 1
 
     print()
-    print("All checks passed. Game install complete.")
+    if policy_ready():
+        print("Cluster checks passed. Game container startup is checked separately.")
+    else:
+        print("Cluster checks passed with a Policy Engine readiness warning.")
     return 0
 
 
