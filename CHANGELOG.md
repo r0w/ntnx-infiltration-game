@@ -21,12 +21,17 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- The deployment guide explains project creation on fresh HPOCs and recovery from network or Policy Engine delays.
+
 - The Pack tab now opens with the whole run in play order, colour-coded by what
   each stage will do, and the stage list can be filtered and searched.
 - The prerequisites runbook now asks which project to use instead of assuming
   one named `lab`, and says so plainly when that project does not exist.
 
 ### Fixed
+
+- Installation waits for Policy Engine downloads without restarting activation and clearly reports incomplete readiness.
+- Production VM creation retries confirmed temporary failures and completes configuration when installation resumes.
 
 - The install no longer stops when the cluster serves an older v4 API than
   expected, or when erasure coding has to be turned off on an Objects container.

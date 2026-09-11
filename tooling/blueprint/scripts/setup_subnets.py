@@ -203,7 +203,7 @@ def migrate_secondary_to_advanced(secondary):
         return False
     if not wait_for_subnet(lambda s: s.get('extId') == ext_id and s.get('isAdvancedNetworking')):
         return False
-    print("[ok]   migrated 'secondary' to advanced-networking")
+    print("[ok]   migration reports Advanced networking; Create Prod VMs will verify VM attachment works")
     return True
 
 
