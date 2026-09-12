@@ -458,10 +458,14 @@ class DefaultProfile(Profile):
     #   Container image repository, Image tag, Cluster profile, Run mode,
     #   Prism Central IP, Prism Central username, Prism Central password,
     #   Planner PC password, Time zone, Secondary network name.
-    GAME_SECONDARY_NETWORK = CalmVariable.Simple(
-        "secondary", label="Secondary network name",
-        description="Existing routable VLAN for the game. Migrated to Advanced if needed. Leave default for HPOC",
-        is_mandatory=True, runtime=True,
+    GAME_SECONDARY_NETWORK = CalmVariable.WithOptions.FromTask(
+        CalmTask.Exec.escript.py3(
+            name="List game networks",
+            filename=os.path.join("scripts", "list_game_networks.py"),
+        ),
+        value="secondary", label="Secondary network name",
+        description="Existing routable VLAN for the game. Migrated to Advanced if needed. Use \"secondary\" for HPOC",
+        is_mandatory=True,
     )
     TIMEZONE = CalmVariable.WithOptions(
         [
