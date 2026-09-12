@@ -44,6 +44,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Auto-play shares a category with the VM’s project when required and verifies its assignment.
+
 - Auto-play waits for VM ownership updates and retries concurrent changes.
 
 - Auto-play completes existing projects and reports failed member assignments.

@@ -146,7 +146,7 @@ export async function waitForTask(
     const status = res?.data?.status;
     if (status && /SUCCEED|SUCCESS|COMPLETE/i.test(status)) return res.data ?? {};
     if (status && /FAIL|ERROR|CANCEL/i.test(status)) {
-      throw new Error(`Task ${taskExtId} terminal: ${status}`);
+      throw new Error(`Task ${taskExtId} terminal: ${status}: ${JSON.stringify(res.data?.errorMessages ?? [])}`);
     }
     await new Promise((r) => setTimeout(r, 1500));
   }
