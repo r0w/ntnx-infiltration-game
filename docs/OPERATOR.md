@@ -1,5 +1,3 @@
-Before importing the runbook or blueprint, create a Self-Service project named `lab` if it does not already exist.
-
 # Operator guide
 
 Everything you need to host the **Nutanix Infiltration Game** at an event, a demo, or a training session.
@@ -7,6 +5,8 @@ Everything you need to host the **Nutanix Infiltration Game** at an event, a dem
 To develop the game itself, see [`../README.md`](../README.md). For the blueprint internals, see [`../tooling/blueprint/README.md`](../tooling/blueprint/README.md).
 
 ## Quickstart
+
+Before importing the runbook or blueprint, create a project named "lab" if it does not already exist.
 
 You need an HPoC and two files. About five minutes of clicks, then the install runs on its own.
 

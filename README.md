@@ -1,5 +1,3 @@
-Before importing the runbook or blueprint, create a Self-Service project named `lab` if it does not already exist.
-
 # ntnx-infiltration-game
 
 ![The ntnx-infiltration-game terminal](docs/screenshots/landing.png)
@@ -13,6 +11,8 @@ A hands-on game that teaches the **Nutanix Cloud Platform** by playing it. Playe
 Based on the original [`ntnx-escape-game`](https://github.com/Golgautier/ntnx-escape-game) by Golgautier.
 
 ## Quickstart
+
+Before importing the runbook or blueprint, create a project named "lab" if it does not already exist.
 
 You need an HPoC and two files. That's it.
 

@@ -25,7 +25,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
-- Added a reminder to create the `lab` project before importing the game.
+- Added a reminder at the start of Quickstart to create the `lab` project before import.
 
 - Moved the secondary network setting to the bottom of the launch form with clearer help.
 
