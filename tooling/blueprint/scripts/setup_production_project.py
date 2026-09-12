@@ -495,7 +495,7 @@ def add_user_as_project_admin(project_uuid, account_uuid, primary_uuid,
                     "cluster_reference_list": [
                         {"kind": "cluster", "uuid": cluster_uuid}
                     ],
-                    "enable_directory_and_identity_provider_shortlist": False,
+                    "directory_reference_list": [{"kind": "directory_service", "uuid": directory_id}],
                 },
                 "description": "Production Project",
             },
@@ -545,10 +545,21 @@ def add_user_as_project_admin(project_uuid, account_uuid, primary_uuid,
         auth=AUTH, headers=HEADERS, verify=False, timeout=60,
         data=json.dumps(payload),
     )
-    if r.status_code >= 400:
-        print("[warn] projects_internal PUT returned %d: %s" % (r.status_code, r.text[:300]))
-        return False
-    return True
+    r.raise_for_status()
+    # projects_internal accepts writes before directory/member validation finishes.
+    for _ in range(60):
+        current = _SESS.get("%s/api/nutanix/v3/projects/%s" % (BASE, project_uuid),
+                            auth=AUTH, headers=HEADERS, verify=False, timeout=20)
+        current.raise_for_status()
+        status = current.json().get("status", {})
+        if status.get("state") in ("ERROR", "FAILED"):
+            raise Exception("Project membership failed: %s" % json.dumps(status.get("message_list", [])))
+        members = status.get("resources", {}).get("user_reference_list", [])
+        if status.get("state") == "COMPLETE" and any(u.get("uuid") == user_uuid for u in members):
+            return True
+        time.sleep(2)
+    raise Exception("Project membership did not complete; inspect the update task")
+
 
 
 def main():

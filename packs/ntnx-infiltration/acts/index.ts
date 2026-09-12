@@ -29,6 +29,7 @@ import {
   postV4,
   postV4Action,
   putV4,
+  waitForTask,
 } from './helpers';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -978,61 +979,46 @@ async function actCreateCategory(ctx: ActContext): Promise<void> {
   }
 }
 
-/**
- * Stage 16 apply-category-to-vm: tags `{Trigram}-vm` with `{Trigram}-cat:
- * Critical`. v4 `associate-categories` action uses `categories: [{extId}]`;
- * the resulting association shows up on GET `/vms/{extId}/categories` (a
- * sub-resource), NOT on the list response's top-level `categories` field.
- * Need to fetch categories via the sub-endpoint to verify, but the check
- * (`CheckCatVM`) does that already. Seed just fires the action and trusts
- * the check to validate.
- */
+/** Apply the category, sharing it with the VM's project if Prism requires it. */
 async function actApplyCategoryToVm(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
-  const vms = await listAllSdk<AnyRec>(($p) => sdk(ctx).vmm.vms.listVms($p));
+  const vms = await listAllSdk<AnyRec>(($p) => sdk(ctx).vmm.vms.listVms({ ...$p, $select: 'extId,name,categories' }));
   const vm = vms.find((v) => v.name === `${trigram}-vm`);
-  if (!vm?.extId) return;
+  if (!vm?.extId) throw new Error(`VM '${trigram}-vm' not found`);
   const cats = await listAllSdk<AnyRec>(($p) => sdk(ctx).prism.categories.listCategories($p));
   const critical = cats.find((c) => c.key === `${trigram}-cat` && c.value === 'Critical');
-  if (!critical?.extId) return;
+  if (!critical?.extId) throw new Error(`Category '${trigram}-cat:Critical' not found`);
+  if (vm.categories?.some((c: AnyRec) => c.extId === critical.extId)) return;
+
+  async function runAction(path: string, action: string, body: AnyRec) {
+    const accepted = await postV4Action<{ data?: { extId?: string } }>(ctx, path, action, body);
+    if (!accepted?.data?.extId) throw new Error(`${action} returned no task; verify its outcome before retrying`);
+    await waitForTask(ctx, accepted.data.extId, 120_000);
+  }
+  const associate = () => runAction(`/api/vmm/v4.2/ahv/config/vms/${vm.extId}`,
+    '$actions/associate-categories', { categories: [{ extId: critical.extId }] });
   try {
-    await postV4Action(
-      ctx,
-      `/api/vmm/v4.2/ahv/config/vms/${vm.extId}`,
-      '$actions/associate-categories',
-      { categories: [{ extId: critical.extId }] },
-    );
+    await associate();
   } catch (err) {
-    ctx.logger.warn('actApplyCategoryToVm: associate failed', { err: String(err) });
-    return;
+    // Share only after Prism confirms this specific project-scope rejection.
+    // Older clusters that accept the association never need the newer share API.
+    if (!/VMM-31701|VM_PROJECT_ASSOCIATION_CHECK_ERROR/.test(String(err))) throw err;
+    const detail = await ctx.nutanix.rest.request<AnyRec>('GET', `/api/nutanix/v3/vms/${vm.extId}`);
+    const projectUuid = detail.metadata?.project_reference?.uuid;
+    if (!projectUuid || projectUuid === '00000000-0000-0000-0000-000000000000') throw err;
+    await runAction(`/api/prism/v4.4/config/categories/${critical.extId}`, '$actions/share', { projectExtId: projectUuid });
+    await associate();
   }
-  // associate-categories is task-tracked: the POST returns 202, the binding
-  // shows up on `/vms/{extId}?$select=categories` a few seconds later. If
-  // we return now and auto-play submits "Ok" immediately, CheckCatVM sees
-  // an empty categories list and rejects the stage. Poll until the binding
-  // is visible (cap 30 s). Per-iteration try/catch so a transient rate-
-  // limit doesn't bubble out and let auto-play fire too early.
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 1500));
-    try {
-      const refreshed = await ctx.nutanix.request<{
-        data?: Array<{ extId?: string; name?: string; categories?: Array<{ extId?: string }> }>;
-      }>('GET', `/api/vmm/v4.2/ahv/config/vms?%24select=extId,name,categories&%24filter=name%20eq%20'${trigram}-vm'`);
-      const cur = refreshed.data?.find((v) => v.name === `${trigram}-vm`);
-      const applied = (cur?.categories ?? []).some((c) => c.extId === critical.extId);
-      if (applied) {
-        ctx.logger.info('actApplyCategoryToVm: category binding visible');
-        return;
-      }
-    } catch (err) {
-      ctx.logger.warn('actApplyCategoryToVm: poll failed (transient?)', {
-        err: String(err).slice(0, 150),
-      });
+  for (let poll = 0; poll < 20; poll++) {
+    const refreshed = await listAllSdk<AnyRec>(($p) => sdk(ctx).vmm.vms.listVms({ ...$p, $select: 'extId,name,categories' }));
+    if (refreshed.find((v) => v.extId === vm.extId)?.categories?.some((c: AnyRec) => c.extId === critical.extId)) {
+      ctx.logger.info('actApplyCategoryToVm: category binding confirmed');
+      return;
     }
+    await new Promise((resolve) => setTimeout(resolve, 1500));
   }
-  ctx.logger.warn('actApplyCategoryToVm: category binding did not surface within 30 s');
+  throw new Error('Category association task succeeded but the binding is not visible');
 }
 
 /** Stage 17 create-storage-policy: creates `{Trigram}-sto-policy` with encryption enabled. */
