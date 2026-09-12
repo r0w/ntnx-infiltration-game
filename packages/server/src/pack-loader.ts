@@ -112,6 +112,21 @@ async function loadStages(dir: string, order: string[]): Promise<StageDefinition
     parsed.index = i;
     stages.push(parsed as StageDefinition);
   }
+  for (const stage of stages) {
+    if (stage.dependsOn === undefined) continue;
+    if (!Array.isArray(stage.dependsOn) || stage.dependsOn.some((name) => typeof name !== 'string')) {
+      throw new Error(`stage "${stage.name}" dependsOn must be an array of stage names`);
+    }
+    if (new Set(stage.dependsOn).size !== stage.dependsOn.length) {
+      throw new Error(`stage "${stage.name}" has duplicate dependencies`);
+    }
+    for (const name of stage.dependsOn) {
+      const upstream = stages.find((s) => s.name === name);
+      if (!upstream || upstream.index >= stage.index) {
+        throw new Error(`stage "${stage.name}" dependency "${name}" must name an earlier stage`);
+      }
+    }
+  }
   return stages;
 }
 

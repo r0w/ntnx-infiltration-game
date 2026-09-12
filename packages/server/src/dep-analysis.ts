@@ -31,6 +31,8 @@ export interface BrokenStage {
   stageName: string;
   /** Variables the stage `needs` that no remaining producer can supply. */
   missingVars: string[];
+  /** Required resource-producing stages that are unavailable. */
+  missingStages?: string[];
 }
 
 export interface DepAnalysisResult {
@@ -53,8 +55,8 @@ function stageProduces(stage: StageDefinition): string[] {
 /**
  * Compute the broken-downstream picture for a hypothetical or actual change
  * to the effective stage list. Variables consumed by a stage's `needs` field
- * are matched against producers from non-off stages (and ENV_SEEDED). A
- * variable with no surviving producer breaks every stage that needs it.
+ * are matched against available producers (and ENV_SEEDED). Explicit
+ * dependsOn links also propagate unavailable resources through the graph.
  *
  * "Off" combines `active === false` (operator-disabled), the explicit
  * `disabledNames` argument (preview a hypothetical disable), and
@@ -67,34 +69,42 @@ export function analyzeDeps(input: DepAnalysisInput): DepAnalysisResult {
   for (const n of input.disabledNames ?? []) off.add(n);
   for (const n of input.unreachableNames ?? []) off.add(n);
 
-  // Producers map keyed by var name → first producing stage name (earliest
-  // position in the pack wins, mirrors the runtime which renders stages in
-  // pack order). Only non-off stages contribute.
-  const firstProducer = new Map<string, string>();
+  // Keep declared producers available for dependency diagnostics.
   const producers = new Map<string, string[]>();
   for (const s of input.stages) {
     const captures = stageProduces(s);
     if (captures.length > 0) producers.set(s.name, captures);
-    if (off.has(s.name)) continue;
-    for (const v of captures) {
-      if (!firstProducer.has(v)) firstProducer.set(v, s.name);
-    }
   }
 
   const broken: BrokenStage[] = [];
-  for (const s of input.stages) {
-    if (off.has(s.name)) continue;
-    const needs = s.needs ?? [];
-    if (needs.length === 0) continue;
-    const missing = needs.filter(
-      (v) => !ENV_SEEDED.has(v) && !firstProducer.has(v),
-    );
-    if (missing.length === 0) continue;
-    broken.push({
-      stageName: s.name,
-      missingVars: missing,
-    });
+  const unavailable = new Set(off);
+  const names = new Set(input.stages.map((s) => s.name));
+  // Broken stages cannot supply resources or variables to later stages.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const availableVars = new Set<string>();
+    for (const s of input.stages) {
+      if (!unavailable.has(s.name)) {
+        for (const v of stageProduces(s)) availableVars.add(v);
+      }
+    }
+    for (const s of input.stages) {
+      if (unavailable.has(s.name)) continue;
+      const missingVars = (s.needs ?? []).filter(
+        (v) => !ENV_SEEDED.has(v) && !availableVars.has(v),
+      );
+      const missingStages = (s.dependsOn ?? []).filter(
+        (name) => !names.has(name) || unavailable.has(name),
+      );
+      if (missingVars.length === 0 && missingStages.length === 0) continue;
+      broken.push({ stageName: s.name, missingVars, ...(missingStages.length ? { missingStages } : {}) });
+      unavailable.add(s.name);
+      changed = true;
+    }
   }
+  const order = new Map(input.stages.map((s, i) => [s.name, i]));
+  broken.sort((a, b) => order.get(a.stageName)! - order.get(b.stageName)!);
 
   return { producers, broken, off };
 }

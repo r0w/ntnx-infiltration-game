@@ -10,5 +10,8 @@
   ],
   "needs": [
     "Trigram"
+  ],
+  "dependsOn": [
+    "create-auth-policy"
   ]
 }

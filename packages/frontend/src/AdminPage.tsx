@@ -377,19 +377,10 @@ function AdminDashboard({
 
   const confirmDisable = async (cascade: boolean) => {
     if (!packDisableTarget) return;
-    const { stage, preview } = packDisableTarget;
+    const { stage } = packDisableTarget;
     setPackBusyId(stage.stageName);
     try {
-      await api.adminPackToggle(password, stage.stageName, 'active', false);
-      if (cascade) {
-        // Best-effort cascade — fire toggles in parallel; failures bubble
-        // into a single error banner but don't try to roll back.
-        await Promise.all(
-          preview.cascade.map((b) =>
-            api.adminPackToggle(password, b.stageName, 'active', false),
-          ),
-        );
-      }
+      await api.adminPackToggle(password, stage.stageName, 'active', false, cascade);
       setPackDisableTarget(null);
       void refresh();
     } catch (err) {
@@ -953,19 +944,19 @@ function AdminDashboard({
           </p>
           <p className="modal-warn">
             <span className="c-yellow">disabling this</span> would leave the
-            stages below unable to satisfy their <code>needs</code>:
+            stages below without their required resources or inputs:
           </p>
           <ul className="modal-cascade-list">
             {packDisableTarget.preview.cascade.map((b) => (
               <li key={b.stageName}>
                 <strong>{b.stageName}</strong>{' '}
-                <span className="c-dim">missing {b.missingVars.join(', ')}</span>
+                <span className="c-dim">requires {[...(b.missingStages ?? []), ...b.missingVars].join(', ')}</span>
               </li>
             ))}
           </ul>
           <p className="c-dim modal-cascade-hint">
             <strong>just this one</strong> = disable only this stage (downstream
-            stages stay on but will surface "missing-upstream" at runtime).{' '}
+            stages stay on and may fail because a required resource is missing).{' '}
             <strong>disable + cascade</strong> = also disable the{' '}
             {packDisableTarget.preview.cascade.length} cascade stage(s).{' '}
             <strong>cancel</strong> = close without changing anything.
