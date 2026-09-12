@@ -72,7 +72,7 @@
   "stage-015.line-02": "Gott sei Dank haben sie die VM nicht entdeckt... Wooow, das war sehr knapp!\n\n",
   "stage-015.line-03": "Jetzt fangen wir mit den ernsten Dingen an. Leider sind Sie nicht Nutanix-zertifiziert, aber das ist kein Problem. Nutanix macht die Dinge mit seiner Oberfläche einfach, und Sie sollten leicht selbst herausfinden, wie es geht.<pause sec='4'/>\n\n",
   "stage-015.line-04": "Auf der Seite <white>Admin Center</white> finden Sie etwas zur Verwaltung von Kategorien. Nutanix nutzt Kategorien, um alle Richtlinien auf dem Cluster zu verwalten, das ist sehr effizient.<pause sec='3'/>\n",
-  "stage-015.line-05": "Erstellen Sie eine neue Kategorie <white>{Trigram}-cat</white> mit 2 Werten: <white>Critical</white> und <white>Test</white>. Geben Sie anschließend beide Werte für das Projekt <white>{Trigram}-proj</white> frei.<pause sec='3'/>\n\n",
+  "stage-015.line-05": "Erstellen Sie eine neue Kategorie <white>{Trigram}-cat</white> mit 2 Werten: <white>Critical</white> und <white>Test</white>. Wählen Sie vor dem Speichern unter <white>Owner Project</white> das Projekt <white>{Trigram}-proj</white> aus.<pause sec='3'/>\n\n",
   "stage-015.line-06": "Ich warte auf Ihre Rückmeldung... Drücken Sie <white>Enter</white>, wenn es erledigt ist: <input/>",
   "stage-015.line-08": "Schön, Sie arbeiten schnell. Ich hoffe, Sie haben es nicht schlampig gemacht...<pause sec='4'/>\n",
   "stage-015.line-09": "Lassen Sie mich diese Kategorie überprüfen... \n",

@@ -25,7 +25,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
-- Category instructions include sharing both values with the player’s project.
+- Category instructions specify the player’s project as Owner Project.
 
 - Project instructions explain how to select and share the identity source.
 
