@@ -42,6 +42,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Auto-play completes existing projects and reports failed member assignments.
+
 - Installation waits for Policy Engine downloads without restarting activation and reports incomplete readiness during activation and final checks.
 - Production VM creation retries confirmed temporary failures and completes configuration when installation resumes.
 
