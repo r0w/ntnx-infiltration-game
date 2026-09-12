@@ -25,6 +25,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- Compatibility updates for Prism Central 7.6 and Self-Service 4.4.0.
+
 - Category instructions specify the player’s project as Owner Project.
 
 - Project instructions explain how to select and share the identity source.
@@ -45,6 +47,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
   one named `lab`, and says so plainly when that project does not exist.
 
 ### Fixed
+
+- CloneProd handles project network restrictions and reports failed clone tasks.
+- Production project setup authorizes its directory and verifies membership.
 
 - Auto-play shares a category with the VM’s project when required and verifies its assignment.
 
