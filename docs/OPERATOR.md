@@ -1,3 +1,5 @@
+Before importing the runbook or blueprint, create a Self-Service project named `lab` if it does not already exist.
+
 # Operator guide
 
 Everything you need to host the **Nutanix Infiltration Game** at an event, a demo, or a training session.

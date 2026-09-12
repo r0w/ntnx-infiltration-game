@@ -1,3 +1,5 @@
+Before importing the runbook or blueprint, create a Self-Service project named `lab` if it does not already exist.
+
 # ntnx-infiltration-game
 
 ![The ntnx-infiltration-game terminal](docs/screenshots/landing.png)
