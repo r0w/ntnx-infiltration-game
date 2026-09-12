@@ -25,6 +25,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- Choose an existing game network when using the Other cluster profile.
+
 - Moved the secondary network setting to the bottom of the launch form with clearer help.
 
 - Updated cluster checks for users, VMs, networks and policies.
