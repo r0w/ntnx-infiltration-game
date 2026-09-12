@@ -12,6 +12,8 @@ Based on the original [`ntnx-escape-game`](https://github.com/Golgautier/ntnx-es
 
 ## Quickstart
 
+Before importing the runbook or blueprint, create a project named "lab" if it does not already exist.
+
 You need an HPoC and two files. That's it.
 
 1. Book an HPoC with the **AOS + PC Demo - Latest (7.5.x)** runbook.

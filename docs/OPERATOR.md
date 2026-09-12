@@ -6,6 +6,8 @@ To develop the game itself, see [`../README.md`](../README.md). For the blueprin
 
 ## Quickstart
 
+Before importing the runbook or blueprint, create a project named "lab" if it does not already exist.
+
 You need an HPoC and two files. About five minutes of clicks, then the install runs on its own.
 
 1. **Book an HPoC** with **AOS + PC Demo - Latest** (4 nodes, Flow and Leap enabled). Enable **Intelligent Operations** in Prism if it is off; one game stage needs it.
