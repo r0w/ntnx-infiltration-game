@@ -206,6 +206,7 @@ export interface AdminPackStageEntry {
   captures: string[];
   /** Vars in `needs` that have no surviving producer in the effective pack. */
   brokenMissingVars: string[];
+  brokenMissingStages?: string[];
   /** Always-enforced capability requirements. */
   requires: string[];
   /** Capability requirements only enforced when `clusterProfile === 'other'`. */
@@ -577,6 +578,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
         needs: s.needs ?? [],
         captures: s.captures ?? [],
         brokenMissingVars: brokenByName.get(s.name)?.missingVars ?? [],
+        brokenMissingStages: brokenByName.get(s.name)?.missingStages ?? [],
         requires,
         requiresOnOther,
         missingCapabilities,
@@ -604,11 +606,24 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     }
     const baseStage = deps.pack.stages.find((s) => s.name === stageName);
     if (!baseStage) throw new HttpError(404, 'stage not found');
-    const body = (await c.req.json().catch(() => ({}))) as { value?: unknown };
+    const body = (await c.req.json().catch(() => ({}))) as { value?: unknown; cascade?: boolean };
     if (body.value !== null && typeof body.value !== 'boolean') {
       throw new HttpError(400, 'value must be boolean or null');
     }
-    deps.service.packOverlay.setField(deps.pack.manifest.id, stageName, field, body.value);
+    if (body.cascade !== undefined && typeof body.cascade !== 'boolean') {
+      throw new HttpError(400, 'cascade must be boolean');
+    }
+    if (body.cascade && (field !== 'active' || body.value !== false)) {
+      throw new HttpError(400, 'cascade is only supported when disabling a stage');
+    }
+    const targets = body.cascade
+      ? [...cascadeDisable(deps.service.listEffectiveStages(), new Set([stageName])).disabled]
+      : [stageName];
+    deps.db.transaction(() => {
+      for (const name of targets) {
+        deps.service.packOverlay.setField(deps.pack.manifest.id, name, field, body.value as boolean | null);
+      }
+    })();
     deps.service.applyEffectiveStages();
     return c.json({ ok: true, stageName, field, value: body.value });
   });

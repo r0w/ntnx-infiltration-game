@@ -24,5 +24,8 @@
   "needs": [
     "HostUUID",
     "Trigram"
+  ],
+  "dependsOn": [
+    "create-vm"
   ]
 }

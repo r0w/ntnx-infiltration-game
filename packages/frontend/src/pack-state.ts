@@ -23,7 +23,7 @@ export function stageState(
   if (s.missingCapabilities.length > 0 || (filtersHpocOnly && s.impact === 'hpoc-only')) {
     return 'skipped';
   }
-  if (s.brokenMissingVars.length > 0) return 'broken';
+  if (s.brokenMissingVars.length > 0 || (s.brokenMissingStages?.length ?? 0) > 0) return 'broken';
   if (s.adminGate) return 'gated';
   return 'playable';
 }
@@ -45,7 +45,10 @@ export function stateNote(
         // cluster generically rather than print "null".
         : `hpoc-only, and this cluster is ${profile ?? 'shared'}`;
     case 'broken':
-      return `nothing left produces ${s.brokenMissingVars.join(', ')}`;
+      return [
+        s.brokenMissingStages?.length ? `requires ${s.brokenMissingStages.join(', ')}` : null,
+        s.brokenMissingVars.length ? `nothing left produces ${s.brokenMissingVars.join(', ')}` : null,
+      ].filter(Boolean).join('; ');
     case 'gated':
       return 'players wait here until you unlock';
     default:

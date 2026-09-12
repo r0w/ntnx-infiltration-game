@@ -15,53 +15,26 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
-- Choose the network used by production VMs and players at deployment.
-
-- Choose the game VM’s SSH user at launch and see it in deployment logs.
-
-- The Pack tab can export the stage setup as one string, import it on another
-  instance, and reset every stage back to the pack defaults.
-- The Pack tab says at a glance how many stages differ from the pack defaults.
+- Choose the game network and game VM SSH user at deployment.
+- Export, import and reset stage configurations from the Pack tab.
 
 ### Changed
 
-- Compatibility updates for Prism Central 7.6 and Self-Service 4.4.0.
-
-- Category instructions specify the player’s project as Owner Project.
-
-- Project instructions explain how to select and share the identity source.
-
-- Added a reminder at the start of Quickstart to create the `lab` project before import.
-
-- Choose an existing game network when using the Other cluster profile.
-
-- Moved the secondary network setting to the bottom of the launch form with clearer help.
-
-- Updated cluster checks for users, VMs, networks and policies.
-
-- The deployment guide explains project creation on fresh HPOCs and recovery from network or Policy Engine delays.
-
-- The Pack tab now opens with the whole run in play order, colour-coded by what
-  each stage will do, and the stage list can be filtered and searched.
-- The prerequisites runbook now asks which project to use instead of assuming
-  one named `lab`, and says so plainly when that project does not exist.
+- Updated deployment and auto-play for Prism Central 7.6 and Self-Service 4.4.0.
+- Search and filter stages in play order, with a count of customized stages.
+- Clearer instructions for project identity sources and category ownership.
+- Deployment guide explains how to create a project if none exists.
+- Choose the target project when launching the prerequisites runbook.
 
 ### Fixed
 
-- CloneProd handles project network restrictions and reports failed clone tasks.
-- Production project setup authorizes its directory and verifies membership.
+- Disabling a stage can also disable all dependent stages; imported configurations report broken dependencies.
 
-- Auto-play shares a category with the VM’s project when required and verifies its assignment.
-
-- Auto-play waits for VM ownership updates and retries concurrent changes.
-
-- Auto-play completes existing projects and reports failed member assignments.
-
-- Installation waits for Policy Engine downloads without restarting activation and reports incomplete readiness during activation and final checks.
-- Production VM creation retries confirmed temporary failures and completes configuration when installation resumes.
-
-- The install no longer stops when the cluster serves an older v4 API than
-  expected, or when erasure coding has to be turned off on an Objects container.
+- CloneProd shares the required network with the source VM's project and reports clone failures.
+- Project setup and auto-play fixes for membership, VM ownership and category assignment.
+- Installation waits for Policy Engine activation and reports incomplete readiness.
+- Installation retries temporary VM creation failures and completes configuration on resume.
+- Fixed installation failures with older cluster APIs and erasure coding settings.
 
 ## [1.0.4] - 2026-09-11
 

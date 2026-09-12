@@ -991,6 +991,81 @@ describe('pack config export / import / reset', () => {
     expect(view.stages.every((s) => !s.activeOverridden && !s.adminGateOverridden)).toBe(true);
   });
 
+  test('real pack previews and applies the full VM cascade while preserving other settings', async () => {
+    const packDir = resolve(import.meta.dir, '../../../packs/ntnx-infiltration');
+    const names = JSON.parse(readFileSync(resolve(packDir, 'pack.json'), 'utf8')).stages as string[];
+    const stages = names.map((name, index) => ({
+      ...JSON.parse(readFileSync(resolve(packDir, 'stages', `${name}.json`), 'utf8')), index,
+    })) as StageDefinition[];
+    const { r, service } = instance(freshDb(), stages);
+    await toggle(r, 'create-report', 'adminGate', true);
+    const preview = await (await r.request('/pack/preview-disable/create-vm', { headers: AUTH })).json();
+    const affected = preview.cascade.map((s: { stageName: string }) => s.stageName);
+    expect(affected).toContain('live-migrate-vm');
+    expect(affected).toContain('apply-category-to-vm');
+    expect(affected).toContain('allow-ssh-in-microseg');
+    expect(affected).toContain('restore-vm-from-recovery');
+    expect(affected).not.toContain('create-report');
+    expect(affected).not.toContain('clone-app-blueprint');
+    expect(affected).not.toContain('create-category');
+    expect(preview.cascade.find((s: { stageName: string }) => s.stageName === 'apply-category-to-vm').missingStages).toContain('create-vm');
+    const response = await r.request('/pack/stages/create-vm/toggle?field=active', {
+      method: 'POST', headers: AUTH_JSON, body: JSON.stringify({ value: false, cascade: true }),
+    });
+    expect(response.status).toBe(200);
+    expect(service.listEffectiveStages().filter((s) => !s.active).map((s) => s.name).sort())
+      .toEqual(['create-vm', ...affected].sort());
+    expect(service.listEffectiveStages().find((s) => s.name === 'create-report')?.adminGate).toBe(true);
+    const exported = (await exportConfig(r)).config;
+    const target = instance(freshDb(), stages);
+    expect((await (await importConfig(target.r, exported)).json()).brokenStages).toEqual([]);
+    expect(target.service.listEffectiveStages().filter((s) => !s.active).map((s) => s.name).sort())
+      .toEqual(['create-vm', ...affected].sort());
+    await target.r.request('/pack/config/reset', { method: 'POST', headers: AUTH });
+    expect(target.service.listEffectiveStages().map((s) => s.active)).toEqual(stages.map((s) => s.active));
+  });
+
+  test('import and Pack view report indirect resource dependencies left enabled', async () => {
+    const stages: StageDefinition[] = [
+      { index: 0, id: 'vm', name: 'vm', active: true, messages: [] },
+      { index: 1, id: 'tag', name: 'tag', active: true, messages: [], dependsOn: ['vm'] },
+      { index: 2, id: 'policy', name: 'policy', active: true, messages: [], dependsOn: ['tag'] },
+    ];
+    const source = instance(freshDb(), stages);
+    await toggle(source.r, 'vm', 'active', false);
+    const target = instance(freshDb(), stages);
+    const result = await (await importConfig(target.r, (await exportConfig(source.r)).config)).json();
+    expect(result.brokenStages).toEqual(['policy', 'tag']);
+    const pack = await (await target.r.request('/pack', { headers: AUTH })).json();
+    expect(pack.brokenCount).toBe(2);
+    expect(pack.stages.find((s: { stageName: string }) => s.stageName === 'tag').brokenMissingStages).toEqual(['vm']);
+    // Enabling a prerequisite clears warnings; it does not rewrite other stages.
+    await toggle(target.r, 'vm', 'active', true);
+    expect((await (await target.r.request('/pack', { headers: AUTH })).json()).brokenCount).toBe(0);
+  });
+
+  test('a failed cascade write rolls back every stage', async () => {
+    const db = freshDb();
+    const { r, service } = instance(db);
+    db.exec(`CREATE TRIGGER fail_cascade BEFORE INSERT ON pack_overlay
+      WHEN NEW.stage_name = 'use-project'
+      BEGIN SELECT RAISE(ABORT, 'test write failure'); END`);
+    await expect(r.request('/pack/stages/mk-project/toggle?field=active', {
+      method: 'POST', headers: AUTH_JSON, body: JSON.stringify({ value: false, cascade: true }),
+    })).rejects.toThrow('test write failure');
+    expect(service.packOverlay.list(PACK_ID)).toEqual([]);
+    expect(service.listEffectiveStages().every((s) => s.active)).toBe(true);
+  });
+
+  test('rejects a cascade on enable without changing the configuration', async () => {
+    const { r, service } = instance(freshDb());
+    const res = await r.request('/pack/stages/mk-project/toggle?field=active', {
+      method: 'POST', headers: AUTH_JSON, body: JSON.stringify({ value: true, cascade: true }),
+    });
+    expect(res.status).toBe(400);
+    expect(service.packOverlay.list(PACK_ID)).toEqual([]);
+  });
+
   test('reset on an untouched pack is a no-op', async () => {
     const { r } = instance(freshDb());
     const res = await r.request('/pack/config/reset', { method: 'POST', headers: AUTH });

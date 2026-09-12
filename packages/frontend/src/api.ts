@@ -291,6 +291,7 @@ export interface AdminPackStageEntry {
   needs: string[];
   captures: string[];
   brokenMissingVars: string[];
+  brokenMissingStages?: string[];
   /** Always-enforced capability requirements. */
   requires: string[];
   /** Capability requirements only enforced when `clusterProfile === 'other'`. */
@@ -314,7 +315,7 @@ export interface AdminPackPayload {
 
 export interface AdminPackTogglePreview {
   requested: string;
-  cascade: Array<{ stageName: string; missingVars: string[] }>;
+  cascade: Array<{ stageName: string; missingVars: string[]; missingStages?: string[] }>;
 }
 
 export interface AdminPackConfigPayload {
@@ -468,11 +469,12 @@ export const api = {
     stageName: string,
     field: 'active' | 'adminGate',
     value: boolean | null,
+    cascade = false,
   ) =>
     adminPost<{ ok: true; stageName: string; field: string; value: boolean | null }>(
       `/admin/pack/stages/${encodeURIComponent(stageName)}/toggle?field=${field}`,
       password,
-      { value },
+      { value, cascade },
     ),
   adminPackConfig: (password: string) =>
     adminGet<AdminPackConfigPayload>('/admin/pack/config', password),
