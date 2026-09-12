@@ -25,6 +25,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- Project instructions explain how to select and share the identity source.
+
 - Added a reminder at the start of Quickstart to create the `lab` project before import.
 
 - Choose an existing game network when using the Other cluster profile.
@@ -41,6 +43,10 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
   one named `lab`, and says so plainly when that project does not exist.
 
 ### Fixed
+
+- Auto-play waits for VM ownership updates and retries concurrent changes.
+
+- Auto-play completes existing projects and reports failed member assignments.
 
 - Installation waits for Policy Engine downloads without restarting activation and reports incomplete readiness during activation and final checks.
 - Production VM creation retries confirmed temporary failures and completes configuration when installation resumes.

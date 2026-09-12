@@ -14,6 +14,7 @@
  * clean `NutanixHttpError`. v3 endpoints are always REST (no SDK exists).
  */
 import type { ActContext } from '@ntnx-game/engine';
+import { assignVmOwnership } from './vm-ownership';
 import type { NutanixSdk } from '@ntnx-game/nutanix';
 import {
   deleteV4Entity,
@@ -191,8 +192,11 @@ async function actCreateProject(ctx: ActContext): Promise<void> {
     '/api/nutanix/v3/projects/list',
     { length: 250 },
   );
-  if (existing.entities?.some((p) => p.spec?.name === name || p.status?.name === name)) {
-    ctx.logger.info(`act noop: project ${name} already exists`);
+  const alreadyExists = existing.entities?.find((p) => p.spec?.name === name || p.status?.name === name);
+  const configured = alreadyExists?.status?.resources;
+  if (configured?.account_reference_list?.length &&
+      configured.user_reference_list?.some((u: AnyRec) => (u.name ?? '').toLowerCase() === 'theprojectmanager')) {
+    ctx.logger.info(`act noop: project ${name} already configured`);
     return;
   }
   const clusters = await ctx.nutanix.rest.request<{ data?: Array<{ extId?: string }> }>(
@@ -223,7 +227,7 @@ async function actCreateProject(ctx: ActContext): Promise<void> {
   const primary = subnets.find((s) => /^primary(-|$)/i.test(s.name ?? ''));
   const pmUuid = await ensureUserUuid(ctx, 'theprojectmanager', 'Paul', 'Project Manager');
   if (!pmUuid) {
-    ctx.logger.warn('actCreateProject: theprojectmanager user not found, project created without it');
+    throw new Error('actCreateProject: cannot resolve theprojectmanager in IAM');
   }
   // Create the project WITHOUT a user_reference_list. Putting an LDAP user
   // uuid straight into the plain `/projects` POST makes PC reject it with
@@ -231,7 +235,7 @@ async function actCreateProject(ctx: ActContext): Promise<void> {
   // (live-confirmed on DM3-POC013). The member is added afterwards via
   // `/projects_internal` (see addProjectAdmin) — the only call that actually
   // registers an LDAP user as a project member on PC 7.x.
-  await ctx.nutanix.rest.request('POST', '/api/nutanix/v3/projects', {
+  if (!alreadyExists) await ctx.nutanix.rest.request('POST', '/api/nutanix/v3/projects', {
     spec: {
       name,
       resources: {
@@ -346,13 +350,14 @@ async function addProjectAdmin(
     (p) => p.spec?.name === projectName || p.status?.name === projectName,
   );
   if (!proj?.metadata?.uuid) {
-    ctx.logger.warn('addProjectAdmin: project not found after create', { projectName });
-    return;
+    throw new Error(`addProjectAdmin: project ${projectName} not found after create`);
   }
   const projectUuid = proj.metadata.uuid as string;
+  const current = await ctx.nutanix.rest.request<AnyRec>('GET', `/api/nutanix/v3/projects/${projectUuid}`);
+  const resources = current.spec?.resources ?? {};
   const members =
-    (proj.status?.resources?.user_reference_list as AnyRec[] | undefined) ??
-    (proj.spec?.resources?.user_reference_list as AnyRec[] | undefined) ??
+    (current.status?.resources?.user_reference_list as AnyRec[] | undefined) ??
+    (resources.user_reference_list as AnyRec[] | undefined) ??
     [];
   if (members.some((u) => u?.uuid === pmUuid)) {
     ctx.logger.info('act noop: theprojectmanager already a member of project', { projectName });
@@ -367,11 +372,7 @@ async function addProjectAdmin(
   const roles = await listAllV3<AnyRec>(ctx, '/api/nutanix/v3/roles/list');
   const roleUuid = roles.find((r) => r.status?.name === 'Project Admin')?.metadata?.uuid;
   if (!directoryId || !roleUuid) {
-    ctx.logger.warn('addProjectAdmin: missing directory service or Project Admin role; skipping', {
-      directoryId: !!directoryId,
-      roleUuid: !!roleUuid,
-    });
-    return;
+    throw new Error('addProjectAdmin: missing directory service or Project Admin role');
   }
   const subnetRefs: AnyRec[] = [];
   if (refs.secondary?.uuid)
@@ -382,7 +383,7 @@ async function addProjectAdmin(
     api_version: '3.1',
     metadata: {
       project_reference: { kind: 'project', name: projectName, uuid: projectUuid },
-      spec_version: proj.metadata.spec_version ?? 0,
+      spec_version: current.metadata.spec_version ?? 0,
       kind: 'project',
       uuid: projectUuid,
     },
@@ -390,12 +391,17 @@ async function addProjectAdmin(
       project_detail: {
         name: projectName,
         resources: {
-          account_reference_list: refs.accountUuid ? [{ kind: 'account', uuid: refs.accountUuid }] : [],
-          user_reference_list: [{ name: 'theprojectmanager', kind: 'user', uuid: pmUuid }],
-          ...(refs.primary?.uuid ? { default_subnet_reference: { kind: 'subnet', uuid: refs.primary.uuid } } : {}),
-          subnet_reference_list: subnetRefs,
-          cluster_reference_list: refs.clusterUuid ? [{ kind: 'cluster', uuid: refs.clusterUuid }] : [],
-          enable_directory_and_identity_provider_shortlist: false,
+          ...resources,
+          account_reference_list: resources.account_reference_list?.length ? resources.account_reference_list : (refs.accountUuid ? [{ kind: 'account', uuid: refs.accountUuid }] : []),
+          user_reference_list: [...members, { name: 'theprojectmanager', kind: 'user', uuid: pmUuid }],
+          ...(!resources.default_subnet_reference && refs.primary?.uuid ? { default_subnet_reference: { kind: 'subnet', uuid: refs.primary.uuid } } : {}),
+          subnet_reference_list: resources.subnet_reference_list?.length ? resources.subnet_reference_list : subnetRefs,
+          cluster_reference_list: resources.cluster_reference_list?.length ? resources.cluster_reference_list : (refs.clusterUuid ? [{ kind: 'cluster', uuid: refs.clusterUuid }] : []),
+          // PC can enforce the shortlist even when asked to disable it.
+          directory_reference_list: [
+            ...(resources.directory_reference_list ?? []).filter((d: AnyRec) => d.uuid !== directoryId),
+            { kind: 'directory_service', uuid: directoryId },
+          ],
         },
       },
       user_list: [
@@ -429,12 +435,22 @@ async function addProjectAdmin(
       ],
     },
   };
-  try {
-    await ctx.nutanix.rest.request('PUT', `/api/nutanix/v3/projects_internal/${projectUuid}`, payload);
-    ctx.logger.info('addProjectAdmin: theprojectmanager added as Project Admin', { projectName });
-  } catch (err) {
-    ctx.logger.warn('addProjectAdmin: projects_internal PUT failed', { err: String(err).slice(0, 200) });
+  await ctx.nutanix.rest.request('PUT', `/api/nutanix/v3/projects_internal/${projectUuid}`, payload);
+  // An accepted PUT can still fail asynchronously; confirm persisted membership.
+  for (let poll = 0; poll < 30; poll++) {
+    const updated = await ctx.nutanix.rest.request<AnyRec>('GET', `/api/nutanix/v3/projects/${projectUuid}`);
+    const state = updated.status?.state;
+    if (state === 'ERROR' || state === 'FAILED') {
+      const detail = (updated.status?.message_list ?? []).map((m: AnyRec) => m.message).join('; ');
+      throw new Error(`addProjectAdmin: ${projectName} ${state}: ${detail}`);
+    }
+    if (state === 'COMPLETE' && updated.status?.resources?.user_reference_list?.some((u: AnyRec) => u.uuid === pmUuid)) {
+      ctx.logger.info('addProjectAdmin: confirmed theprojectmanager membership', { projectName });
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
   }
+  throw new Error(`addProjectAdmin: timed out waiting for theprojectmanager in ${projectName}`);
 }
 
 /** Stage 10 create-subnet: creates `{Trigram}-subnet` on VLAN `{Vlanid}` with
@@ -724,8 +740,7 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
   // project_reference patched in. GET-modify-PUT the full entity (v3
   // enforces spec_version concurrency). Idempotent: runs on every act
   // call so a previously-failed assignment can be retried, and skips when
-  // the project is already correct. Best-effort: unavailable v3 → log +
-  // continue (CheckVM also defaults to pass when v3 is unreachable).
+  // the project is already correct. Wait for confirmed ownership before powering on.
   // Resolve the project by name — never from a stored var, which can go
   // stale when the project is re-created (issue #31).
   let projUuid: string | undefined;
@@ -749,48 +764,8 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
   const pmUuid = await ensureUserUuid(ctx, 'theprojectmanager', 'Paul', 'Project Manager');
   const lookup = (await listAllSdk<AnyRec>(($p) => sdk(ctx).vmm.vms.listVms($p))).find((v) => v.name === name);
   if (lookup?.extId && (projUuid || pmUuid)) {
-    // Retry the GET-modify-PUT on 409: right after create-project registers
-    // theprojectmanager, the VM's IDF entry is still settling and the first
-    // owner PUT often 409s ("Edit conflict / CONCURRENT_REQUESTS"). Re-GET for
-    // a fresh spec_version each attempt (v3 enforces optimistic concurrency).
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        const v3vm = await ctx.nutanix.rest.request<AnyRec>(
-          'GET',
-          `/api/nutanix/v3/vms/${lookup.extId}`,
-        );
-        const meta = (v3vm?.metadata as AnyRec) ?? {};
-        let changed = false;
-        if (projUuid && meta.project_reference?.uuid !== projUuid) {
-          meta.project_reference = { kind: 'project', uuid: projUuid };
-          changed = true;
-        }
-        if (pmUuid && meta.owner_reference?.uuid !== pmUuid) {
-          meta.owner_reference = { kind: 'user', name: 'theprojectmanager', uuid: pmUuid };
-          changed = true;
-        }
-        if (!changed) break;
-        // v3 PUT echoes the GET body but rejects `status` (server-controlled
-        // view, re-sending triggers 422). Strip before PUT.
-        const { status: _drop, ...putBody } = v3vm as AnyRec;
-        await ctx.nutanix.rest.request('PUT', `/api/nutanix/v3/vms/${lookup.extId}`, {
-          ...putBody,
-          metadata: meta,
-        });
-        ctx.logger.info('actCreateVm: ownership assigned', { vm: name, project: projUuid, owner: pmUuid });
-        break;
-      } catch (err) {
-        const msg = String(err);
-        if (/409|conflict|CONCURRENT/i.test(msg) && attempt < 4) {
-          await new Promise((r) => setTimeout(r, 3000));
-          continue; // edit conflict — re-GET and retry
-        }
-        ctx.logger.warn('actCreateVm: ownership assignment failed (v3 unavailable?)', {
-          err: msg.slice(0, 200),
-        });
-        break;
-      }
-    }
+    await assignVmOwnership(ctx, lookup.extId, projUuid, pmUuid);
+    ctx.logger.info('actCreateVm: ownership confirmed', { vm: name, project: projUuid, owner: pmUuid });
   }
   // Power on the VM. CheckVM / CheckRestoreVM both require powerState
   // === 'ON' so this act CAN'T return until that's stably true. Loop

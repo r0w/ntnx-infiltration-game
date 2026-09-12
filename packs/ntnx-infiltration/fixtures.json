@@ -288,10 +288,24 @@
   "GET /api/nutanix/v3/vms/vm-{Trigram}": {
     "spec": {
       "resources": {
-        "guest_customization": { "cloud_init": { "user_data": "#cloud-config\n" } }
+        "guest_customization": {
+          "cloud_init": {
+            "user_data": "#cloud-config\n"
+          }
+        }
       }
     },
-    "metadata": { "project_reference": { "kind": "project", "uuid": "proj-{Trigram}" } }
+    "metadata": {
+      "project_reference": {
+        "kind": "project",
+        "uuid": "proj-{Trigram}"
+      },
+      "owner_reference": {
+        "kind": "user",
+        "uuid": "user-theprojmgr",
+        "name": "TheProjectManager"
+      }
+    }
   },
   "GET /api/prism/v4.2/config/categories": {
     "data": [
@@ -422,5 +436,27 @@
         ]
       }
     ]
+  },
+  "GET /api/nutanix/v3/vms/{VMUUID}": {
+    "spec": {
+      "resources": {
+        "guest_customization": {
+          "cloud_init": {
+            "user_data": "#cloud-config\n"
+          }
+        }
+      }
+    },
+    "metadata": {
+      "project_reference": {
+        "kind": "project",
+        "uuid": "proj-{Trigram}"
+      },
+      "owner_reference": {
+        "kind": "user",
+        "uuid": "user-theprojmgr",
+        "name": "TheProjectManager"
+      }
+    }
   }
 }
