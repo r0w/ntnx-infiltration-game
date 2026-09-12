@@ -72,7 +72,7 @@
   "stage-015.line-02": "Grazie al cielo, non hanno individuato la VM... Wooow, è stata durissima!\n\n",
   "stage-015.line-03": "Ora iniziamo le cose serie. Purtroppo non è certificato Nutanix, ma non è un gran problema. Nutanix semplifica le cose con la sua interfaccia e dovrebbe riuscire facilmente a capire come fare da solo.<pause sec='4'/>\n\n",
   "stage-015.line-04": "Nella pagina <white>Admin Center</white> dovrebbe trovare qualcosa per gestire le categorie. Nutanix usa le categorie per gestire tutte le policy sul cluster, è molto efficiente.<pause sec='3'/>\n",
-  "stage-015.line-05": "Crei una nuova categoria <white>{Trigram}-cat</white> con 2 valori: <white>Critical</white> e <white>Test</white>.<pause sec='3'/>\n\n",
+  "stage-015.line-05": "Crei una nuova categoria <white>{Trigram}-cat</white> con 2 valori: <white>Critical</white> e <white>Test</white>. Poi condivida entrambi i valori con il progetto <white>{Trigram}-proj</white>.<pause sec='3'/>\n\n",
   "stage-015.line-06": "Aspetto un suo riscontro... prema <white>Invio</white> quando è fatto: <input/>",
   "stage-015.line-08": "Bene, lavora in fretta. Spero che non l'abbia fatto in modo approssimativo...<pause sec='4'/>\n",
   "stage-015.line-09": "Lasci che verifichi questa categoria... \n",
