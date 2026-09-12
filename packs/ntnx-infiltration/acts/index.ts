@@ -14,6 +14,7 @@
  * clean `NutanixHttpError`. v3 endpoints are always REST (no SDK exists).
  */
 import type { ActContext } from '@ntnx-game/engine';
+import { assignVmOwnership } from './vm-ownership';
 import type { NutanixSdk } from '@ntnx-game/nutanix';
 import {
   deleteV4Entity,
@@ -739,8 +740,7 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
   // project_reference patched in. GET-modify-PUT the full entity (v3
   // enforces spec_version concurrency). Idempotent: runs on every act
   // call so a previously-failed assignment can be retried, and skips when
-  // the project is already correct. Best-effort: unavailable v3 → log +
-  // continue (CheckVM also defaults to pass when v3 is unreachable).
+  // the project is already correct. Wait for confirmed ownership before powering on.
   // Resolve the project by name — never from a stored var, which can go
   // stale when the project is re-created (issue #31).
   let projUuid: string | undefined;
@@ -764,48 +764,8 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
   const pmUuid = await ensureUserUuid(ctx, 'theprojectmanager', 'Paul', 'Project Manager');
   const lookup = (await listAllSdk<AnyRec>(($p) => sdk(ctx).vmm.vms.listVms($p))).find((v) => v.name === name);
   if (lookup?.extId && (projUuid || pmUuid)) {
-    // Retry the GET-modify-PUT on 409: right after create-project registers
-    // theprojectmanager, the VM's IDF entry is still settling and the first
-    // owner PUT often 409s ("Edit conflict / CONCURRENT_REQUESTS"). Re-GET for
-    // a fresh spec_version each attempt (v3 enforces optimistic concurrency).
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        const v3vm = await ctx.nutanix.rest.request<AnyRec>(
-          'GET',
-          `/api/nutanix/v3/vms/${lookup.extId}`,
-        );
-        const meta = (v3vm?.metadata as AnyRec) ?? {};
-        let changed = false;
-        if (projUuid && meta.project_reference?.uuid !== projUuid) {
-          meta.project_reference = { kind: 'project', uuid: projUuid };
-          changed = true;
-        }
-        if (pmUuid && meta.owner_reference?.uuid !== pmUuid) {
-          meta.owner_reference = { kind: 'user', name: 'theprojectmanager', uuid: pmUuid };
-          changed = true;
-        }
-        if (!changed) break;
-        // v3 PUT echoes the GET body but rejects `status` (server-controlled
-        // view, re-sending triggers 422). Strip before PUT.
-        const { status: _drop, ...putBody } = v3vm as AnyRec;
-        await ctx.nutanix.rest.request('PUT', `/api/nutanix/v3/vms/${lookup.extId}`, {
-          ...putBody,
-          metadata: meta,
-        });
-        ctx.logger.info('actCreateVm: ownership assigned', { vm: name, project: projUuid, owner: pmUuid });
-        break;
-      } catch (err) {
-        const msg = String(err);
-        if (/409|conflict|CONCURRENT/i.test(msg) && attempt < 4) {
-          await new Promise((r) => setTimeout(r, 3000));
-          continue; // edit conflict — re-GET and retry
-        }
-        ctx.logger.warn('actCreateVm: ownership assignment failed (v3 unavailable?)', {
-          err: msg.slice(0, 200),
-        });
-        break;
-      }
-    }
+    await assignVmOwnership(ctx, lookup.extId, projUuid, pmUuid);
+    ctx.logger.info('actCreateVm: ownership confirmed', { vm: name, project: projUuid, owner: pmUuid });
   }
   // Power on the VM. CheckVM / CheckRestoreVM both require powerState
   // === 'ON' so this act CAN'T return until that's stably true. Loop

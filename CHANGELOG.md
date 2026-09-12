@@ -44,6 +44,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Auto-play waits for VM ownership updates and retries concurrent changes.
+
 - Auto-play completes existing projects and reports failed member assignments.
 
 - Installation waits for Policy Engine downloads without restarting activation and reports incomplete readiness during activation and final checks.
