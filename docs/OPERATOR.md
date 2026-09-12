@@ -134,6 +134,10 @@ projects and their VM's second NIC. Player instructions in every language and
 auto-play use the same setting. The game VM's own NIC is still selected separately
 on the launch screen; `TestNetwork` remains the external network for CloneProd.
 
+For `hpoc`, the dropdown selects `secondary` automatically. For `other`, choose
+one of the cluster’s internal VLANs. Changing the cluster profile refreshes the
+list; returning to `hpoc` restores `secondary`.
+
 The default `secondary` also accepts `secondary-<cluster>` (case-insensitive).
 An exact match wins; if multiple suffixed networks match, enter the full name.
 With the default only, the installer can rename `aux-1` to `secondary` when needed.
