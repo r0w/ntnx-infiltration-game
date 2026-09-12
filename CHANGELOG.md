@@ -25,6 +25,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- Project instructions explain how to select and share the identity source.
+
 - Added a reminder at the start of Quickstart to create the `lab` project before import.
 
 - Choose an existing game network when using the Other cluster profile.
