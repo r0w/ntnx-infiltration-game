@@ -457,7 +457,12 @@ class DefaultProfile(Profile):
     # Desired on-screen order (top→bottom):
     #   Container image repository, Image tag, Cluster profile, Run mode,
     #   Prism Central IP, Prism Central username, Prism Central password,
-    #   Planner PC password, Time zone.
+    #   Planner PC password, Time zone, Secondary network name.
+    GAME_SECONDARY_NETWORK = CalmVariable.Simple(
+        "secondary", label="Secondary network name",
+        description="Existing routable VLAN for the game. Migrated to Advanced if needed. Leave default for HPOC",
+        is_mandatory=True, runtime=True,
+    )
     TIMEZONE = CalmVariable.WithOptions(
         [
             "UTC",
@@ -533,11 +538,6 @@ class DefaultProfile(Profile):
     LOG_LEVEL = CalmVariable.WithOptions(
         ["debug", "info", "warn", "error"], label="Server log level",
         default="info", is_mandatory=False, runtime=False, is_hidden=True,
-    )
-    GAME_SECONDARY_NETWORK = CalmVariable.Simple(
-        "secondary", label="Secondary network name",
-        description="Existing routable VLAN to use for production and player VMs. Migrated to Advanced networking if needed.",
-        is_mandatory=True, runtime=True,
     )
     GAME_PROD_USERNAME = CalmVariable.Simple(
         "thebadguy", is_mandatory=False, runtime=False, is_hidden=True,
