@@ -29,6 +29,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Auto-play restores the VM from recovery and correctly configures storage policies and daily Refresh VM schedules.
 - Disabling a stage can also disable all dependent stages; imported configurations report broken dependencies.
 
 - CloneProd shares the required network with the source VM's project and reports clone failures.

@@ -14,6 +14,8 @@
  * clean `NutanixHttpError`. v3 endpoints are always REST (no SDK exists).
  */
 import type { ActContext } from '@ntnx-game/engine';
+import { restoreRecoveryVm } from './recovery';
+import { refreshAction, dailyScheduleError } from '../schedule';
 import { assignVmOwnership } from './vm-ownership';
 import type { NutanixSdk } from '@ntnx-game/nutanix';
 import {
@@ -718,23 +720,7 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
     if (!created?.extId) {
       ctx.logger.warn(`actCreateVm: VM ${name} did not appear in listVms after 45s, power-on branch will skip`);
     }
-    if (created?.extId) {
-      // Mirror Python `CheckVM`'s side-effect: kick off a recovery point
-      // for the freshly created VM so stage 26 `restore-vm-from-recovery`
-      // has something to roll back to. Best-effort: failure is logged
-      // but doesn't block the act (recovery-points endpoint may be
-      // unavailable on minimal HPoCs).
-      try {
-        await postV4(ctx, '/api/dataprotection/v4.0/config/recovery-points', {
-          vmRecoveryPoints: [{ vmExtId: created.extId }],
-        });
-        ctx.logger.info('actCreateVm: recovery point created', { vm: name });
-      } catch (err) {
-        ctx.logger.warn('actCreateVm: recovery-point creation failed', {
-          err: String(err).slice(0, 150),
-        });
-      }
-    }
+
   }
   // Project ownership: stage prompt asks the player to use Manage Ownership
   // in Prism. v4 doesn't expose project on VMs, so PUT v3 with the
@@ -1021,30 +1007,36 @@ async function actApplyCategoryToVm(ctx: ActContext): Promise<void> {
   throw new Error('Category association task succeeded but the binding is not visible');
 }
 
-/** Stage 17 create-storage-policy: creates `{Trigram}-sto-policy` with encryption enabled. */
+/** Stage 17: encrypt VMs selected by the player's Critical category. */
 async function actCreateStoragePolicy(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
   const name = `${trigram}-sto-policy`;
-  await ensure<AnyRec>({
-    name: `storage-policy ${name}`,
-    logger: ctx.logger,
-    list: async () => listAllSdk(($p) => sdk(ctx).datapolicies.storage.listStoragePolicies($p)),
-    match: (p) => p.name === name,
-    create: async () =>
-      (await postV4<{ data?: AnyRec }>(
-        ctx,
-        '/api/datapolicies/v4.2/config/storage-policies',
-        {
-          // encryptionState enum: $UNKNOWN | $REDACTED | ENABLED | SYSTEM_DERIVED.
-          // `INLINE` was the compression state's value, not encryption's.
-          name,
-          encryptionSpec: { encryptionState: 'ENABLED' },
-          compressionSpec: { compressionState: 'INLINE' },
-          faultToleranceSpec: { replicationFactor: 'TWO' },
-        },
-      )).data,
-  });
+  const categories = await listAllSdk<AnyRec>(p => sdk(ctx).prism.categories.listCategories(p));
+  const category = categories.find(c => c.key === `${trigram}-cat` && c.value === 'Critical');
+  if (!category?.extId) throw new Error(`Category ${trigram}-cat:Critical not found`);
+  const policies = await listAllSdk<AnyRec>(p => sdk(ctx).datapolicies.storage.listStoragePolicies(p));
+  const existing = policies.find(p => p.name === name);
+  if (existing?.encryptionSpec?.encryptionState === 'ENABLED' && existing.categoryExtIds?.includes(category.extId)) return;
+  const path = '/api/datapolicies/v4.2/config/storage-policies';
+  const body = {
+    name,
+    encryptionSpec: { encryptionState: 'ENABLED' },
+    compressionSpec: existing?.compressionSpec ?? { compressionState: 'INLINE' },
+    faultToleranceSpec: existing?.faultToleranceSpec ?? { replicationFactor: 'TWO' },
+    categoryExtIds: [...new Set([...(existing?.categoryExtIds ?? []), category.extId])],
+  };
+  let result: { data?: AnyRec };
+  if (existing?.extId) {
+    const current = await getV4WithEtag<{ data?: AnyRec }>(ctx, `${path}/${existing.extId}`);
+    if (!current?.etag) throw new Error('Storage policy revision unavailable; retry');
+    result = await putV4(ctx, `${path}/${existing.extId}`, current.etag, body);
+  } else {
+    result = await postV4(ctx, path, body);
+  }
+  if (result.data?.extId && result.data?.$objectType?.includes('TaskReference')) {
+    await waitForTask(ctx, result.data.extId);
+  }
 }
 
 /** Stage 18 create-microseg-policy: creates `{Trigram}-mseg-policy` in ENFORCE mode. */
@@ -1404,10 +1396,9 @@ async function actCreateApprovalPolicy(ctx: ActContext): Promise<void> {
   }
 }
 
-/** Stage 26 restore-vm-from-recovery: re-creates `{Trigram}-vm` after the incident. Minimal spec; a real replay would restore from a recovery point. */
+/** Stage 26: restore the deleted VM's disks and configuration. */
 async function actRestoreVmFromRecovery(ctx: ActContext): Promise<void> {
-  // Delegates to the create-vm act: the check only asserts the VM exists again.
-  await actCreateVm(ctx);
+  await restoreRecoveryVm(ctx);
 }
 
 /** Stage 27 create-report: creates `{Trigram}-report` with a DAILY
@@ -1761,74 +1752,41 @@ async function actCloneAppBlueprint(ctx: ActContext): Promise<void> {
 
 }
 
-/**
- * Stage 36 schedule-day2-action: schedules a daily run on the player's
- * `{Trigram}-app`. Calm v3 models scheduled actions as `job` entities at
- * `POST /api/nutanix/v3/jobs` (NOT `/api/nutanix/v3/app_scheduler` which
- * 404s: that was an early wrong guess). Original Python `CheckSchedDay2`
- * confirms via `entities[?(metadata.name=='{trigram}-sched')].resources`
- * with `executable.entity.uuid == AppUUID`.
- *
- * Body shape pinned through trial & error against the live PC:
- *   - resources.type: 'RECURRING'
- *   - resources.schedule_info: ONE OF { execution_time } (one-time) OR
- *     { schedule } (recurring cron). Both → 422 "valid under each schema".
- *     We use `schedule: '0 3 * * *'` for daily-3am.
- *   - resources.executable.entity.uuid: the launched app's UUID
- *   - resources.executable.action: `{}` is accepted, the check only
- *     validates entity match, the action details (per-app runbook UUID
- *     for "Refresh VM") aren't part of the live check assertion.
- *
- * Idempotent: skips when {trigram}-sched already exists.
- */
+/** Stage 36: schedule the application's real Refresh VM action daily. */
 async function actScheduleDay2Action(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
-  const schedName = `${trigram}-sched`;
-  const existing = await ctx.nutanix.rest.request<{ entities?: AnyRec[] }>(
-    'POST',
-    '/api/nutanix/v3/jobs/list',
-    { kind: 'job', length: 250 },
-  );
-  if (
-    existing.entities?.some(
-      (s) => s.status?.name === schedName || s.metadata?.name === schedName,
-    )
-  ) {
-    ctx.logger.info(`act noop: schedule ${schedName} already exists`);
-    return;
-  }
-  const apps = await ctx.nutanix.rest.request<{ entities?: AnyRec[] }>(
-    'POST',
-    '/api/nutanix/v3/apps/list',
-    { kind: 'app', length: 250 },
-  );
-  const app = apps.entities?.find((a) => a.status?.name === `${trigram}-app`);
-  if (!app?.metadata?.uuid) {
-    ctx.logger.warn(
-      'actScheduleDay2Action: player app not found, run clone-app-blueprint first',
-    );
-    return;
-  }
-  try {
-    await ctx.nutanix.rest.request('POST', '/api/nutanix/v3/jobs', {
-      api_version: '3.1',
-      metadata: { kind: 'job', name: schedName },
-      resources: {
-        name: schedName,
-        description: 'Daily Refresh VM (registered for stage 36)',
-        type: 'RECURRING',
-        schedule_info: { schedule: '0 3 * * *', time_zone: 'UTC' },
-        executable: {
-          entity: { uuid: app.metadata.uuid },
-          action: {},
-        },
-      },
+  const name = `${trigram}-sched`;
+  const apps = await listAllV3<AnyRec>(ctx, '/api/nutanix/v3/apps/list', { kind: 'app' });
+  const appRef = apps.find(a => (a.status?.name ?? a.metadata?.name) === `${trigram}-app`);
+  if (!appRef?.metadata?.uuid) throw new Error(`Application ${trigram}-app not found`);
+  const app = await ctx.nutanix.rest.request<AnyRec>('GET', `/api/nutanix/v3/apps/${appRef.metadata.uuid}`);
+  const action = refreshAction(app);
+  const jobs = await listAllV3<AnyRec>(ctx, '/api/nutanix/v3/jobs/list', { kind: 'job' });
+  const existing = jobs.find(j => (j.metadata?.name ?? j.resources?.name) === name);
+  if (existing && !dailyScheduleError(existing.resources, appRef.metadata.uuid, action.uuid)) return;
+  const payload = {
+    api_version: app.api_version ?? '3.1',
+    metadata: app.metadata,
+    spec: { args: [], target_kind: 'Application', target_uuid: appRef.metadata.uuid },
+  };
+  const resources = {
+    name, description: 'Daily Refresh VM', type: 'RECURRING',
+    schedule_info: { schedule: '0 3 * * *', time_zone: 'UTC' },
+    executable: {
+      entity: { type: 'app', uuid: appRef.metadata.uuid },
+      action: { type: 'APP_ACTION_RUN', spec: { uuid: action.uuid, payload: JSON.stringify(payload) } },
+    },
+  };
+  if (existing?.metadata?.uuid) {
+    const path = `/api/nutanix/v3/jobs/${existing.metadata.uuid}`;
+    const current = await ctx.nutanix.rest.request<AnyRec>('GET', path);
+    await ctx.nutanix.rest.request('PUT', path, {
+      api_version: current.api_version ?? '3.1', metadata: current.metadata, resources,
     });
-    ctx.logger.info(`act create: schedule ${schedName} → app ${app.metadata.uuid}`);
-  } catch (err) {
-    ctx.logger.warn('actScheduleDay2Action: jobs POST failed', {
-      err: String(err).slice(0, 200),
+  } else {
+    await ctx.nutanix.rest.request('POST', '/api/nutanix/v3/jobs', {
+      api_version: '3.1', metadata: { kind: 'job', name }, resources,
     });
   }
 }
