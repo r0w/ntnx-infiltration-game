@@ -22,7 +22,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 ### Changed
 
 - Updated deployment and auto-play for Prism Central 7.6 and Self-Service 4.4.0.
-- Search and filter stages in play order, with a count of customized stages.
+- Search and filter stages in the Pack tab.
 - Clearer instructions for project identity sources and category ownership.
 - Deployment guide explains how to create a project if none exists.
 - Choose the target project when launching the prerequisites runbook.
