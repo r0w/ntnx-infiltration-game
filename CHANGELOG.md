@@ -29,6 +29,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Auto-play retrieves the LCM update count if it was unavailable at startup.
+
 - Auto-play matches the instructions for VM recovery, policies, network ranges, disk size and schedules, including existing reports.
 - Disabling a stage can also disable all dependent stages; imported configurations report broken dependencies.
 

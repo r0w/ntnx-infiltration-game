@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import type { SessionService } from '../session-service';
 import { HttpError } from '../session-service';
+import { refreshLcmCount } from '../cluster-config-probe';
+import type { ClusterConfigQueries } from '../db/queries';
 import type { LoadedPack } from '../pack-loader';
 import { NutanixTransportError } from '@ntnx-game/nutanix';
 import type { SubmitInputRequest } from '@ntnx-game/shared';
@@ -166,7 +168,7 @@ export function buildStageRoutes(deps: StageRoutesDeps): Hono {
     try {
       const value = await service.queryWithSessionContext(sessionId, async (ctx) => {
         if (variable === 'NodeSerial') return await lookupNodeSerial(ctx);
-        if (variable === 'NumberUpdates') return await lookupNumberUpdates(ctx);
+        if (variable === 'NumberUpdates') return await lookupNumberUpdates(ctx, service.clusterConfig);
         if (variable === 'Runway') return await lookupRunway(ctx);
         return null;
       });
@@ -195,18 +197,18 @@ async function lookupNodeSerial(ctx: import('@ntnx-game/engine').CheckContext): 
   }
 }
 
-/** Stage 29 auto-fill — the cached count, i.e. exactly what CheckUpdates
- *  validates against. No live LCM read: the check doesn't do one either. */
-async function lookupNumberUpdates(ctx: import('@ntnx-game/engine').CheckContext): Promise<string | null> {
+/** Re-read LCM if the boot probe had no settled count yet. */
+async function lookupNumberUpdates(
+  ctx: import('@ntnx-game/engine').CheckContext,
+  cfg: ClusterConfigQueries,
+): Promise<string> {
   const cached = ctx.clusterConfig?.lcmAvailableUpdates;
   if (typeof cached === 'number') return String(cached);
-  // Mock has no cluster-config probe seeding the count, and the LCM fixture
-  // shows 0 available updates — return that so mock auto-play can walk stage
-  // 29 (CheckUpdates does format-only validation in mock, accepting any
-  // non-negative integer). test/live without a cached count stay null so the
-  // operator types it.
   if (ctx.nutanix.mode === 'mock') return '0';
-  return null;
+  await refreshLcmCount({ nutanix: ctx.nutanix, cfg, logger: ctx.logger });
+  const count = cfg.get<number>('lcm_available_updates');
+  if (typeof count === 'number') return String(count);
+  throw new HttpError(503, 'LCM update count is not available yet. Wait for LCM to settle, then retry auto-play.');
 }
 
 /** Live lookup for stage 31 — query OldPC's v3/groups runway endpoint. */
