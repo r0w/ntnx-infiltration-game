@@ -110,7 +110,7 @@
   "stage-020.line-05": " - Juste un <white>ordonnancement local</white> (local schedule), avec les paramètres ci-dessous :\n",
   "stage-020.line-06": "   . Prendre un snapshot toutes les <white>1 heure</white>.\n",
   "stage-020.line-07": "   . Le type de rétention doit être <white>Roll-up</white>.\n",
-  "stage-020.line-08": "   . Conserver <white>1 jour</white> de snapshots.\n",
+  "stage-020.line-08": "   . Définir la rétention des snapshots sur <white>Daily</white>, avec une fréquence de <white>1</white>.\n",
   "stage-020.line-09": " - Appliquée aux VM avec votre catégorie <white>{Trigram}-cat</white> et la valeur <white>Critical</white>.<pause sec='2'/>\n\n",
   "stage-020.line-10": "Appuyez sur <white>Entrée</white> quand c'est fait : <input/>",
   "stage-020.line-12": "Bien. Je vérifie à nouveau. Moins de risques, plus de fun !\n",

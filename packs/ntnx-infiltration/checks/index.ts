@@ -1,4 +1,4 @@
-import { refreshAction, dailyScheduleError } from '../schedule';
+import { refreshAction, dailyScheduleError, reportRunsAtThree } from '../schedule';
 import { selectSecondarySubnet } from '../network';
 import { checkSdk, listAllSdk } from './sdk';
 import { unwrapOne } from '../acts/helpers';
@@ -423,6 +423,7 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
       }>;
       disks?: Array<{
         backingInfo?: {
+          diskSizeBytes?: number;
           dataSource?: { reference?: { imageExtId?: string } };
         };
       }>;
@@ -486,6 +487,9 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
           fr: `La VM est éteinte — démarrez-la.`,
         }),
       };
+    }
+    if (!found.disks?.some(d => (d.backingInfo?.diskSizeBytes ?? 0) >= 20 * 1024 ** 3)) {
+      return { pass: false, detail: `VM '${expected}' needs a disk of at least 20 GB.` };
     }
     // NIC count + subnet binding, subnet resolved by name (issue #31).
     // Transport blip → skip the assertion; real miss → fail.
@@ -1210,7 +1214,8 @@ async function CheckReport(ctx: CheckContext): Promise<CheckResult> {
     const reports = await listAllSdk<{
       extId?: string;
       name?: string;
-      schedule?: { scheduleInterval?: string };
+      timezone?: string;
+      schedule?: { scheduleInterval?: string; frequency?: number; startTime?: string };
       notificationPolicy?: {
         recipients?: Array<{ emailAddress?: string }>;
       };
@@ -1229,6 +1234,9 @@ async function CheckReport(ctx: CheckContext): Promise<CheckResult> {
         pass: false,
         detail: `Report '${expected}' is not on a DAILY schedule.`,
       };
+    }
+    if (found.schedule?.frequency !== 1 || !reportRunsAtThree(found.schedule?.startTime, found.timezone)) {
+      return { pass: false, detail: `Report '${expected}' must run every day at 03:00 in its configured timezone.` };
     }
     const recipients = found.notificationPolicy?.recipients ?? [];
     if (recipients.length === 0) {

@@ -110,7 +110,7 @@
   "stage-020.line-05": " - Solo uno <white>schedule locale</white>, con le impostazioni qui sotto:\n",
   "stage-020.line-06": "   . Prenda uno snapshot ogni <white>1 ora</white>.\n",
   "stage-020.line-07": "   . Il Retention Type deve essere <white>Roll-up</white>.\n",
-  "stage-020.line-08": "   . Conservi <white>1 giorno</white> di snapshot.\n",
+  "stage-020.line-08": "   . Impostare la conservazione degli snapshot su <white>Daily</white>, con una frequenza di <white>1</white>.\n",
   "stage-020.line-09": " - Applicata alle VM con la sua categoria <white>{Trigram}-cat</white> e il valore <white>Critical</white>.<pause sec='2'/>\n\n",
   "stage-020.line-10": "Prema <white>Invio</white> quando è fatto: <input/>",
   "stage-020.line-12": "Bene. Verifico di nuovo. Meno rischi, più divertimento!\n",

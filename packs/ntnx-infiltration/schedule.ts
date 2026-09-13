@@ -27,3 +27,20 @@ export function dailyScheduleError(job: JobResources | undefined, appUuid: strin
   }
   if (job.state && job.state !== 'ACTIVE') return 'enable the schedule.';
 }
+
+/** Auto-play uses UTC; player reports may use any valid named timezone. */
+export function nextReportTime(now = new Date()): string {
+  const start = new Date(now);
+  start.setUTCHours(3, 0, 0, 0);
+  if (start <= now) start.setUTCDate(start.getUTCDate() + 1);
+  return start.toISOString();
+}
+
+export function reportRunsAtThree(startTime?: string, timezone = 'UTC'): boolean {
+  if (!startTime) return false;
+  try {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).format(new Date(startTime)) === '03:00';
+  } catch { return false; }
+}

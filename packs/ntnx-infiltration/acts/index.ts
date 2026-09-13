@@ -15,7 +15,7 @@
  */
 import type { ActContext } from '@ntnx-game/engine';
 import { restoreRecoveryVm } from './recovery';
-import { refreshAction, dailyScheduleError } from '../schedule';
+import { refreshAction, dailyScheduleError, nextReportTime } from '../schedule';
 import { assignVmOwnership } from './vm-ownership';
 import type { NutanixSdk } from '@ntnx-game/nutanix';
 import {
@@ -514,7 +514,7 @@ async function actCreateSubnet(ctx: ActContext): Promise<void> {
               poolList: [
                 {
                   startIp: { value: `${subnetBase}.50` },
-                  endIp: { value: `${subnetBase}.200` },
+                  endIp: { value: `${subnetBase}.115` },
                 },
               ],
             },
@@ -684,6 +684,7 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
             {
               backingInfo: {
                 '$objectType': 'vmm.v4.ahv.config.VmDisk',
+                diskSizeBytes: 20 * 1024 ** 3,
                 dataSource: {
                   reference: {
                     '$objectType': 'vmm.v4.ahv.config.ImageReference',
@@ -1432,7 +1433,7 @@ async function actCreateReport(ctx: ActContext): Promise<void> {
             '$objectType': 'opsmgmt.v4.config.ReportSchedule',
             scheduleInterval: 'DAILY',
             frequency: 1,
-            startTime: new Date(Date.now() + 60_000).toISOString(),
+            startTime: nextReportTime(),
           },
           // Recipient = `{Trigram}{EmailReport}` (Python check requires
           // first recipient match this exact value).

@@ -110,7 +110,7 @@
   "stage-020.line-05": " - Nur ein <white>lokaler Zeitplan</white> mit den folgenden Einstellungen:\n",
   "stage-020.line-06": "   . Alle <white>1 Stunde</white> einen Snapshot erstellen.\n",
   "stage-020.line-07": "   . Der Retention Type muss <white>Roll-up</white> sein.\n",
-  "stage-020.line-08": "   . <white>1 Tag</white> an Snapshots aufbewahren.\n",
+  "stage-020.line-08": "   . Die Snapshot-Aufbewahrung auf <white>Daily</white> mit der Häufigkeit <white>1</white> setzen.\n",
   "stage-020.line-09": " - Angewendet auf VMs mit Ihrer Kategorie <white>{Trigram}-cat</white> und dem Wert <white>Critical</white>.<pause sec='2'/>\n\n",
   "stage-020.line-10": "Drücken Sie <white>Enter</white>, wenn es erledigt ist: <input/>",
   "stage-020.line-12": "Gut. Ich prüfe noch einmal. Weniger Risiken, mehr Spaß!\n",

@@ -274,7 +274,7 @@
           { "nicNetworkInfo": { "subnet": { "extId": "subnet-{Trigram}" } } }
         ],
         "disks": [
-          { "backingInfo": { "dataSource": { "reference": { "imageExtId": "img-{Trigram}-ubuntu" } } } }
+          { "backingInfo": { "diskSizeBytes": 21474836480, "dataSource": { "reference": { "imageExtId": "img-{Trigram}-ubuntu" } } } }
         ],
         "guestCustomization": { "config": { "cloudInit": {} } },
         "project": { "extId": "proj-{Trigram}" },
@@ -434,7 +434,8 @@
       {
         "extId": "report-{Trigram}",
         "name": "{Trigram}-report",
-        "schedule": { "scheduleInterval": "DAILY", "time": "03:00" },
+        "timezone": "UTC",
+        "schedule": { "scheduleInterval": "DAILY", "frequency": 1, "startTime": "2026-01-01T03:00:00Z" },
         "notificationPolicy": {
           "recipients": [{ "emailAddress": "{Trigram}{EmailReport}" }]
         },
