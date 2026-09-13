@@ -105,3 +105,17 @@ test('reports use the next 03:00 and validate the selected timezone',async()=>{
   expect(reportRunsAtThree(undefined)).toBe(false);
   expect(reportRunsAtThree('invalid')).toBe(false);
 });
+
+test('report act repairs an old schedule without replacing its recipients or widgets',async()=>{
+  const ctx=context();const writes:any[]=[];
+  const old={name:'fid-report',extId:'report',sections:[{name:'VMs',rows:[]}],notificationPolicy:{recipients:[{emailAddress:'fid@example.com'}]},schedule:{scheduleInterval:'DAILY',frequency:1,startTime:'2026-01-01T12:00:00Z'}};
+  ctx.nutanix.sdk={opsmgmt:{reportConfigs:{listReportConfigs:async()=>({data:{data:[old]}})}}};
+  const fetch=spyOn(globalThis,'fetch').mockImplementation(async(_url,init)=>{
+    if(init?.method==='PUT')writes.push(JSON.parse(String(init.body)));
+    return Response.json({data:old},{headers:{etag:'revision'}});
+  });
+  try{await acts['create-report'](ctx);}finally{fetch.mockRestore();}
+  expect(writes).toHaveLength(1);
+  expect(writes[0].notificationPolicy).toEqual(old.notificationPolicy);expect(writes[0].sections).toEqual(old.sections);
+  expect(writes[0].schedule.startTime).toContain('T03:00:00.000Z');expect(writes[0].extId).toBeUndefined();
+});

@@ -15,7 +15,7 @@
  */
 import type { ActContext } from '@ntnx-game/engine';
 import { restoreRecoveryVm } from './recovery';
-import { refreshAction, dailyScheduleError, nextReportTime } from '../schedule';
+import { refreshAction, dailyScheduleError, nextReportTime, reportRunsAtThree } from '../schedule';
 import { assignVmOwnership } from './vm-ownership';
 import type { NutanixSdk } from '@ntnx-game/nutanix';
 import {
@@ -1414,6 +1414,22 @@ async function actCreateReport(ctx: ActContext): Promise<void> {
   const name = `${trigram}-report`;
   const emailSuffix = getVarString(ctx, 'EmailReport');
   const recipientEmail = emailSuffix ? `${trigram}${emailSuffix}` : `${trigram}@example.com`;
+  const reports = await listAllSdk<AnyRec>(p => sdk(ctx).opsmgmt.reportConfigs.listReportConfigs(p));
+  const existing = reports.find(r => r.name === name);
+  if (existing?.extId) {
+    if (existing.schedule?.scheduleInterval === 'DAILY' && existing.schedule?.frequency === 1 &&
+        reportRunsAtThree(existing.schedule?.startTime, existing.timezone)) return;
+    const path = `/api/opsmgmt/v4.0/config/report-configs/${existing.extId}`;
+    const current = await getV4WithEtag<{ data?: AnyRec }>(ctx, path);
+    if (!current?.etag || !current.body.data) throw new Error('Report revision unavailable; retry');
+    const writable = ['name', 'description', 'retentionConfig', 'sections', 'supportedFormats', 'notificationPolicy',
+      'isPrivate', 'startTimeOffsetSecs', 'endTimeOffsetSecs', 'reportCustomization'];
+    const body = Object.fromEntries(writable.filter(k => current.body.data![k] !== undefined).map(k => [k, current.body.data![k]]));
+    await putV4(ctx, path, current.etag, {
+      ...body, timezone: 'UTC', schedule: { scheduleInterval: 'DAILY', frequency: 1, startTime: nextReportTime() },
+    });
+    return;
+  }
   await ensure<AnyRec>({
     name: `report-config ${name}`,
     logger: ctx.logger,
