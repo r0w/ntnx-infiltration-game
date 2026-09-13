@@ -1202,6 +1202,7 @@ function PackConfigBar({
 
   const copy = async () => {
     if (!exported) return;
+    setBusy(true);
     try {
       await navigator.clipboard.writeText(exported.config);
       setCopied(true);
@@ -1209,6 +1210,8 @@ function PackConfigBar({
       // Clipboard is blocked over plain http on some browsers, and the game
       // is served over http. The box is selectable, so say that instead.
       setError('clipboard blocked by the browser, select the text and copy manually');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -1258,10 +1261,10 @@ function PackConfigBar({
             : 'pack default'}
         </span>
         <span className="admin-pack-config-sep" aria-hidden="true" />
-        <button type="button" className="app-reset" onClick={() => void openExport()}>
+        <button type="button" className="app-reset" disabled={busy} onClick={() => void openExport()}>
           export
         </button>
-        <button type="button" className="app-reset" onClick={() => setDialog('import')}>
+        <button type="button" className="app-reset" disabled={busy} onClick={() => { close(); setDialog('import'); }}>
           import
         </button>
         {/* Never disabled on driftCount alone: an override that matches the
@@ -1270,14 +1273,15 @@ function PackConfigBar({
           type="button"
           className="app-reset"
           title="drop every override and go back to the pack defaults"
-          onClick={() => setDialog('reset')}
+          disabled={busy}
+          onClick={() => { close(); setDialog('reset'); }}
         >
           reset
         </button>
       </div>
 
       {dialog === 'export' && (
-        <Modal title="export stage config" onClose={close} wide>
+        <Modal title="export stage config" onClose={close} busy={busy} wide>
           <div className="modal-body">
             <p className="admin-pack-config-lede">
               Paste this into another instance to give it the same setup.
@@ -1306,13 +1310,13 @@ function PackConfigBar({
             {error && <p className="c-red admin-pack-config-error">{error}</p>}
           </div>
           <div className="modal-actions">
-            <button type="button" className="modal-btn" onClick={close}>
+            <button type="button" className="modal-btn" disabled={busy} onClick={close}>
               close
             </button>
             <button
               type="button"
               className="modal-btn"
-              disabled={!exported}
+              disabled={busy || !exported}
               onClick={() => void copy()}
             >
               {copied ? 'copied' : 'copy'}

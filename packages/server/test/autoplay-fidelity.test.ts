@@ -89,10 +89,13 @@ test('storage act adds Critical while preserving existing category bindings',asy
   };
   const fetch=spyOn(globalThis,'fetch').mockImplementation(async(url,init)=>{
     if(init?.method==='PUT') writes.push(JSON.parse(String(init.body)));
-    return Response.json({data:{extId:'policy'}},{headers:{etag:'revision'}});
+    return Response.json({data:{extId:'policy',categoryExtIds:['other','fresh'],qosSpec:{throttledIops:200},compressionSpec:{compressionState:'POST_PROCESS'},faultToleranceSpec:{replicationFactor:'THREE'}}},{headers:{etag:'revision'}});
   });
   try{await acts['create-storage-policy'](ctx);}finally{fetch.mockRestore();}
-  expect(writes).toHaveLength(1);expect(writes[0].categoryExtIds).toEqual(['other','critical']);
+  expect(writes).toHaveLength(1);expect(writes[0].categoryExtIds).toEqual(['other','fresh','critical']);
+  expect(writes[0].qosSpec).toEqual({throttledIops:200});
+  expect(writes[0].compressionSpec.compressionState).toBe('POST_PROCESS');
+  expect(writes[0].faultToleranceSpec.replicationFactor).toBe('THREE');
   expect(writes[0].encryptionSpec.encryptionState).toBe('ENABLED');
 });
 

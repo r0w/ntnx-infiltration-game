@@ -149,9 +149,9 @@ def policy_ready():
         r = requests.get(PC_BASE + '/api/calm/v3.0/features/policy',
                          auth=AUTH, headers=HEADERS, verify=False, timeout=20)
         r.raise_for_status()
-        feature = r.json()
-        enabled = feature.get('spec', {}).get('feature_status', {}).get('is_enabled') is True
-        config = feature.get('status', {}).get('feature_status', {}).get('config') or {}
+        feature = r.json() or {}
+        enabled = ((feature.get('spec') or {}).get('feature_status') or {}).get('is_enabled') is True
+        config = (((feature.get('status') or {}).get('feature_status') or {}).get('config') or {})
         if enabled and config.get('state') in (None, 'COMPLETED'):
             print('[ok] Policy Engine enabled; approval-policy stages are ready')
             return True

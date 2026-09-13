@@ -169,7 +169,8 @@ def get_image_uuid():
 def find_vm(name):
     r = _req_retry(
         'GET', "%s/api/vmm/v4.0/ahv/config/vms" % BASE,
-        params={'$filter': "name eq '%s'" % name, '$limit': 100},
+        params={'$filter': "name eq '%s'" % name, '$limit': 100,
+                '$select': 'extId,name,cluster,categories,nics'},
     )
     r.raise_for_status()  # Failed inventory reads must never mean 'absent'.
     matches = r.json().get('data') or []
@@ -182,7 +183,7 @@ def validate_existing_vm(vm, cat_uuid, subnet_uuid):
     if (vm.get('cluster') or {}).get('extId') != CLUSTER_UUID:
         raise Exception('Existing VM belongs to another cluster; refusing to reuse it')
     categories = [c.get('extId') for c in vm.get('categories') or []]
-    subnets = [(n.get('networkInfo') or {}).get('subnet', {}).get('extId')
+    subnets = [((n.get('networkInfo') or n.get('nicNetworkInfo') or {}).get('subnet') or {}).get('extId')
                for n in vm.get('nics') or []]
     if cat_uuid not in categories or subnet_uuid not in subnets:
         raise Exception('Existing VM does not match the production category/network; inspect it before resuming')

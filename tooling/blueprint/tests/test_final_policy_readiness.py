@@ -46,3 +46,12 @@ def test_other_profile_does_not_require_policy():
     ns['CLUSTER_PROFILE'] = 'other'
     assert ns['main']() == 0
     ns['requests'].get.assert_not_called()
+
+
+@pytest.mark.parametrize('payload', [None, {'spec': None, 'status': None},
+    {'spec': {'feature_status': None}, 'status': {'feature_status': None}}])
+def test_null_policy_fields_warn_without_crashing(payload, capsys):
+    ns = verifier()
+    ns['requests'].get.return_value = Response(payload)
+    assert ns['main']() == 0
+    assert 'NOT confirmed ready' in capsys.readouterr().out
