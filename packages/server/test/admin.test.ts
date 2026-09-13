@@ -1038,6 +1038,8 @@ describe('pack config export / import / reset', () => {
     expect(result.brokenStages).toEqual(['policy', 'tag']);
     const pack = await (await target.r.request('/pack', { headers: AUTH })).json();
     expect(pack.brokenCount).toBe(2);
+    expect(pack.stages.find((s: { stageName: string }) => s.stageName === 'tag').dependsOn).toEqual(['vm']);
+    expect(pack.stages.find((s: { stageName: string }) => s.stageName === 'vm').dependsOn).toEqual([]);
     expect(pack.stages.find((s: { stageName: string }) => s.stageName === 'tag').brokenMissingStages).toEqual(['vm']);
     // Enabling a prerequisite clears warnings; it does not rewrite other stages.
     await toggle(target.r, 'vm', 'active', true);

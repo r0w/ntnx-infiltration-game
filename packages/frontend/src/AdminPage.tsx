@@ -1598,6 +1598,7 @@ function PackEditor({
               <th>active</th>
               <th>gate</th>
               <th>vars</th>
+              <th>requires stages</th>
             </tr>
           </thead>
           <tbody>
@@ -1682,12 +1683,32 @@ function PackEditor({
                       </>
                     )}
                   </td>
+                  <td className="pack-dependencies">
+                    {(s.dependsOn ?? []).length === 0 ? (
+                      <span className="c-dim pack-vars-none">—</span>
+                    ) : (
+                      <ul>
+                        {s.dependsOn!.map((name) => (
+                          <li key={name}>
+                            <button
+                              type="button"
+                              className={`pack-dependency${s.brokenMissingStages?.includes(name) ? ' pack-dependency-missing' : ''}`}
+                              title={`Go to ${name}${s.brokenMissingStages?.includes(name) ? ' (unavailable)' : ''}`}
+                              onClick={() => jumpTo(name)}
+                            >
+                              {name}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </td>
                 </tr>
               );
             })}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={5} className="pack-empty">
+                <td colSpan={6} className="pack-empty">
                   no stage matches. <button type="button" className="app-reset" onClick={() => { setFilter('all'); setQuery(''); }}>show all {rows.length}</button>
                 </td>
               </tr>

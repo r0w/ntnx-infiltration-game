@@ -15,6 +15,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- See required stages in the Pack table and click to jump to them.
 - Choose the game network and game VM SSH user at deployment.
 - Export, import and reset stage configurations from the Pack tab.
 
