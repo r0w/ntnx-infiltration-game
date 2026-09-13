@@ -292,6 +292,7 @@ export interface AdminPackStageEntry {
   captures: string[];
   brokenMissingVars: string[];
   brokenMissingStages?: string[];
+  dependsOn?: string[];
   /** Always-enforced capability requirements. */
   requires: string[];
   /** Capability requirements only enforced when `clusterProfile === 'other'`. */

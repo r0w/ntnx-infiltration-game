@@ -207,6 +207,7 @@ export interface AdminPackStageEntry {
   /** Vars in `needs` that have no surviving producer in the effective pack. */
   brokenMissingVars: string[];
   brokenMissingStages?: string[];
+  dependsOn?: string[];
   /** Always-enforced capability requirements. */
   requires: string[];
   /** Capability requirements only enforced when `clusterProfile === 'other'`. */
@@ -577,6 +578,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
         adminGateOverridden: !!o && o.adminGate !== null && o.adminGate !== (base?.adminGate ?? false),
         needs: s.needs ?? [],
         captures: s.captures ?? [],
+        dependsOn: s.dependsOn ?? [],
         brokenMissingVars: brokenByName.get(s.name)?.missingVars ?? [],
         brokenMissingStages: brokenByName.get(s.name)?.missingStages ?? [],
         requires,

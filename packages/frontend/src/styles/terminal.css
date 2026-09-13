@@ -2966,3 +2966,20 @@ a.terminal-link:visited {
   color: var(--dim);
   font-size: 11px;
 }
+
+/* Resource dependencies link back to their producing stage. */
+.pack-dependencies { min-width: 210px; white-space: normal; }
+.pack-dependencies ul { list-style: none; margin: 0; padding: 0; }
+.pack-dependency {
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.pack-dependency:hover { text-decoration: underline; }
+.pack-dependency:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.pack-dependency-missing { color: var(--st-broken); }
