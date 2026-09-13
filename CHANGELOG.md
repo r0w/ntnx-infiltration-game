@@ -29,7 +29,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
-- Auto-play matches the instructions for VM recovery, policies, network ranges, disk size and scheduled actions.
+- Auto-play matches the instructions for VM recovery, policies, network ranges, disk size and schedules, including existing reports.
 - Disabling a stage can also disable all dependent stages; imported configurations report broken dependencies.
 
 - CloneProd shares the required network with the source VM's project and reports clone failures.

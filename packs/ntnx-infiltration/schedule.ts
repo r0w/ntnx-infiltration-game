@@ -44,3 +44,14 @@ export function reportRunsAtThree(startTime?: string, timezone = 'UTC'): boolean
     }).format(new Date(startTime)) === '03:00';
   } catch { return false; }
 }
+
+/** GET responses include union discriminators that report PUT rejects. */
+export function reportWriteBody(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(reportWriteBody);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value)
+      .filter(([key]) => key !== '$reserved' && !/^\$.*ItemDiscriminator$/.test(key))
+      .map(([key, item]) => [key, reportWriteBody(item)]));
+  }
+  return value;
+}

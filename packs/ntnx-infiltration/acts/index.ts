@@ -15,7 +15,7 @@
  */
 import type { ActContext } from '@ntnx-game/engine';
 import { restoreRecoveryVm } from './recovery';
-import { refreshAction, dailyScheduleError, nextReportTime, reportRunsAtThree } from '../schedule';
+import { refreshAction, dailyScheduleError, nextReportTime, reportRunsAtThree, reportWriteBody } from '../schedule';
 import { assignVmOwnership } from './vm-ownership';
 import type { NutanixSdk } from '@ntnx-game/nutanix';
 import {
@@ -1425,9 +1425,9 @@ async function actCreateReport(ctx: ActContext): Promise<void> {
     const writable = ['name', 'description', 'retentionConfig', 'sections', 'supportedFormats', 'notificationPolicy',
       'isPrivate', 'startTimeOffsetSecs', 'endTimeOffsetSecs', 'reportCustomization'];
     const body = Object.fromEntries(writable.filter(k => current.body.data![k] !== undefined).map(k => [k, current.body.data![k]]));
-    await putV4(ctx, path, current.etag, {
+    await putV4(ctx, path, current.etag, reportWriteBody({
       ...body, timezone: 'UTC', schedule: { scheduleInterval: 'DAILY', frequency: 1, startTime: nextReportTime() },
-    });
+    }));
     return;
   }
   await ensure<AnyRec>({
