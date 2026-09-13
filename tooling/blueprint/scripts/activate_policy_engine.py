@@ -37,9 +37,9 @@ def get_feature():
 
 def feature_state(feature):
     feature = feature or {}
-    status = feature.get('status', {}).get('feature_status') or {}
+    status = ((feature.get('status') or {}).get('feature_status') or {})
     config = status.get('config') or {}
-    enabled = feature.get('spec', {}).get('feature_status', {}).get('is_enabled') is True
+    enabled = ((feature.get('spec') or {}).get('feature_status') or {}).get('is_enabled') is True
     return enabled, config.get('state'), config.get('state_message') or ''
 
 
@@ -98,6 +98,9 @@ def attempt():
     feature, err = get_feature()
     if err:
         print('[not ready] %s; no activation submitted.' % err)
+        return False
+    if not isinstance(feature, dict) or not isinstance(((feature.get('spec') or {}).get('feature_status') or {}).get('is_enabled'), bool):
+        print('[not ready] Policy Engine enablement status is missing; no activation submitted.')
         return False
     enabled, state, message = feature_state(feature)
     if enabled and state in (None, 'COMPLETED'):

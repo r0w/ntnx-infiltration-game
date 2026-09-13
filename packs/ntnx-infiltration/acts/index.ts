@@ -1020,20 +1020,21 @@ async function actCreateStoragePolicy(ctx: ActContext): Promise<void> {
   const existing = policies.find(p => p.name === name);
   if (existing?.encryptionSpec?.encryptionState === 'ENABLED' && existing.categoryExtIds?.includes(category.extId)) return;
   const path = '/api/datapolicies/v4.2/config/storage-policies';
-  const body = {
+  const policyBody = (policy?: AnyRec) => ({
     name,
     encryptionSpec: { encryptionState: 'ENABLED' },
-    compressionSpec: existing?.compressionSpec ?? { compressionState: 'INLINE' },
-    faultToleranceSpec: existing?.faultToleranceSpec ?? { replicationFactor: 'TWO' },
-    categoryExtIds: [...new Set([...(existing?.categoryExtIds ?? []), category.extId])],
-  };
+    compressionSpec: policy?.compressionSpec ?? { compressionState: 'INLINE' },
+    faultToleranceSpec: policy?.faultToleranceSpec ?? { replicationFactor: 'TWO' },
+    ...(policy?.qosSpec ? { qosSpec: policy.qosSpec } : {}),
+    categoryExtIds: [...new Set([...(policy?.categoryExtIds ?? []), category.extId])],
+  });
   let result: { data?: AnyRec };
   if (existing?.extId) {
     const current = await getV4WithEtag<{ data?: AnyRec }>(ctx, `${path}/${existing.extId}`);
-    if (!current?.etag) throw new Error('Storage policy revision unavailable; retry');
-    result = await putV4(ctx, `${path}/${existing.extId}`, current.etag, body);
+    if (!current?.etag || !current.body?.data) throw new Error('Storage policy revision unavailable; retry');
+    result = await putV4(ctx, `${path}/${existing.extId}`, current.etag, policyBody(current.body.data));
   } else {
-    result = await postV4(ctx, path, body);
+    result = await postV4(ctx, path, policyBody());
   }
   if (result.data?.extId && result.data?.$objectType?.includes('TaskReference')) {
     await waitForTask(ctx, result.data.extId);

@@ -73,3 +73,22 @@ def test_lost_enable_response_is_not_retried(capsys):
     ns['main']()
     ns['put_enable'].assert_called_once()
     assert 'NOT confirmed ready' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('payload', [None, {}, {'spec': None, 'status': None},
+    {'spec': {'feature_status': None}, 'status': {'feature_status': None}}])
+def test_missing_enablement_does_not_crash_or_start_activation(payload, capsys):
+    ns = policy()
+    ns['get_feature'] = Mock(return_value=(payload, None))
+    assert ns['main']() == 0
+    ns['put_enable'].assert_not_called()
+    assert 'NOT confirmed ready' in capsys.readouterr().out
+
+@pytest.mark.parametrize('status', [None, {'feature_status': None}, {'feature_status': {'config': None}}])
+def test_null_status_during_polling_does_not_crash(status, capsys):
+    ns = policy()
+    payload = feature('RUNNING')
+    payload['status'] = status
+    ns['get_feature'] = Mock(return_value=(payload, None))
+    assert ns['wait_until_ready']() is False
+    assert '[ready]' not in capsys.readouterr().out

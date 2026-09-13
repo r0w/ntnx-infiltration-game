@@ -32,14 +32,16 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 ### Fixed
 
 - Auto-play retrieves the LCM update count if it was unavailable at startup.
+- Storage policy updates preserve existing performance settings.
+- Pack dialogs clear messages from previous operations.
 
 - Auto-play matches the instructions for VM recovery, policies, network ranges, disk size and schedules, including existing reports.
 - Disabling a stage can also disable all dependent stages; imported configurations report broken dependencies.
 
 - CloneProd shares the required network with the source VM's project and reports clone failures.
-- Project setup and auto-play fixes for membership, VM ownership and category assignment.
-- Installation waits for Policy Engine activation and reports incomplete readiness.
-- Installation retries temporary VM creation failures and completes configuration on resume.
+- Project setup reports incomplete membership; auto-play fixes VM ownership and category assignment.
+- Installation waits for Policy Engine activation and handles missing readiness information.
+- Installation retries temporary VM creation failures and correctly recognizes existing VMs on resume.
 - Fixed installation failures with older cluster APIs and erasure coding settings.
 
 ## [1.0.4] - 2026-09-11

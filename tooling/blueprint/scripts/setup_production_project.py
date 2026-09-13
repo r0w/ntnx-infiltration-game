@@ -620,14 +620,17 @@ def main():
 
     print("Adding '%s' (uuid=%s) as Project Admin (role=%s)..." %
           (PROJECT_ADMIN, user_uuid, role_uuid))
-    ok = add_user_as_project_admin(
-        project_uuid, account_uuid, primary_uuid, secondary_uuid,
-        CLUSTER_UUID, user_uuid, role_uuid, directory_id, spec_version,
-    )
-    if ok:
-        print("[ok]   ACP set: '%s' is Project Admin on '%s'" % (PROJECT_ADMIN, PROJECT_NAME))
-    else:
-        print("[warn] ACP PUT failed — operator can re-add manually via Prism UI")
+    try:
+        add_user_as_project_admin(
+            project_uuid, account_uuid, primary_uuid, secondary_uuid,
+            CLUSTER_UUID, user_uuid, role_uuid, directory_id, spec_version,
+        )
+    except Exception as exc:
+        print("[FAIL] Project membership could not be confirmed: %s" % exc)
+        print("Inspect the project update task and '%s' access to '%s' before resuming installation." %
+              (PROJECT_ADMIN, PROJECT_NAME))
+        return 1
+    print("[ok]   ACP set: '%s' is Project Admin on '%s'" % (PROJECT_ADMIN, PROJECT_NAME))
 
     # Calm SetVariable task captures the line `ProjectUUID=...` from stdout.
     print("ProjectUUID=%s" % project_uuid)

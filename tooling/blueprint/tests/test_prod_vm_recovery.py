@@ -94,3 +94,18 @@ def test_retry_does_not_create_duplicate_when_vm_appears_after_failure():
     ns['create_vm'].return_value = (False, 'task FAILED: VMM-10011')
     assert ns['ensure_vm'](ns['VM_SPECS'][0], 'cat', 'net', 'img')[0]
     ns['create_vm'].assert_called_once()
+
+
+@pytest.mark.parametrize('nic_key', ['networkInfo', 'nicNetworkInfo'])
+def test_resume_requests_categories_and_accepts_both_nic_shapes(nic_key):
+    ns = load('create_prod_vms.py')
+    vm = {'extId': 'vm', 'cluster': {'extId': ns['CLUSTER_UUID']},
+          'categories': [{'extId': 'cat'}], 'nics': [{nic_key: {'subnet': {'extId': 'net'}}}]}
+    def inventory(method, url, **kwargs):
+        assert method == 'GET'
+        fields = kwargs['params']['$select'].split(',')
+        return Response({'data': [{k: v for k, v in vm.items() if k in fields}]})
+    ns['_req_retry'] = inventory
+    ns['create_vm'] = Mock()
+    assert ns['ensure_vm'](ns['VM_SPECS'][0], 'cat', 'net', 'img')[0]
+    ns['create_vm'].assert_not_called()
