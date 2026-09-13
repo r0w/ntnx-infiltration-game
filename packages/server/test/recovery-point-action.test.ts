@@ -12,7 +12,7 @@
  *      recovery-points endpoint with the right body when VMUUID is captured,
  *      and quietly does nothing when it isn't (or in mock mode).
  */
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
@@ -36,15 +36,25 @@ const PACKS_DIR = resolve(HERE, '../../../packs');
 const SCHEMA = readFileSync(resolve(HERE, '../src/db/schema.sql'), 'utf8');
 const STAGE = 'verify-prod-user-isolation';
 
+afterEach(() => { if (fetchSpy) fetchSpy.mockRestore(); fetchSpy = undefined; });
+let fetchSpy: ReturnType<typeof spyOn> | undefined;
+
 const silentLogger = { debug() {}, info() {}, warn() {}, error() {} };
 
 /** Records every rest.request call so we can assert the POST happened. */
 function recordingClient(mode: 'mock' | 'live') {
   const calls: Array<{ method: string; path: string; body?: unknown }> = [];
+  let vmUuid: string | undefined;
+  fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+    const body = JSON.parse(String(init?.body));
+    vmUuid = body.vmRecoveryPoints[0].vmExtId;
+    calls.push({ method: 'POST', path: new URL(String(url)).pathname, body });
+    return Response.json({ data: { extId: 'snapshot-task' } });
+  });
   const rest = {
-    async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-      calls.push({ method, path, body });
-      return {} as T;
+    async request<T>(_method: string, path: string): Promise<T> {
+      if (path.includes('/tasks/')) return { data: { status: 'SUCCEEDED' } } as T;
+      return { data: vmUuid ? [{ name: 'xy9-game-recovery', extId: 'point', status: 'COMPLETE', vmRecoveryPoints: [{ vmExtId: vmUuid, extId: 'vm-point' }] }] : [] } as T;
     },
   };
   const client = {
@@ -57,6 +67,7 @@ function recordingClient(mode: 'mock' | 'live') {
 }
 
 function actionCtx(client: NutanixClient, vars: VariableStore): ActionContext {
+  for (const [key,value] of Object.entries({PC:"https://pc.invalid",PCUser:"admin",PCPassword:"test",Trigram:"xy9"})) vars.set(key,value,"test");
   return {
     nutanix: client,
     vars,
@@ -98,7 +109,7 @@ describe('recovery-point action wiring', () => {
     expect(calls[0]).toEqual({
       method: 'POST',
       path: '/api/dataprotection/v4.0/config/recovery-points',
-      body: { vmRecoveryPoints: [{ vmExtId: 'vm-abc-123' }] },
+      body: { name: 'xy9-game-recovery', vmRecoveryPoints: [{ vmExtId: 'vm-abc-123' }] },
     });
   });
 
@@ -148,7 +159,7 @@ describe('recovery-point action — full session flow', () => {
   test('VMUUID captured at create-vm is present when verify-iso fires the action', async () => {
     const { client, calls } = recordingClient('live');
     const checks = new CheckRegistry();
-    checks.register('captureVm', async () => ({ pass: true, captured: { VMUUID: 'vm-live-999' } }));
+    checks.register('captureVm', async () => ({ pass: true, captured: { VMUUID: 'vm-live-999', Trigram: 'xy9', PC: 'https://pc.invalid', PCUser: 'admin', PCPassword: 'test' } }));
 
     const realAction = (await loadPack(PACKS_DIR, 'ntnx-infiltration')).actions.get('createRecoveryPoint')!;
     const actions = new ActionRegistry();
@@ -181,6 +192,6 @@ describe('recovery-point action — full session flow', () => {
 
     const rpCall = calls.find((c) => c.path === '/api/dataprotection/v4.0/config/recovery-points');
     expect(rpCall).toBeDefined();
-    expect(rpCall!.body).toEqual({ vmRecoveryPoints: [{ vmExtId: 'vm-live-999' }] });
+    expect(rpCall!.body).toEqual({ name: 'xy9-game-recovery', vmRecoveryPoints: [{ vmExtId: 'vm-live-999' }] });
   }, 30_000);
 });

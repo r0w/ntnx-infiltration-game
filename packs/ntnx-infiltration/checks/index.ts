@@ -1,3 +1,4 @@
+import { refreshAction, dailyScheduleError, reportRunsAtThree } from '../schedule';
 import { selectSecondarySubnet } from '../network';
 import { checkSdk, listAllSdk } from './sdk';
 import { unwrapOne } from '../acts/helpers';
@@ -422,6 +423,7 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
       }>;
       disks?: Array<{
         backingInfo?: {
+          diskSizeBytes?: number;
           dataSource?: { reference?: { imageExtId?: string } };
         };
       }>;
@@ -485,6 +487,9 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
           fr: `La VM est éteinte — démarrez-la.`,
         }),
       };
+    }
+    if (!found.disks?.some(d => (d.backingInfo?.diskSizeBytes ?? 0) >= 20 * 1024 ** 3)) {
+      return { pass: false, detail: `VM '${expected}' needs a disk of at least 20 GB.` };
     }
     // NIC count + subnet binding, subnet resolved by name (issue #31).
     // Transport blip → skip the assertion; real miss → fail.
@@ -836,13 +841,7 @@ async function CheckCatVM(ctx: CheckContext): Promise<CheckResult> {
 
 // ─── Storage + security + protection + approval ─────────────────────────
 
-/**
- * Stage 17 `create-storage-policy`. Verifies `{Trigram}-sto-policy` exists
- * with encryption enabled. Live path is `/api/datapolicies/v4.2/config/
- * storage-policies` (namespace moved from the provisional `storage` guess);
- * shape is `encryptionSpec.encryptionState` — any value other than
- * `NO_ENCRYPTION` counts as encrypted (`INLINE`, `SYSTEM_DERIVED`, etc.).
- */
+/** Stage 17: encryption enabled for the player's Critical category. */
 async function CheckStoragePolicy(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const expected = `${trigram}-sto-policy`;
@@ -851,12 +850,17 @@ async function CheckStoragePolicy(ctx: CheckContext): Promise<CheckResult> {
       extId?: string;
       name?: string;
       encryptionSpec?: { encryptionState?: string };
+      categoryExtIds?: string[];
     }>(p => checkSdk(ctx.nutanix).datapolicies.storage.listStoragePolicies(p));
     const found = policies.find((p) => p.name === expected);
     if (!found) return { pass: false, detail: `Storage policy '${expected}' not found.` };
     const encState = found.encryptionSpec?.encryptionState ?? 'NO_ENCRYPTION';
-    if (encState === 'NO_ENCRYPTION') {
+    if (encState !== 'ENABLED') {
       return { pass: false, detail: `Storage policy '${expected}' does not have encryption enabled.` };
+    }
+    const category = await lookupCategoryUuid(ctx, `${trigram}-cat`, 'Critical');
+    if (!category || !found.categoryExtIds?.includes(category)) {
+      return { pass: false, detail: `Storage policy '${expected}' must include '${trigram}-cat:Critical'.` };
     }
     if (found.extId) {
       ctx.cache.set({ kind: 'storagePolicy', logicalName: expected, uuid: found.extId });
@@ -1210,7 +1214,8 @@ async function CheckReport(ctx: CheckContext): Promise<CheckResult> {
     const reports = await listAllSdk<{
       extId?: string;
       name?: string;
-      schedule?: { scheduleInterval?: string };
+      timezone?: string;
+      schedule?: { scheduleInterval?: string; frequency?: number; startTime?: string };
       notificationPolicy?: {
         recipients?: Array<{ emailAddress?: string }>;
       };
@@ -1229,6 +1234,9 @@ async function CheckReport(ctx: CheckContext): Promise<CheckResult> {
         pass: false,
         detail: `Report '${expected}' is not on a DAILY schedule.`,
       };
+    }
+    if (found.schedule?.frequency !== 1 || !reportRunsAtThree(found.schedule?.startTime, found.timezone)) {
+      return { pass: false, detail: `Report '${expected}' must run every day at 03:00 in its configured timezone.` };
     }
     const recipients = found.notificationPolicy?.recipients ?? [];
     if (recipients.length === 0) {
@@ -1708,7 +1716,10 @@ async function CheckSchedDay2(ctx: CheckContext): Promise<CheckResult> {
         metadata?: { uuid?: string; name?: string };
         resources?: {
           name?: string;
-          executable?: { entity?: { uuid?: string } };
+          type?: string;
+          state?: string;
+          schedule_info?: { schedule?: string };
+          executable?: { entity?: { uuid?: string; type?: string }; action?: { type?: string; spec?: { uuid?: string } } };
         };
       }>;
     }>('POST', '/api/nutanix/v3/jobs/list', { kind: 'job', length: 100 });
@@ -1716,14 +1727,11 @@ async function CheckSchedDay2(ctx: CheckContext): Promise<CheckResult> {
       (j) => j.metadata?.name === expected || j.resources?.name === expected,
     );
     if (!found) return { pass: false, detail: `Scheduled policy '${expected}' not found.` };
-    const target = found.resources?.executable?.entity?.uuid;
-    if (target !== appUuid) {
-      return {
-        pass: false,
-        detail: `Schedule '${expected}' targets '${target ?? '?'}' (expected app UUID '${appUuid}').`,
-      };
-    }
-    return { pass: true, detail: `Schedule '${expected}' targets the player's app.` };
+    const app = await ctx.nutanix.rest.request<Record<string, any>>('GET', `/api/nutanix/v3/apps/${appUuid}`);
+    const action = refreshAction(app);
+    const error = dailyScheduleError(found.resources, appUuid, action.uuid);
+    if (error) return { pass: false, detail: `Schedule '${expected}': ${error}` };
+    return { pass: true, detail: `Schedule '${expected}' runs Refresh VM daily.` };
   } catch (err) {
     return { pass: false, detail: `Scheduler query failed: ${nutanixErrorDetail(err)}` };
   }
