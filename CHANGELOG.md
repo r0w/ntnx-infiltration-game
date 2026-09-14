@@ -40,7 +40,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 - CloneProd shares the required network with the source VM's project and reports clone failures.
 - Project setup reports incomplete membership; auto-play fixes VM ownership and category assignment.
-- Installation waits for Policy Engine activation and handles missing readiness information.
+- Installation waits for Policy Engine and reports missing status or failed downloads.
 - Installation retries temporary VM creation failures and correctly recognizes existing VMs on resume.
 - Fixed installation failures with older cluster APIs and erasure coding settings.
 
