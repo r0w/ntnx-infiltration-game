@@ -69,7 +69,7 @@ def wait_until_ready():
         if enabled and state in (None, 'COMPLETED'):
             print('[ready] Policy Engine is enabled; approval-policy stages are ready.')
             return True
-        if state == 'ERROR':
+        if state in ('ERROR', 'FAILURE'):
             print('[not ready] Policy Engine activation failed: %s' % message)
             return False
         key = (enabled, state, message, err)
@@ -106,7 +106,7 @@ def attempt():
     if enabled and state in (None, 'COMPLETED'):
         print('[ready] Policy Engine is already enabled.')
         return True
-    if state == 'ERROR':
+    if state in ('ERROR', 'FAILURE'):
         print('[not ready] Existing activation failed: %s. Review it in Prism Central before retrying.' % message)
         return False
     if state in ('RUNNING', 'QUEUED', 'PENDING') or downloading(message) or enabled:

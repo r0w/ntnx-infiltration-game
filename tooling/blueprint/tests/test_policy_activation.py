@@ -92,3 +92,25 @@ def test_null_status_during_polling_does_not_crash(status, capsys):
     ns['get_feature'] = Mock(return_value=(payload, None))
     assert ns['wait_until_ready']() is False
     assert '[ready]' not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('state', ['ERROR', 'FAILURE'])
+def test_terminal_download_failure_stops_polling_without_resubmission(state, capsys):
+    ns = policy()
+    failed = feature(state, 'Policy Engine VM image download failed')
+    ns['get_feature'] = Mock(side_effect=[(feature('RUNNING', 'DownloadingImage'), None), (failed, None)])
+    assert ns['main']() == 0
+    ns['put_enable'].assert_not_called()
+    assert ns['get_feature'].call_count == 2
+    output = capsys.readouterr().out
+    assert 'activation failed' in output and 'NOT confirmed ready' in output
+    assert 'polling limit' not in output
+
+@pytest.mark.parametrize('state', ['ERROR', 'FAILURE'])
+def test_existing_terminal_failure_requires_operator_review(state, capsys):
+    ns = policy()
+    ns['get_feature'] = Mock(return_value=(feature(state, 'Image download failed'), None))
+    assert ns['main']() == 0
+    ns['put_enable'].assert_not_called()
+    assert ns['get_feature'].call_count == 1
+    assert 'before retrying' in capsys.readouterr().out
