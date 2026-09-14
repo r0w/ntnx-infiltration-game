@@ -33,6 +33,7 @@ PC_IP = '@@{PC_IP}@@'
 PC_USERNAME = '@@{PC_USERNAME}@@'
 PC_PASSWORD = '@@{PC_PASSWORD}@@'
 CLUSTER_UUID = '@@{Game.CLUSTERUUID}@@'
+SECONDARY_SUBNET_NAME = '@@{GAME_SECONDARY_NETWORK}@@'.strip() or 'secondary'
 
 BASE = "https://%s:9440" % PC_IP
 AUTH = (PC_USERNAME, PC_PASSWORD)
@@ -134,19 +135,27 @@ def get_subnet_by_id(ext_id):
 
 
 def _is_secondary(name):
-    """Match the secondary subnet across naming conventions: some clusters
-    name it bare `secondary`, others `secondary-<clusterName>`, and casing
-    can vary. Same tolerant pattern as setup_production_project.get_subnet_uuid."""
+    """Custom names are exact; preserve the default HPoC naming convention."""
     n = (name or '').lower()
-    return n == 'secondary' or n.startswith('secondary-')
+    target = SECONDARY_SUBNET_NAME.lower()
+    return n == target or (target == 'secondary' and n.startswith('secondary-'))
 
 
 def rename_aux1_to_secondary(subnets):
-    """Step 1: ensure there's a `secondary` (or `secondary-<cluster>`) subnet."""
-    existing = next((s for s in subnets if _is_secondary(s.get('name'))), None)
+    """Select the configured network; only the default may rename aux-1."""
+    matches = [s for s in subnets if (s.get('name') or '').lower() == SECONDARY_SUBNET_NAME.lower()]
+    if not matches:
+        matches = [s for s in subnets if _is_secondary(s.get('name'))]
+    if len(matches) > 1:
+        raise ValueError("Multiple networks match %r; configure the exact name" % SECONDARY_SUBNET_NAME)
+    existing = matches[0] if matches else None
     if existing:
         print("[skip] subnet %r already present — no rename" % existing.get('name'))
         return existing
+
+    if SECONDARY_SUBNET_NAME.lower() != 'secondary':
+        print("[FAIL] configured network %r not found; create it before deployment" % SECONDARY_SUBNET_NAME)
+        return None
 
     aux1 = next((s for s in subnets if s.get('name') == 'aux-1'), None)
     if not aux1:
@@ -178,9 +187,9 @@ def rename_aux1_to_secondary(subnets):
 
 
 def migrate_secondary_to_advanced(secondary):
-    """Step 2: flip the `secondary` subnet to advanced-networking mode."""
+    """Step 2: migrate the selected network to Advanced networking."""
     if secondary.get('isAdvancedNetworking'):
-        print("[skip] subnet 'secondary' already advanced-networking")
+        print("[skip] subnet %r already advanced-networking" % secondary.get('name'))
         return True
 
     ext_id = secondary['extId']
@@ -203,7 +212,7 @@ def migrate_secondary_to_advanced(secondary):
         return False
     if not wait_for_subnet(lambda s: s.get('extId') == ext_id and s.get('isAdvancedNetworking')):
         return False
-    print("[ok]   migrated 'secondary' to advanced-networking")
+    print("[ok]   migration reports Advanced networking; Create Prod VMs will verify VM attachment works")
     return True
 
 
@@ -271,10 +280,11 @@ def main():
         return 1
 
     # Re-list since the rename mutated the snapshot.
+    selected_id = secondary.get('extId')
     subnets = list_subnets()
-    secondary = next((s for s in subnets if _is_secondary(s.get('name'))), None)
+    secondary = next((s for s in subnets if s.get('extId') == selected_id), None)
     if not secondary:
-        print("[FAIL] 'secondary' missing after rename — bailing")
+        print("[FAIL] configured network %r missing after rename" % SECONDARY_SUBNET_NAME)
         return 1
     if not migrate_secondary_to_advanced(secondary):
         return 1

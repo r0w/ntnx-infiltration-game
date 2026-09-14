@@ -130,6 +130,8 @@ export interface StageDefinition {
    * runtime may auto-rehydrate the producer (see StageRunner.rehydrate).
    */
   needs?: string[];
+  /** Stages that create resources required by this stage, even when resolved by name. */
+  dependsOn?: string[];
   /**
    * Session variables the stage destroys on completion. Fires AFTER the stage's
    * captures so a stage can theoretically invalidate and replace the same var

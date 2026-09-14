@@ -14,6 +14,9 @@
  * clean `NutanixHttpError`. v3 endpoints are always REST (no SDK exists).
  */
 import type { ActContext } from '@ntnx-game/engine';
+import { restoreRecoveryVm } from './recovery';
+import { refreshAction, dailyScheduleError, nextReportTime, reportRunsAtThree, reportWriteBody } from '../schedule';
+import { assignVmOwnership } from './vm-ownership';
 import type { NutanixSdk } from '@ntnx-game/nutanix';
 import {
   deleteV4Entity,
@@ -21,13 +24,14 @@ import {
   getTrigram,
   getV4WithEtag,
   getVarString,
-  isSecondarySubnet,
+  selectSecondarySubnet,
   listAllSdk,
   listAllV3,
   listAllV4Rest,
   postV4,
   postV4Action,
   putV4,
+  waitForTask,
 } from './helpers';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -191,8 +195,11 @@ async function actCreateProject(ctx: ActContext): Promise<void> {
     '/api/nutanix/v3/projects/list',
     { length: 250 },
   );
-  if (existing.entities?.some((p) => p.spec?.name === name || p.status?.name === name)) {
-    ctx.logger.info(`act noop: project ${name} already exists`);
+  const alreadyExists = existing.entities?.find((p) => p.spec?.name === name || p.status?.name === name);
+  const configured = alreadyExists?.status?.resources;
+  if (configured?.account_reference_list?.length &&
+      configured.user_reference_list?.some((u: AnyRec) => (u.name ?? '').toLowerCase() === 'theprojectmanager')) {
+    ctx.logger.info(`act noop: project ${name} already configured`);
     return;
   }
   const clusters = await ctx.nutanix.rest.request<{ data?: Array<{ extId?: string }> }>(
@@ -217,13 +224,13 @@ async function actCreateProject(ctx: ActContext): Promise<void> {
       'actCreateProject: no nutanix_pc account on PC, project will be created without an infrastructure binding (CheckProject will fail)',
     );
   }
-  // Subnet binding mirrors the stage prompt (`Use the VLAN named secondary`).
+  // Use the same network as the player instructions.
   const subnets = await listAllSdk<AnyRec>(($p) => sdk(ctx).networking.subnets.listSubnets($p));
-  const secondary = subnets.find((s) => isSecondarySubnet(s.name));
+  const secondary = selectSecondarySubnet(subnets, getVarString(ctx, 'SecondaryNetwork'));
   const primary = subnets.find((s) => /^primary(-|$)/i.test(s.name ?? ''));
   const pmUuid = await ensureUserUuid(ctx, 'theprojectmanager', 'Paul', 'Project Manager');
   if (!pmUuid) {
-    ctx.logger.warn('actCreateProject: theprojectmanager user not found, project created without it');
+    throw new Error('actCreateProject: cannot resolve theprojectmanager in IAM');
   }
   // Create the project WITHOUT a user_reference_list. Putting an LDAP user
   // uuid straight into the plain `/projects` POST makes PC reject it with
@@ -231,7 +238,7 @@ async function actCreateProject(ctx: ActContext): Promise<void> {
   // (live-confirmed on DM3-POC013). The member is added afterwards via
   // `/projects_internal` (see addProjectAdmin) — the only call that actually
   // registers an LDAP user as a project member on PC 7.x.
-  await ctx.nutanix.rest.request('POST', '/api/nutanix/v3/projects', {
+  if (!alreadyExists) await ctx.nutanix.rest.request('POST', '/api/nutanix/v3/projects', {
     spec: {
       name,
       resources: {
@@ -346,13 +353,14 @@ async function addProjectAdmin(
     (p) => p.spec?.name === projectName || p.status?.name === projectName,
   );
   if (!proj?.metadata?.uuid) {
-    ctx.logger.warn('addProjectAdmin: project not found after create', { projectName });
-    return;
+    throw new Error(`addProjectAdmin: project ${projectName} not found after create`);
   }
   const projectUuid = proj.metadata.uuid as string;
+  const current = await ctx.nutanix.rest.request<AnyRec>('GET', `/api/nutanix/v3/projects/${projectUuid}`);
+  const resources = current.spec?.resources ?? {};
   const members =
-    (proj.status?.resources?.user_reference_list as AnyRec[] | undefined) ??
-    (proj.spec?.resources?.user_reference_list as AnyRec[] | undefined) ??
+    (current.status?.resources?.user_reference_list as AnyRec[] | undefined) ??
+    (resources.user_reference_list as AnyRec[] | undefined) ??
     [];
   if (members.some((u) => u?.uuid === pmUuid)) {
     ctx.logger.info('act noop: theprojectmanager already a member of project', { projectName });
@@ -367,11 +375,7 @@ async function addProjectAdmin(
   const roles = await listAllV3<AnyRec>(ctx, '/api/nutanix/v3/roles/list');
   const roleUuid = roles.find((r) => r.status?.name === 'Project Admin')?.metadata?.uuid;
   if (!directoryId || !roleUuid) {
-    ctx.logger.warn('addProjectAdmin: missing directory service or Project Admin role; skipping', {
-      directoryId: !!directoryId,
-      roleUuid: !!roleUuid,
-    });
-    return;
+    throw new Error('addProjectAdmin: missing directory service or Project Admin role');
   }
   const subnetRefs: AnyRec[] = [];
   if (refs.secondary?.uuid)
@@ -382,7 +386,7 @@ async function addProjectAdmin(
     api_version: '3.1',
     metadata: {
       project_reference: { kind: 'project', name: projectName, uuid: projectUuid },
-      spec_version: proj.metadata.spec_version ?? 0,
+      spec_version: current.metadata.spec_version ?? 0,
       kind: 'project',
       uuid: projectUuid,
     },
@@ -390,12 +394,17 @@ async function addProjectAdmin(
       project_detail: {
         name: projectName,
         resources: {
-          account_reference_list: refs.accountUuid ? [{ kind: 'account', uuid: refs.accountUuid }] : [],
-          user_reference_list: [{ name: 'theprojectmanager', kind: 'user', uuid: pmUuid }],
-          ...(refs.primary?.uuid ? { default_subnet_reference: { kind: 'subnet', uuid: refs.primary.uuid } } : {}),
-          subnet_reference_list: subnetRefs,
-          cluster_reference_list: refs.clusterUuid ? [{ kind: 'cluster', uuid: refs.clusterUuid }] : [],
-          enable_directory_and_identity_provider_shortlist: false,
+          ...resources,
+          account_reference_list: resources.account_reference_list?.length ? resources.account_reference_list : (refs.accountUuid ? [{ kind: 'account', uuid: refs.accountUuid }] : []),
+          user_reference_list: [...members, { name: 'theprojectmanager', kind: 'user', uuid: pmUuid }],
+          ...(!resources.default_subnet_reference && refs.primary?.uuid ? { default_subnet_reference: { kind: 'subnet', uuid: refs.primary.uuid } } : {}),
+          subnet_reference_list: resources.subnet_reference_list?.length ? resources.subnet_reference_list : subnetRefs,
+          cluster_reference_list: resources.cluster_reference_list?.length ? resources.cluster_reference_list : (refs.clusterUuid ? [{ kind: 'cluster', uuid: refs.clusterUuid }] : []),
+          // PC can enforce the shortlist even when asked to disable it.
+          directory_reference_list: [
+            ...(resources.directory_reference_list ?? []).filter((d: AnyRec) => d.uuid !== directoryId),
+            { kind: 'directory_service', uuid: directoryId },
+          ],
         },
       },
       user_list: [
@@ -429,12 +438,22 @@ async function addProjectAdmin(
       ],
     },
   };
-  try {
-    await ctx.nutanix.rest.request('PUT', `/api/nutanix/v3/projects_internal/${projectUuid}`, payload);
-    ctx.logger.info('addProjectAdmin: theprojectmanager added as Project Admin', { projectName });
-  } catch (err) {
-    ctx.logger.warn('addProjectAdmin: projects_internal PUT failed', { err: String(err).slice(0, 200) });
+  await ctx.nutanix.rest.request('PUT', `/api/nutanix/v3/projects_internal/${projectUuid}`, payload);
+  // An accepted PUT can still fail asynchronously; confirm persisted membership.
+  for (let poll = 0; poll < 30; poll++) {
+    const updated = await ctx.nutanix.rest.request<AnyRec>('GET', `/api/nutanix/v3/projects/${projectUuid}`);
+    const state = updated.status?.state;
+    if (state === 'ERROR' || state === 'FAILED') {
+      const detail = (updated.status?.message_list ?? []).map((m: AnyRec) => m.message).join('; ');
+      throw new Error(`addProjectAdmin: ${projectName} ${state}: ${detail}`);
+    }
+    if (state === 'COMPLETE' && updated.status?.resources?.user_reference_list?.some((u: AnyRec) => u.uuid === pmUuid)) {
+      ctx.logger.info('addProjectAdmin: confirmed theprojectmanager membership', { projectName });
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
   }
+  throw new Error(`addProjectAdmin: timed out waiting for theprojectmanager in ${projectName}`);
 }
 
 /** Stage 10 create-subnet: creates `{Trigram}-subnet` on VLAN `{Vlanid}` with
@@ -495,7 +514,7 @@ async function actCreateSubnet(ctx: ActContext): Promise<void> {
               poolList: [
                 {
                   startIp: { value: `${subnetBase}.50` },
-                  endIp: { value: `${subnetBase}.200` },
+                  endIp: { value: `${subnetBase}.115` },
                 },
               ],
             },
@@ -606,15 +625,8 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
   const name = `${trigram}-vm`;
   const subnets = await listAllSdk<AnyRec>(($p) => sdk(ctx).networking.subnets.listSubnets($p));
   const subnet = subnets.find((s) => s.name === `${trigram}-subnet`);
-  // The routable subnet the stage prompt calls `secondary`. Match the bare
-  // name AND the `secondary-<cluster>` form HPoCs ship (see isSecondarySubnet)
-  // — a strict match here left this VM with 1 NIC on those clusters.
-  const secondary = subnets.find((s) => isSecondarySubnet(s.name));
-  if (!secondary) {
-    ctx.logger.warn(
-      `actCreateVm: 'secondary' subnet missing on cluster, VM will be created with 1 NIC and CheckVM (NIC-count) will fail`,
-    );
-  }
+  // Resolve before creating anything; a missing second network cannot produce a playable VM.
+  const secondary = selectSecondarySubnet(subnets, getVarString(ctx, 'SecondaryNetwork'));
   const images = await listAllSdk<AnyRec>(($p) => sdk(ctx).vmm.images.listImages($p));
   const image = images.find((i) => i.name === `${trigram}-ubuntu`);
   const clusters = await ctx.nutanix.rest.request<{ data?: Array<{ extId?: string }> }>(
@@ -672,6 +684,7 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
             {
               backingInfo: {
                 '$objectType': 'vmm.v4.ahv.config.VmDisk',
+                diskSizeBytes: 20 * 1024 ** 3,
                 dataSource: {
                   reference: {
                     '$objectType': 'vmm.v4.ahv.config.ImageReference',
@@ -708,31 +721,14 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
     if (!created?.extId) {
       ctx.logger.warn(`actCreateVm: VM ${name} did not appear in listVms after 45s, power-on branch will skip`);
     }
-    if (created?.extId) {
-      // Mirror Python `CheckVM`'s side-effect: kick off a recovery point
-      // for the freshly created VM so stage 26 `restore-vm-from-recovery`
-      // has something to roll back to. Best-effort: failure is logged
-      // but doesn't block the act (recovery-points endpoint may be
-      // unavailable on minimal HPoCs).
-      try {
-        await postV4(ctx, '/api/dataprotection/v4.0/config/recovery-points', {
-          vmRecoveryPoints: [{ vmExtId: created.extId }],
-        });
-        ctx.logger.info('actCreateVm: recovery point created', { vm: name });
-      } catch (err) {
-        ctx.logger.warn('actCreateVm: recovery-point creation failed', {
-          err: String(err).slice(0, 150),
-        });
-      }
-    }
+
   }
   // Project ownership: stage prompt asks the player to use Manage Ownership
   // in Prism. v4 doesn't expose project on VMs, so PUT v3 with the
   // project_reference patched in. GET-modify-PUT the full entity (v3
   // enforces spec_version concurrency). Idempotent: runs on every act
   // call so a previously-failed assignment can be retried, and skips when
-  // the project is already correct. Best-effort: unavailable v3 → log +
-  // continue (CheckVM also defaults to pass when v3 is unreachable).
+  // the project is already correct. Wait for confirmed ownership before powering on.
   // Resolve the project by name — never from a stored var, which can go
   // stale when the project is re-created (issue #31).
   let projUuid: string | undefined;
@@ -756,48 +752,8 @@ async function actCreateVm(ctx: ActContext): Promise<void> {
   const pmUuid = await ensureUserUuid(ctx, 'theprojectmanager', 'Paul', 'Project Manager');
   const lookup = (await listAllSdk<AnyRec>(($p) => sdk(ctx).vmm.vms.listVms($p))).find((v) => v.name === name);
   if (lookup?.extId && (projUuid || pmUuid)) {
-    // Retry the GET-modify-PUT on 409: right after create-project registers
-    // theprojectmanager, the VM's IDF entry is still settling and the first
-    // owner PUT often 409s ("Edit conflict / CONCURRENT_REQUESTS"). Re-GET for
-    // a fresh spec_version each attempt (v3 enforces optimistic concurrency).
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        const v3vm = await ctx.nutanix.rest.request<AnyRec>(
-          'GET',
-          `/api/nutanix/v3/vms/${lookup.extId}`,
-        );
-        const meta = (v3vm?.metadata as AnyRec) ?? {};
-        let changed = false;
-        if (projUuid && meta.project_reference?.uuid !== projUuid) {
-          meta.project_reference = { kind: 'project', uuid: projUuid };
-          changed = true;
-        }
-        if (pmUuid && meta.owner_reference?.uuid !== pmUuid) {
-          meta.owner_reference = { kind: 'user', name: 'theprojectmanager', uuid: pmUuid };
-          changed = true;
-        }
-        if (!changed) break;
-        // v3 PUT echoes the GET body but rejects `status` (server-controlled
-        // view, re-sending triggers 422). Strip before PUT.
-        const { status: _drop, ...putBody } = v3vm as AnyRec;
-        await ctx.nutanix.rest.request('PUT', `/api/nutanix/v3/vms/${lookup.extId}`, {
-          ...putBody,
-          metadata: meta,
-        });
-        ctx.logger.info('actCreateVm: ownership assigned', { vm: name, project: projUuid, owner: pmUuid });
-        break;
-      } catch (err) {
-        const msg = String(err);
-        if (/409|conflict|CONCURRENT/i.test(msg) && attempt < 4) {
-          await new Promise((r) => setTimeout(r, 3000));
-          continue; // edit conflict — re-GET and retry
-        }
-        ctx.logger.warn('actCreateVm: ownership assignment failed (v3 unavailable?)', {
-          err: msg.slice(0, 200),
-        });
-        break;
-      }
-    }
+    await assignVmOwnership(ctx, lookup.extId, projUuid, pmUuid);
+    ctx.logger.info('actCreateVm: ownership confirmed', { vm: name, project: projUuid, owner: pmUuid });
   }
   // Power on the VM. CheckVM / CheckRestoreVM both require powerState
   // === 'ON' so this act CAN'T return until that's stably true. Loop
@@ -1010,87 +966,79 @@ async function actCreateCategory(ctx: ActContext): Promise<void> {
   }
 }
 
-/**
- * Stage 16 apply-category-to-vm: tags `{Trigram}-vm` with `{Trigram}-cat:
- * Critical`. v4 `associate-categories` action uses `categories: [{extId}]`;
- * the resulting association shows up on GET `/vms/{extId}/categories` (a
- * sub-resource), NOT on the list response's top-level `categories` field.
- * Need to fetch categories via the sub-endpoint to verify, but the check
- * (`CheckCatVM`) does that already. Seed just fires the action and trusts
- * the check to validate.
- */
+/** Apply the category, sharing it with the VM's project if Prism requires it. */
 async function actApplyCategoryToVm(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
-  const vms = await listAllSdk<AnyRec>(($p) => sdk(ctx).vmm.vms.listVms($p));
+  const vms = await listAllSdk<AnyRec>(($p) => sdk(ctx).vmm.vms.listVms({ ...$p, $select: 'extId,name,categories' }));
   const vm = vms.find((v) => v.name === `${trigram}-vm`);
-  if (!vm?.extId) return;
+  if (!vm?.extId) throw new Error(`VM '${trigram}-vm' not found`);
   const cats = await listAllSdk<AnyRec>(($p) => sdk(ctx).prism.categories.listCategories($p));
   const critical = cats.find((c) => c.key === `${trigram}-cat` && c.value === 'Critical');
-  if (!critical?.extId) return;
+  if (!critical?.extId) throw new Error(`Category '${trigram}-cat:Critical' not found`);
+  if (vm.categories?.some((c: AnyRec) => c.extId === critical.extId)) return;
+
+  async function runAction(path: string, action: string, body: AnyRec) {
+    const accepted = await postV4Action<{ data?: { extId?: string } }>(ctx, path, action, body);
+    if (!accepted?.data?.extId) throw new Error(`${action} returned no task; verify its outcome before retrying`);
+    await waitForTask(ctx, accepted.data.extId, 120_000);
+  }
+  const associate = () => runAction(`/api/vmm/v4.2/ahv/config/vms/${vm.extId}`,
+    '$actions/associate-categories', { categories: [{ extId: critical.extId }] });
   try {
-    await postV4Action(
-      ctx,
-      `/api/vmm/v4.2/ahv/config/vms/${vm.extId}`,
-      '$actions/associate-categories',
-      { categories: [{ extId: critical.extId }] },
-    );
+    await associate();
   } catch (err) {
-    ctx.logger.warn('actApplyCategoryToVm: associate failed', { err: String(err) });
-    return;
+    // Share only after Prism confirms this specific project-scope rejection.
+    // Older clusters that accept the association never need the newer share API.
+    if (!/VMM-31701|VM_PROJECT_ASSOCIATION_CHECK_ERROR/.test(String(err))) throw err;
+    const detail = await ctx.nutanix.rest.request<AnyRec>('GET', `/api/nutanix/v3/vms/${vm.extId}`);
+    const projectUuid = detail.metadata?.project_reference?.uuid;
+    if (!projectUuid || projectUuid === '00000000-0000-0000-0000-000000000000') throw err;
+    await runAction(`/api/prism/v4.4/config/categories/${critical.extId}`, '$actions/share', { projectExtId: projectUuid });
+    await associate();
   }
-  // associate-categories is task-tracked: the POST returns 202, the binding
-  // shows up on `/vms/{extId}?$select=categories` a few seconds later. If
-  // we return now and auto-play submits "Ok" immediately, CheckCatVM sees
-  // an empty categories list and rejects the stage. Poll until the binding
-  // is visible (cap 30 s). Per-iteration try/catch so a transient rate-
-  // limit doesn't bubble out and let auto-play fire too early.
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 1500));
-    try {
-      const refreshed = await ctx.nutanix.request<{
-        data?: Array<{ extId?: string; name?: string; categories?: Array<{ extId?: string }> }>;
-      }>('GET', `/api/vmm/v4.2/ahv/config/vms?%24select=extId,name,categories&%24filter=name%20eq%20'${trigram}-vm'`);
-      const cur = refreshed.data?.find((v) => v.name === `${trigram}-vm`);
-      const applied = (cur?.categories ?? []).some((c) => c.extId === critical.extId);
-      if (applied) {
-        ctx.logger.info('actApplyCategoryToVm: category binding visible');
-        return;
-      }
-    } catch (err) {
-      ctx.logger.warn('actApplyCategoryToVm: poll failed (transient?)', {
-        err: String(err).slice(0, 150),
-      });
+  for (let poll = 0; poll < 20; poll++) {
+    const refreshed = await listAllSdk<AnyRec>(($p) => sdk(ctx).vmm.vms.listVms({ ...$p, $select: 'extId,name,categories' }));
+    if (refreshed.find((v) => v.extId === vm.extId)?.categories?.some((c: AnyRec) => c.extId === critical.extId)) {
+      ctx.logger.info('actApplyCategoryToVm: category binding confirmed');
+      return;
     }
+    await new Promise((resolve) => setTimeout(resolve, 1500));
   }
-  ctx.logger.warn('actApplyCategoryToVm: category binding did not surface within 30 s');
+  throw new Error('Category association task succeeded but the binding is not visible');
 }
 
-/** Stage 17 create-storage-policy: creates `{Trigram}-sto-policy` with encryption enabled. */
+/** Stage 17: encrypt VMs selected by the player's Critical category. */
 async function actCreateStoragePolicy(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
   const name = `${trigram}-sto-policy`;
-  await ensure<AnyRec>({
-    name: `storage-policy ${name}`,
-    logger: ctx.logger,
-    list: async () => listAllSdk(($p) => sdk(ctx).datapolicies.storage.listStoragePolicies($p)),
-    match: (p) => p.name === name,
-    create: async () =>
-      (await postV4<{ data?: AnyRec }>(
-        ctx,
-        '/api/datapolicies/v4.2/config/storage-policies',
-        {
-          // encryptionState enum: $UNKNOWN | $REDACTED | ENABLED | SYSTEM_DERIVED.
-          // `INLINE` was the compression state's value, not encryption's.
-          name,
-          encryptionSpec: { encryptionState: 'ENABLED' },
-          compressionSpec: { compressionState: 'INLINE' },
-          faultToleranceSpec: { replicationFactor: 'TWO' },
-        },
-      )).data,
+  const categories = await listAllSdk<AnyRec>(p => sdk(ctx).prism.categories.listCategories(p));
+  const category = categories.find(c => c.key === `${trigram}-cat` && c.value === 'Critical');
+  if (!category?.extId) throw new Error(`Category ${trigram}-cat:Critical not found`);
+  const policies = await listAllSdk<AnyRec>(p => sdk(ctx).datapolicies.storage.listStoragePolicies(p));
+  const existing = policies.find(p => p.name === name);
+  if (existing?.encryptionSpec?.encryptionState === 'ENABLED' && existing.categoryExtIds?.includes(category.extId)) return;
+  const path = '/api/datapolicies/v4.2/config/storage-policies';
+  const policyBody = (policy?: AnyRec) => ({
+    name,
+    encryptionSpec: { encryptionState: 'ENABLED' },
+    compressionSpec: policy?.compressionSpec ?? { compressionState: 'INLINE' },
+    faultToleranceSpec: policy?.faultToleranceSpec ?? { replicationFactor: 'TWO' },
+    ...(policy?.qosSpec ? { qosSpec: policy.qosSpec } : {}),
+    categoryExtIds: [...new Set([...(policy?.categoryExtIds ?? []), category.extId])],
   });
+  let result: { data?: AnyRec };
+  if (existing?.extId) {
+    const current = await getV4WithEtag<{ data?: AnyRec }>(ctx, `${path}/${existing.extId}`);
+    if (!current?.etag || !current.body?.data) throw new Error('Storage policy revision unavailable; retry');
+    result = await putV4(ctx, `${path}/${existing.extId}`, current.etag, policyBody(current.body.data));
+  } else {
+    result = await postV4(ctx, path, policyBody());
+  }
+  if (result.data?.extId && result.data?.$objectType?.includes('TaskReference')) {
+    await waitForTask(ctx, result.data.extId);
+  }
 }
 
 /** Stage 18 create-microseg-policy: creates `{Trigram}-mseg-policy` in ENFORCE mode. */
@@ -1450,10 +1398,9 @@ async function actCreateApprovalPolicy(ctx: ActContext): Promise<void> {
   }
 }
 
-/** Stage 26 restore-vm-from-recovery: re-creates `{Trigram}-vm` after the incident. Minimal spec; a real replay would restore from a recovery point. */
+/** Stage 26: restore the deleted VM's disks and configuration. */
 async function actRestoreVmFromRecovery(ctx: ActContext): Promise<void> {
-  // Delegates to the create-vm act: the check only asserts the VM exists again.
-  await actCreateVm(ctx);
+  await restoreRecoveryVm(ctx);
 }
 
 /** Stage 27 create-report: creates `{Trigram}-report` with a DAILY
@@ -1468,6 +1415,22 @@ async function actCreateReport(ctx: ActContext): Promise<void> {
   const name = `${trigram}-report`;
   const emailSuffix = getVarString(ctx, 'EmailReport');
   const recipientEmail = emailSuffix ? `${trigram}${emailSuffix}` : `${trigram}@example.com`;
+  const reports = await listAllSdk<AnyRec>(p => sdk(ctx).opsmgmt.reportConfigs.listReportConfigs(p));
+  const existing = reports.find(r => r.name === name);
+  if (existing?.extId) {
+    if (existing.schedule?.scheduleInterval === 'DAILY' && existing.schedule?.frequency === 1 &&
+        reportRunsAtThree(existing.schedule?.startTime, existing.timezone)) return;
+    const path = `/api/opsmgmt/v4.0/config/report-configs/${existing.extId}`;
+    const current = await getV4WithEtag<{ data?: AnyRec }>(ctx, path);
+    if (!current?.etag || !current.body.data) throw new Error('Report revision unavailable; retry');
+    const writable = ['name', 'description', 'retentionConfig', 'sections', 'supportedFormats', 'notificationPolicy',
+      'isPrivate', 'startTimeOffsetSecs', 'endTimeOffsetSecs', 'reportCustomization'];
+    const body = Object.fromEntries(writable.filter(k => current.body.data![k] !== undefined).map(k => [k, current.body.data![k]]));
+    await putV4(ctx, path, current.etag, reportWriteBody({
+      ...body, timezone: 'UTC', schedule: { scheduleInterval: 'DAILY', frequency: 1, startTime: nextReportTime() },
+    }));
+    return;
+  }
   await ensure<AnyRec>({
     name: `report-config ${name}`,
     logger: ctx.logger,
@@ -1487,7 +1450,7 @@ async function actCreateReport(ctx: ActContext): Promise<void> {
             '$objectType': 'opsmgmt.v4.config.ReportSchedule',
             scheduleInterval: 'DAILY',
             frequency: 1,
-            startTime: new Date(Date.now() + 60_000).toISOString(),
+            startTime: nextReportTime(),
           },
           // Recipient = `{Trigram}{EmailReport}` (Python check requires
           // first recipient match this exact value).
@@ -1807,74 +1770,41 @@ async function actCloneAppBlueprint(ctx: ActContext): Promise<void> {
 
 }
 
-/**
- * Stage 36 schedule-day2-action: schedules a daily run on the player's
- * `{Trigram}-app`. Calm v3 models scheduled actions as `job` entities at
- * `POST /api/nutanix/v3/jobs` (NOT `/api/nutanix/v3/app_scheduler` which
- * 404s: that was an early wrong guess). Original Python `CheckSchedDay2`
- * confirms via `entities[?(metadata.name=='{trigram}-sched')].resources`
- * with `executable.entity.uuid == AppUUID`.
- *
- * Body shape pinned through trial & error against the live PC:
- *   - resources.type: 'RECURRING'
- *   - resources.schedule_info: ONE OF { execution_time } (one-time) OR
- *     { schedule } (recurring cron). Both → 422 "valid under each schema".
- *     We use `schedule: '0 3 * * *'` for daily-3am.
- *   - resources.executable.entity.uuid: the launched app's UUID
- *   - resources.executable.action: `{}` is accepted, the check only
- *     validates entity match, the action details (per-app runbook UUID
- *     for "Refresh VM") aren't part of the live check assertion.
- *
- * Idempotent: skips when {trigram}-sched already exists.
- */
+/** Stage 36: schedule the application's real Refresh VM action daily. */
 async function actScheduleDay2Action(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
-  const schedName = `${trigram}-sched`;
-  const existing = await ctx.nutanix.rest.request<{ entities?: AnyRec[] }>(
-    'POST',
-    '/api/nutanix/v3/jobs/list',
-    { kind: 'job', length: 250 },
-  );
-  if (
-    existing.entities?.some(
-      (s) => s.status?.name === schedName || s.metadata?.name === schedName,
-    )
-  ) {
-    ctx.logger.info(`act noop: schedule ${schedName} already exists`);
-    return;
-  }
-  const apps = await ctx.nutanix.rest.request<{ entities?: AnyRec[] }>(
-    'POST',
-    '/api/nutanix/v3/apps/list',
-    { kind: 'app', length: 250 },
-  );
-  const app = apps.entities?.find((a) => a.status?.name === `${trigram}-app`);
-  if (!app?.metadata?.uuid) {
-    ctx.logger.warn(
-      'actScheduleDay2Action: player app not found, run clone-app-blueprint first',
-    );
-    return;
-  }
-  try {
-    await ctx.nutanix.rest.request('POST', '/api/nutanix/v3/jobs', {
-      api_version: '3.1',
-      metadata: { kind: 'job', name: schedName },
-      resources: {
-        name: schedName,
-        description: 'Daily Refresh VM (registered for stage 36)',
-        type: 'RECURRING',
-        schedule_info: { schedule: '0 3 * * *', time_zone: 'UTC' },
-        executable: {
-          entity: { uuid: app.metadata.uuid },
-          action: {},
-        },
-      },
+  const name = `${trigram}-sched`;
+  const apps = await listAllV3<AnyRec>(ctx, '/api/nutanix/v3/apps/list', { kind: 'app' });
+  const appRef = apps.find(a => (a.status?.name ?? a.metadata?.name) === `${trigram}-app`);
+  if (!appRef?.metadata?.uuid) throw new Error(`Application ${trigram}-app not found`);
+  const app = await ctx.nutanix.rest.request<AnyRec>('GET', `/api/nutanix/v3/apps/${appRef.metadata.uuid}`);
+  const action = refreshAction(app);
+  const jobs = await listAllV3<AnyRec>(ctx, '/api/nutanix/v3/jobs/list', { kind: 'job' });
+  const existing = jobs.find(j => (j.metadata?.name ?? j.resources?.name) === name);
+  if (existing && !dailyScheduleError(existing.resources, appRef.metadata.uuid, action.uuid)) return;
+  const payload = {
+    api_version: app.api_version ?? '3.1',
+    metadata: app.metadata,
+    spec: { args: [], target_kind: 'Application', target_uuid: appRef.metadata.uuid },
+  };
+  const resources = {
+    name, description: 'Daily Refresh VM', type: 'RECURRING',
+    schedule_info: { schedule: '0 3 * * *', time_zone: 'UTC' },
+    executable: {
+      entity: { type: 'app', uuid: appRef.metadata.uuid },
+      action: { type: 'APP_ACTION_RUN', spec: { uuid: action.uuid, payload: JSON.stringify(payload) } },
+    },
+  };
+  if (existing?.metadata?.uuid) {
+    const path = `/api/nutanix/v3/jobs/${existing.metadata.uuid}`;
+    const current = await ctx.nutanix.rest.request<AnyRec>('GET', path);
+    await ctx.nutanix.rest.request('PUT', path, {
+      api_version: current.api_version ?? '3.1', metadata: current.metadata, resources,
     });
-    ctx.logger.info(`act create: schedule ${schedName} → app ${app.metadata.uuid}`);
-  } catch (err) {
-    ctx.logger.warn('actScheduleDay2Action: jobs POST failed', {
-      err: String(err).slice(0, 200),
+  } else {
+    await ctx.nutanix.rest.request('POST', '/api/nutanix/v3/jobs', {
+      api_version: '3.1', metadata: { kind: 'job', name }, resources,
     });
   }
 }

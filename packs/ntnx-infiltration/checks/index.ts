@@ -1,9 +1,12 @@
+import { refreshAction, dailyScheduleError, reportRunsAtThree } from '../schedule';
+import { selectSecondarySubnet } from '../network';
+import { checkSdk, listAllSdk } from './sdk';
+import { unwrapOne } from '../acts/helpers';
 import type { CheckContext, CheckResult } from '@ntnx-game/engine';
 import {
   cacheEntity,
   discoverableNodeSerials,
   getTrigram,
-  listAll,
   listAllV3,
   localizedHint,
   lookupAppUuid,
@@ -127,9 +130,8 @@ async function CheckUser(ctx: CheckContext): Promise<CheckResult> {
   const expected = `${trigram}-adm`;
   const expectedLc = expected.toLowerCase();
   try {
-    const users = await listAll<{ extId?: string; name?: string; username?: string }>(
-      ctx,
-      '/api/iam/v4.0/authn/users',
+    const users = await listAllSdk<{ extId?: string; name?: string; username?: string }>(
+      p => checkSdk(ctx.nutanix).iam.users.listUsers(p)
     );
     // v4 IAM normalizes `username` to lowercase on store — `qaE-adm` POSTed
     // becomes `qae-adm` in the list. `name` may carry the original casing
@@ -176,7 +178,7 @@ async function CheckAuthPolicy(ctx: CheckContext): Promise<CheckResult> {
     // only matches on `name`, so open-code the find+cache here. Match
     // case-insensitive because v4 IAM lowercases identifiers (a
     // policy POSTed as `qaE-auth` reads back as `qae-auth`).
-    const policies = await listAll<{
+    const policies = await listAllSdk<{
       extId?: string;
       name?: string;
       displayName?: string;
@@ -185,7 +187,7 @@ async function CheckAuthPolicy(ctx: CheckContext): Promise<CheckResult> {
         identityFilter?: { user?: { uuid?: { anyof?: string[] } } };
         $reserved?: { user?: { uuid?: { anyof?: string[] } } };
       }>;
-    }>(ctx, '/api/iam/v4.0/authz/authorization-policies');
+    }>(p => checkSdk(ctx.nutanix).iam.authzPolicies.listAuthorizationPolicies(p));
     const found = policies.find(
       (p) => (p.displayName ?? '').toLowerCase() === expectedLc,
     );
@@ -195,9 +197,8 @@ async function CheckAuthPolicy(ctx: CheckContext): Promise<CheckResult> {
     // Look up the Super Admin role's extId so we can compare. v4 IAM
     // exposes role names on `displayName` (top-level `name` is empty
     // on system roles).
-    const roles = await listAll<{ extId?: string; displayName?: string }>(
-      ctx,
-      '/api/iam/v4.0/authz/roles',
+    const roles = await listAllSdk<{ extId?: string; displayName?: string }>(
+      p => checkSdk(ctx.nutanix).iam.roles.listRoles(p)
     );
     const superAdmin = roles.find((r) => /super admin/i.test(r.displayName ?? ''));
     if (superAdmin?.extId && found.role !== superAdmin.extId) {
@@ -320,12 +321,12 @@ async function CheckNetwork(ctx: CheckContext): Promise<CheckResult> {
       ? Number.parseInt(vlanRaw, 10)
       : Number.NaN;
   try {
-    const subnets = await listAll<{
+    const subnets = await listAllSdk<{
       extId?: string;
       name?: string;
       networkId?: number | string;
       isAdvancedNetworking?: boolean;
-    }>(ctx, '/api/networking/v4.0/config/subnets');
+    }>(p => checkSdk(ctx.nutanix).networking.subnets.listSubnets(p));
     const found = subnets.find((s) => s.name === expected);
     if (!found) return { pass: false, detail: `Subnet '${expected}' not found.` };
     const actualVlan =
@@ -367,11 +368,11 @@ async function CheckImage(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const expected = `${trigram}-ubuntu`;
   try {
-    const images = await listAll<{
+    const images = await listAllSdk<{
       extId?: string;
       name?: string;
       type?: string;
-    }>(ctx, '/api/vmm/v4.0/content/images');
+    }>(p => checkSdk(ctx.nutanix).vmm.images.listImages(p));
     const found = images.find((i) => i.name === expected);
     if (!found) return { pass: false, detail: `Image '${expected}' not found in library.` };
     if (found.type && !/^DISK/i.test(found.type)) {
@@ -407,7 +408,7 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
     // Filter server-side instead of paginating the full VM list — on a HPoC
     // with 100+ VMs that drops a multi-second pagination scan to a single
     // 1-page query. Name is unique per trigram so the filter returns 0/1.
-    const vms = await listAll<{
+    const vms = await listAllSdk<{
       extId?: string;
       name?: string;
       numSockets?: number;
@@ -422,6 +423,7 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
       }>;
       disks?: Array<{
         backingInfo?: {
+          diskSizeBytes?: number;
           dataSource?: { reference?: { imageExtId?: string } };
         };
       }>;
@@ -430,7 +432,7 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
       // the reliable signal for the Manage Ownership step (v3 was flaky here).
       project?: { extId?: string };
       ownershipInfo?: { owner?: { extId?: string } };
-    }>(ctx, `/api/vmm/v4.0/ahv/config/vms?%24filter=name%20eq%20'${expected}'`);
+    }>(p => checkSdk(ctx.nutanix).vmm.vms.listVms({ ...p, $filter: `name eq '${expected}'` }));
     const found = vms.find((v) => v.name === expected);
     if (!found) {
       return {
@@ -486,6 +488,9 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
         }),
       };
     }
+    if (!found.disks?.some(d => (d.backingInfo?.diskSizeBytes ?? 0) >= 20 * 1024 ** 3)) {
+      return { pass: false, detail: `VM '${expected}' needs a disk of at least 20 GB.` };
+    }
     // NIC count + subnet binding, subnet resolved by name (issue #31).
     // Transport blip → skip the assertion; real miss → fail.
     const nics = found.nics ?? [];
@@ -536,6 +541,16 @@ async function CheckVM(ctx: CheckContext): Promise<CheckResult> {
           }),
         };
       }
+    }
+    const configured = ctx.vars.get('SecondaryNetwork');
+    const secondaryName = typeof configured === 'string' ? configured : 'secondary';
+    const networks = await listAllSdk<{ name?: string; extId?: string }>(
+      p => checkSdk(ctx.nutanix).networking.subnets.listSubnets(p),
+    );
+    const secondary = selectSecondarySubnet(networks, secondaryName);
+    if (!secondary.extId || !nics.some(n =>
+      (n.nicNetworkInfo?.subnet?.extId ?? n.networkInfo?.subnet?.extId) === secondary.extId)) {
+      return { pass: false, detail: `VM '${expected}' has no NIC on '${secondary.name}'.` };
     }
     // Boot disk image binding — same treatment.
     const img = await lookupOrSkip(ctx, 'CheckVM: image', () =>
@@ -663,9 +678,8 @@ async function CheckLiveMigration(ctx: CheckContext): Promise<CheckResult> {
     };
   }
   try {
-    const vms = await listAll<{ name?: string; host?: { extId?: string } }>(
-      ctx,
-      '/api/vmm/v4.0/ahv/config/vms',
+    const vms = await listAllSdk<{ name?: string; host?: { extId?: string } }>(
+      p => checkSdk(ctx.nutanix).vmm.vms.listVms(p)
     );
     const found = vms.find((v) => v.name === expected);
     if (!found) return { pass: false, detail: `VM '${expected}' not found.` };
@@ -709,9 +723,8 @@ async function CheckRestoreVM(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const expected = `${trigram}-vm`;
   try {
-    const vms = await listAll<{ extId?: string; name?: string; powerState?: string }>(
-      ctx,
-      '/api/vmm/v4.0/ahv/config/vms',
+    const vms = await listAllSdk<{ extId?: string; name?: string; powerState?: string }>(
+      p => checkSdk(ctx.nutanix).vmm.vms.listVms(p)
     );
     const found = vms.find((v) => v.name === expected);
     if (!found) {
@@ -752,9 +765,8 @@ async function CheckCat(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const expectedKey = `${trigram}-cat`;
   try {
-    const categories = await listAll<{ extId?: string; key?: string; value?: string }>(
-      ctx,
-      '/api/prism/v4.2/config/categories',
+    const categories = await listAllSdk<{ extId?: string; key?: string; value?: string }>(
+      p => checkSdk(ctx.nutanix).prism.categories.listCategories(p)
     );
     const matching = categories.filter((c) => c.key === expectedKey);
     const values = new Set(matching.map((c) => c.value).filter((v): v is string => !!v));
@@ -804,11 +816,11 @@ async function CheckCatVM(ctx: CheckContext): Promise<CheckResult> {
     // we have to opt in via `$select=extId,name,categories`. Also note the
     // path is v4.2 on live (v4.0 works too, but v4.2 is what actually
     // honors the $select field reliably).
-    const vms = await listAll<{
+    const vms = await listAllSdk<{
       extId?: string;
       name?: string;
       categories?: Array<{ extId?: string }>;
-    }>(ctx, '/api/vmm/v4.2/ahv/config/vms?%24select=extId,name,categories');
+    }>(p => checkSdk(ctx.nutanix).vmm.vms.listVms({ ...p, $select: 'extId,name,categories' }));
     const vm = vms.find((v) => v.name === vmName);
     if (!vm) return { pass: false, detail: `VM '${vmName}' not found.` };
     const applied = (vm.categories ?? []).some((c) => c.extId === catUuid);
@@ -829,27 +841,26 @@ async function CheckCatVM(ctx: CheckContext): Promise<CheckResult> {
 
 // ─── Storage + security + protection + approval ─────────────────────────
 
-/**
- * Stage 17 `create-storage-policy`. Verifies `{Trigram}-sto-policy` exists
- * with encryption enabled. Live path is `/api/datapolicies/v4.2/config/
- * storage-policies` (namespace moved from the provisional `storage` guess);
- * shape is `encryptionSpec.encryptionState` — any value other than
- * `NO_ENCRYPTION` counts as encrypted (`INLINE`, `SYSTEM_DERIVED`, etc.).
- */
+/** Stage 17: encryption enabled for the player's Critical category. */
 async function CheckStoragePolicy(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const expected = `${trigram}-sto-policy`;
   try {
-    const policies = await listAll<{
+    const policies = await listAllSdk<{
       extId?: string;
       name?: string;
       encryptionSpec?: { encryptionState?: string };
-    }>(ctx, '/api/datapolicies/v4.2/config/storage-policies');
+      categoryExtIds?: string[];
+    }>(p => checkSdk(ctx.nutanix).datapolicies.storage.listStoragePolicies(p));
     const found = policies.find((p) => p.name === expected);
     if (!found) return { pass: false, detail: `Storage policy '${expected}' not found.` };
     const encState = found.encryptionSpec?.encryptionState ?? 'NO_ENCRYPTION';
-    if (encState === 'NO_ENCRYPTION') {
+    if (encState !== 'ENABLED') {
       return { pass: false, detail: `Storage policy '${expected}' does not have encryption enabled.` };
+    }
+    const category = await lookupCategoryUuid(ctx, `${trigram}-cat`, 'Critical');
+    if (!category || !found.categoryExtIds?.includes(category)) {
+      return { pass: false, detail: `Storage policy '${expected}' must include '${trigram}-cat:Critical'.` };
     }
     if (found.extId) {
       ctx.cache.set({ kind: 'storagePolicy', logicalName: expected, uuid: found.extId });
@@ -905,9 +916,8 @@ async function CheckSecurityPolicy(ctx: CheckContext): Promise<CheckResult> {
         detail: `Category '${trigram}-cat:Critical' not found on the cluster — re-create it.`,
       };
     }
-    const policies = await listAll<{ extId?: string; name?: string; state?: string }>(
-      ctx,
-      '/api/microseg/v4.0/config/policies',
+    const policies = await listAllSdk<{ extId?: string; name?: string; state?: string }>(
+      p => checkSdk(ctx.nutanix).microseg.policies.listNetworkSecurityPolicies(p)
     );
     const found = policies.find((p) => p.name === expected);
     if (!found?.extId) {
@@ -919,11 +929,8 @@ async function CheckSecurityPolicy(ctx: CheckContext): Promise<CheckResult> {
         detail: `Security policy '${expected}' in state '${found.state}' (expected ENFORCE).`,
       };
     }
-    const detail = await ctx.nutanix.request<{ data?: { rules?: MsegRule[] } }>(
-      'GET',
-      `/api/microseg/v4.0/config/policies/${found.extId}`,
-    );
-    const rules = detail?.data?.rules ?? [];
+    const detail = unwrapOne<{ rules?: MsegRule[] }>(await checkSdk(ctx.nutanix).microseg.policies.getNetworkSecurityPolicyById(found.extId));
+    const rules = detail?.rules ?? [];
     const scoped = rules.some((r) =>
       (r.spec?.securedGroupCategoryReferences ?? []).includes(catUuid),
     );
@@ -970,9 +977,8 @@ async function CheckSecurityPolicy2(ctx: CheckContext): Promise<CheckResult> {
   const expected = `${trigram}-mseg-policy`;
   const frontendHost = String(ctx.vars.get('frontendHost') ?? '').trim();
   try {
-    const policies = await listAll<{ extId?: string; name?: string }>(
-      ctx,
-      '/api/microseg/v4.0/config/policies',
+    const policies = await listAllSdk<{ extId?: string; name?: string }>(
+      p => checkSdk(ctx.nutanix).microseg.policies.listNetworkSecurityPolicies(p)
     );
     const listEntry = policies.find((p) => p.name === expected);
     if (!listEntry?.extId) {
@@ -981,16 +987,12 @@ async function CheckSecurityPolicy2(ctx: CheckContext): Promise<CheckResult> {
     // The built-in `ssh` service group is one of the two valid ways to express
     // the SSH rule; look up its extId so we recognise it. Missing on older PCs
     // is fine — a raw tcp/22 rule is the other accepted shape.
-    const serviceGroups = await listAll<{ extId?: string; name?: string }>(
-      ctx,
-      '/api/microseg/v4.0/config/service-groups',
+    const serviceGroups = await listAllSdk<{ extId?: string; name?: string }>(
+      p => checkSdk(ctx.nutanix).microseg.serviceGroups.listServiceGroups(p)
     );
     const sshExtId = serviceGroups.find((g) => g.name === 'ssh')?.extId;
-    const detail = await ctx.nutanix.request<{ data?: { rules?: MsegRule[] } }>(
-      'GET',
-      `/api/microseg/v4.0/config/policies/${listEntry.extId}`,
-    );
-    const rules = detail?.data?.rules ?? [];
+    const detail = unwrapOne<{ rules?: MsegRule[] }>(await checkSdk(ctx.nutanix).microseg.policies.getNetworkSecurityPolicyById(listEntry.extId));
+    const rules = detail?.rules ?? [];
 
     // A rule "opens SSH" if it references the `ssh` service group or covers tcp/22.
     const opensSsh = (s: MsegRuleSpec): boolean => {
@@ -1054,7 +1056,7 @@ async function CheckProtectionPolicy(ctx: CheckContext): Promise<CheckResult> {
   const expected = `${trigram}-prot-policy`;
   const expectedCatKey = `${trigram}-cat`;
   try {
-    const policies = await listAll<{
+    const policies = await listAllSdk<{
       extId?: string;
       name?: string;
       replicationConfigurations?: Array<{
@@ -1066,7 +1068,7 @@ async function CheckProtectionPolicy(ctx: CheckContext): Promise<CheckResult> {
         };
       }>;
       categoryIds?: string[];
-    }>(ctx, '/api/datapolicies/v4.2/config/protection-policies');
+    }>(p => checkSdk(ctx.nutanix).datapolicies.protection.listProtectionPolicies(p));
     const found = policies.find((p) => p.name === expected);
     if (!found) return { pass: false, detail: `Protection policy '${expected}' not found.` };
     const schedules = (found.replicationConfigurations ?? [])
@@ -1094,9 +1096,8 @@ async function CheckProtectionPolicy(ctx: CheckContext): Promise<CheckResult> {
     // {key, value} pair so we can assert the player attached to their own
     // category AND chose the non-critical tier (Python's intent: snapshot
     // the low-impact entities, not the production-critical ones).
-    const allCats = await listAll<{ extId?: string; key?: string; value?: string }>(
-      ctx,
-      '/api/prism/v4.2/config/categories',
+    const allCats = await listAllSdk<{ extId?: string; key?: string; value?: string }>(
+      p => checkSdk(ctx.nutanix).prism.categories.listCategories(p)
     );
     const boundCats = (found.categoryIds ?? [])
       .map((id) => allCats.find((c) => c.extId === id))
@@ -1154,11 +1155,14 @@ async function CheckApprovalPolicy(ctx: CheckContext): Promise<CheckResult> {
     // `r0w/ntnx-escape-game`. The link is wired via a separate
     // `$actions/associate-policies` POST, not by a write to securedPolicies
     // directly (that field is read-only in the schema).
-    const policies = await listAll<{
+    const policies = await listAllSdk<{
       extId?: string;
       name?: string;
       securedPolicies?: Array<{ policyExtId?: string; policyType?: string }>;
-    }>(ctx, '/api/security/v4.1/management/approval-policies');
+    }>(() => checkSdk(ctx.nutanix).security.approvals.listApprovalPolicies({
+      // This SDK operation has no page parameters; ask for the unique policy name.
+      $filter: `name eq '${expectedName}'`,
+    }));
     const found = policies.find((p) => p.name === expectedName);
     if (!found) {
       return {
@@ -1207,10 +1211,11 @@ async function CheckReport(ctx: CheckContext): Promise<CheckResult> {
       ? `${trigram}${emailSuffix}`
       : undefined;
   try {
-    const reports = await listAll<{
+    const reports = await listAllSdk<{
       extId?: string;
       name?: string;
-      schedule?: { scheduleInterval?: string };
+      timezone?: string;
+      schedule?: { scheduleInterval?: string; frequency?: number; startTime?: string };
       notificationPolicy?: {
         recipients?: Array<{ emailAddress?: string }>;
       };
@@ -1221,7 +1226,7 @@ async function CheckReport(ctx: CheckContext): Promise<CheckResult> {
           }>;
         }>;
       }>;
-    }>(ctx, '/api/opsmgmt/v4.0/config/report-configs');
+    }>(p => checkSdk(ctx.nutanix).opsmgmt.reportConfigs.listReportConfigs(p));
     const found = reports.find((r) => r.name === expected);
     if (!found) return { pass: false, detail: `Report '${expected}' not found.` };
     if (found.schedule?.scheduleInterval !== 'DAILY') {
@@ -1229,6 +1234,9 @@ async function CheckReport(ctx: CheckContext): Promise<CheckResult> {
         pass: false,
         detail: `Report '${expected}' is not on a DAILY schedule.`,
       };
+    }
+    if (found.schedule?.frequency !== 1 || !reportRunsAtThree(found.schedule?.startTime, found.timezone)) {
+      return { pass: false, detail: `Report '${expected}' must run every day at 03:00 in its configured timezone.` };
     }
     const recipients = found.notificationPolicy?.recipients ?? [];
     if (recipients.length === 0) {
@@ -1659,9 +1667,8 @@ async function CheckCloneApp(ctx: CheckContext): Promise<CheckResult> {
     // The original Python CheckCloneApp also asserts the player created the
     // VPC `{Trigram}-vpc` as a runtime input to the blueprint launch. v4
     // networking exposes VPCs at `/api/networking/v4.0/config/vpcs`.
-    const vpcs = await listAll<{ extId?: string; name?: string }>(
-      ctx,
-      '/api/networking/v4.0/config/vpcs',
+    const vpcs = await listAllSdk<{ extId?: string; name?: string }>(
+      p => checkSdk(ctx.nutanix).networking.vpcs.listVpcs(p)
     );
     const foundVpc = vpcs.find((v) => v.name === expectedVpc);
     if (!foundVpc) {
@@ -1709,7 +1716,10 @@ async function CheckSchedDay2(ctx: CheckContext): Promise<CheckResult> {
         metadata?: { uuid?: string; name?: string };
         resources?: {
           name?: string;
-          executable?: { entity?: { uuid?: string } };
+          type?: string;
+          state?: string;
+          schedule_info?: { schedule?: string };
+          executable?: { entity?: { uuid?: string; type?: string }; action?: { type?: string; spec?: { uuid?: string } } };
         };
       }>;
     }>('POST', '/api/nutanix/v3/jobs/list', { kind: 'job', length: 100 });
@@ -1717,14 +1727,11 @@ async function CheckSchedDay2(ctx: CheckContext): Promise<CheckResult> {
       (j) => j.metadata?.name === expected || j.resources?.name === expected,
     );
     if (!found) return { pass: false, detail: `Scheduled policy '${expected}' not found.` };
-    const target = found.resources?.executable?.entity?.uuid;
-    if (target !== appUuid) {
-      return {
-        pass: false,
-        detail: `Schedule '${expected}' targets '${target ?? '?'}' (expected app UUID '${appUuid}').`,
-      };
-    }
-    return { pass: true, detail: `Schedule '${expected}' targets the player's app.` };
+    const app = await ctx.nutanix.rest.request<Record<string, any>>('GET', `/api/nutanix/v3/apps/${appUuid}`);
+    const action = refreshAction(app);
+    const error = dailyScheduleError(found.resources, appUuid, action.uuid);
+    if (error) return { pass: false, detail: `Schedule '${expected}': ${error}` };
+    return { pass: true, detail: `Schedule '${expected}' runs Refresh VM daily.` };
   } catch (err) {
     return { pass: false, detail: `Scheduler query failed: ${nutanixErrorDetail(err)}` };
   }

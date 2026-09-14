@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 // Locks two invariants that silently rotted in the past: the dependency
@@ -29,7 +29,7 @@ describe('pack integrity', () => {
     expect(code).toBe(0);
   });
 
-  test('every fixture placeholder resolves to a seeded or player-input var', () => {
+  test('every fixture placeholder resolves to a seeded, input or declared captured var', () => {
     const fixtures = readFileSync(join(PACK, 'fixtures.json'), 'utf8');
     const en = JSON.parse(readFileSync(join(PACK, 'locales/en.json'), 'utf8')) as Record<
       string,
@@ -48,6 +48,7 @@ describe('pack integrity', () => {
       'PCUser',
       'PCPassword',
       'ImageURL',
+      'SecondaryNetwork',
       'EmailReport',
       'ProdUsername',
       'ProdPassword',
@@ -57,7 +58,10 @@ describe('pack integrity', () => {
       'OldPCUsername',
       'OldPCPassword',
     ];
-    const allowed = new Set([...seeded, ...inputVars]);
+    // Detail endpoints can use IDs captured by an earlier check (e.g. VMUUID).
+    const captured = readdirSync(join(PACK, 'stages')).filter(name => name.endsWith('.json'))
+      .flatMap(name => JSON.parse(readFileSync(join(PACK, 'stages', name), 'utf8')).captures ?? []);
+    const allowed = new Set([...seeded, ...inputVars, ...captured]);
     const unresolved = new Set<string>();
     for (const m of fixtures.matchAll(/\{([A-Za-z][A-Za-z0-9]*)\}/g)) {
       if (!allowed.has(m[1])) unresolved.add(m[1]);

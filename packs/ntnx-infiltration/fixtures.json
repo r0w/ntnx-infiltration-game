@@ -100,13 +100,20 @@
     ],
     "metadata": { "total_matches": 1 }
   },
+  "GET /api/nutanix/v3/apps/app-{Trigram}": {
+    "metadata": { "uuid": "app-{Trigram}", "name": "{Trigram}-app" },
+    "spec": { "resources": { "action_list": [{ "name": "Refresh VM", "uuid": "refresh-{Trigram}" }] } }
+  },
   "POST /api/nutanix/v3/jobs/list": {
     "entities": [
       {
         "metadata": { "uuid": "sched-{Trigram}", "name": "{Trigram}-sched" },
         "resources": {
           "name": "{Trigram}-sched",
-          "executable": { "entity": { "uuid": "app-{Trigram}" } }
+          "type": "RECURRING",
+          "state": "ACTIVE",
+          "schedule_info": { "schedule": "0 3 * * *" },
+          "executable": { "entity": { "type": "app", "uuid": "app-{Trigram}" }, "action": { "type": "APP_ACTION_RUN", "spec": { "uuid": "refresh-{Trigram}" } } }
         }
       }
     ],
@@ -267,7 +274,7 @@
           { "nicNetworkInfo": { "subnet": { "extId": "subnet-{Trigram}" } } }
         ],
         "disks": [
-          { "backingInfo": { "dataSource": { "reference": { "imageExtId": "img-{Trigram}-ubuntu" } } } }
+          { "backingInfo": { "diskSizeBytes": 21474836480, "dataSource": { "reference": { "imageExtId": "img-{Trigram}-ubuntu" } } } }
         ],
         "guestCustomization": { "config": { "cloudInit": {} } },
         "project": { "extId": "proj-{Trigram}" },
@@ -288,10 +295,24 @@
   "GET /api/nutanix/v3/vms/vm-{Trigram}": {
     "spec": {
       "resources": {
-        "guest_customization": { "cloud_init": { "user_data": "#cloud-config\n" } }
+        "guest_customization": {
+          "cloud_init": {
+            "user_data": "#cloud-config\n"
+          }
+        }
       }
     },
-    "metadata": { "project_reference": { "kind": "project", "uuid": "proj-{Trigram}" } }
+    "metadata": {
+      "project_reference": {
+        "kind": "project",
+        "uuid": "proj-{Trigram}"
+      },
+      "owner_reference": {
+        "kind": "user",
+        "uuid": "user-theprojmgr",
+        "name": "TheProjectManager"
+      }
+    }
   },
   "GET /api/prism/v4.2/config/categories": {
     "data": [
@@ -313,7 +334,7 @@
         "extId": "sto-{Trigram}",
         "name": "{Trigram}-sto-policy",
         "policyType": "USER",
-        "encryptionSpec": { "encryptionState": "INLINE" },
+        "encryptionSpec": { "encryptionState": "ENABLED" },
         "categoryExtIds": ["cat-{Trigram}-critical"]
       }
     ]
@@ -413,7 +434,8 @@
       {
         "extId": "report-{Trigram}",
         "name": "{Trigram}-report",
-        "schedule": { "scheduleInterval": "DAILY", "time": "03:00" },
+        "timezone": "UTC",
+        "schedule": { "scheduleInterval": "DAILY", "frequency": 1, "startTime": "2026-01-01T03:00:00Z" },
         "notificationPolicy": {
           "recipients": [{ "emailAddress": "{Trigram}{EmailReport}" }]
         },
@@ -422,5 +444,27 @@
         ]
       }
     ]
+  },
+  "GET /api/nutanix/v3/vms/{VMUUID}": {
+    "spec": {
+      "resources": {
+        "guest_customization": {
+          "cloud_init": {
+            "user_data": "#cloud-config\n"
+          }
+        }
+      }
+    },
+    "metadata": {
+      "project_reference": {
+        "kind": "project",
+        "uuid": "proj-{Trigram}"
+      },
+      "owner_reference": {
+        "kind": "user",
+        "uuid": "user-theprojmgr",
+        "name": "TheProjectManager"
+      }
+    }
   }
 }

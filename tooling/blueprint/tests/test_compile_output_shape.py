@@ -224,6 +224,7 @@ def test_no_banned_imports_in_escripts(compiled_bp: dict):
         res.get("service_definition_list", [])
         + res.get("app_profile_list", [])
         + res.get("package_definition_list", [])
+        + res.get("substrate_definition_list", [])
     ):
         for action in c.get("action_list", []):
             rb = action.get("runbook", {})

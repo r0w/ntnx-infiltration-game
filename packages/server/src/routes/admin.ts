@@ -10,6 +10,14 @@ import { analyzeDeps, cascadeDisable, type BrokenStage } from '../dep-analysis';
 import { probeClusterConfig } from '../cluster-config-probe';
 import { readEnabledWipLocales, writeEnabledWipLocales } from '../effective-locales';
 import {
+  decodePackConfig,
+  encodePackConfig,
+  meaningfulOverrides,
+  planPackConfigImport,
+  PackConfigError,
+  type PackStageDefaults,
+} from '../pack-config';
+import {
   probeClusterName,
   probeIntelligentOps,
   probeSoftwareVersions,
@@ -198,6 +206,8 @@ export interface AdminPackStageEntry {
   captures: string[];
   /** Vars in `needs` that have no surviving producer in the effective pack. */
   brokenMissingVars: string[];
+  brokenMissingStages?: string[];
+  dependsOn?: string[];
   /** Always-enforced capability requirements. */
   requires: string[];
   /** Capability requirements only enforced when `clusterProfile === 'other'`. */
@@ -232,6 +242,35 @@ export interface AdminPackTogglePreview {
   requested: string;
   /** Stages that would also become broken if `requested` were turned off. */
   cascade: BrokenStage[];
+}
+
+export interface AdminPackConfigPayload {
+  /** The portable string to copy out of this instance. */
+  config: string;
+  packId: string;
+  /** How many stages currently carry an operator override. 0 = the pack is
+   *  untouched and the string encodes an empty config. */
+  overriddenCount: number;
+}
+
+export interface AdminPackConfigImportResult {
+  ok: true;
+  packId: string;
+  /** Stage names whose overrides were applied. */
+  applied: string[];
+  /** Overridden names this pack no longer has (stages deleted since the
+   *  export). Reported, not fatal: the rest of the config still lands. */
+  missingStages: string[];
+  /** Stages this pack has that the config's pack didn't (added since the
+   *  export). Left at their JSON default for the operator to review. */
+  newStages: string[];
+  /** Local overrides the import wiped because the config doesn't set them.
+   *  Import replaces rather than merges, so the setup is reproducible. */
+  clearedStages: string[];
+  /** Stages left active with no surviving producer for what they need. The
+   *  per-stage toggle warns about this before disabling; an imported config
+   *  can disable the same producer in one go, so it has to say so after. */
+  brokenStages: string[];
 }
 
 export interface AdminLanguageEntry {
@@ -539,7 +578,9 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
         adminGateOverridden: !!o && o.adminGate !== null && o.adminGate !== (base?.adminGate ?? false),
         needs: s.needs ?? [],
         captures: s.captures ?? [],
+        dependsOn: s.dependsOn ?? [],
         brokenMissingVars: brokenByName.get(s.name)?.missingVars ?? [],
+        brokenMissingStages: brokenByName.get(s.name)?.missingStages ?? [],
         requires,
         requiresOnOther,
         missingCapabilities,
@@ -567,11 +608,24 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     }
     const baseStage = deps.pack.stages.find((s) => s.name === stageName);
     if (!baseStage) throw new HttpError(404, 'stage not found');
-    const body = (await c.req.json().catch(() => ({}))) as { value?: unknown };
+    const body = (await c.req.json().catch(() => ({}))) as { value?: unknown; cascade?: boolean };
     if (body.value !== null && typeof body.value !== 'boolean') {
       throw new HttpError(400, 'value must be boolean or null');
     }
-    deps.service.packOverlay.setField(deps.pack.manifest.id, stageName, field, body.value);
+    if (body.cascade !== undefined && typeof body.cascade !== 'boolean') {
+      throw new HttpError(400, 'cascade must be boolean');
+    }
+    if (body.cascade && (field !== 'active' || body.value !== false)) {
+      throw new HttpError(400, 'cascade is only supported when disabling a stage');
+    }
+    const targets = body.cascade
+      ? [...cascadeDisable(deps.service.listEffectiveStages(), new Set([stageName])).disabled]
+      : [stageName];
+    deps.db.transaction(() => {
+      for (const name of targets) {
+        deps.service.packOverlay.setField(deps.pack.manifest.id, name, field, body.value as boolean | null);
+      }
+    })();
     deps.service.applyEffectiveStages();
     return c.json({ ok: true, stageName, field, value: body.value });
   });
@@ -614,6 +668,87 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     const r = cascadeDisable(effective, new Set([stageName]));
     const preview: AdminPackTogglePreview = { requested: stageName, cascade: r.cascade };
     return c.json(preview);
+  });
+
+  // ─── portable stage config (export / import / reset) ────────────────
+  // One string carrying every operator override, so a curated setup can be
+  // reproduced on another instance without hand-editing SQLite. Only the
+  // pack overlay travels: gate unlocks and the lunch lock are live event
+  // state, not configuration, and importing them would surprise a room.
+
+  // The pack as its files declare it, which is what an override is measured
+  // against everywhere the operator sees a number.
+  const stageDefaults = (): PackStageDefaults[] =>
+    deps.pack.stages.map((s) => ({
+      name: s.name,
+      active: s.active ?? true,
+      adminGate: s.adminGate ?? false,
+    }));
+
+  router.get('/pack/config', (c) => {
+    const defaults = stageDefaults();
+    const rows = deps.service.packOverlay.list(deps.pack.manifest.id);
+    const payload: AdminPackConfigPayload = {
+      config: encodePackConfig(deps.pack.manifest.id, defaults, rows),
+      packId: deps.pack.manifest.id,
+      overriddenCount: meaningfulOverrides(rows, defaults).length,
+    };
+    return c.json(payload);
+  });
+
+  // POST /pack/config  Body: { config: string }
+  // Replaces the whole overlay: what the operator gets is the config, not
+  // the config merged onto whatever they had flipped before.
+  router.post('/pack/config', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { config?: unknown };
+    if (typeof body.config !== 'string') {
+      throw new HttpError(400, 'config must be a string');
+    }
+    const packId = deps.pack.manifest.id;
+    const defaults = stageDefaults();
+    const stageNames = defaults.map((d) => d.name);
+    let plan;
+    try {
+      plan = planPackConfigImport(decodePackConfig(body.config), packId, stageNames);
+    } catch (err) {
+      if (err instanceof PackConfigError) throw new HttpError(400, err.message);
+      throw err;
+    }
+    // Only overrides the operator could actually see count as "wiped": a
+    // stale row, or one that repeats the pack default, isn't news to them.
+    const before = new Set(
+      meaningfulOverrides(deps.service.packOverlay.list(packId), defaults).map((r) => r.stageName),
+    );
+    deps.service.packOverlay.replaceAll(packId, plan.applied);
+    deps.service.applyEffectiveStages();
+    const applied = plan.applied.map((a) => a.stageName);
+    const appliedSet = new Set(applied);
+    const result: AdminPackConfigImportResult = {
+      ok: true,
+      packId,
+      applied,
+      missingStages: plan.missingStages,
+      newStages: plan.newStages,
+      clearedStages: [...before].filter((n) => !appliedSet.has(n)).sort(),
+      brokenStages: analyzeDeps({ stages: deps.service.listEffectiveStages() })
+        .broken.map((b) => b.stageName)
+        .sort(),
+    };
+    return c.json(result);
+  });
+
+  // Back to the pack JSON defaults, the escape hatch after an import or a
+  // long afternoon of toggling.
+  router.post('/pack/config/reset', (c) => {
+    // Report what the operator was shown, not the row count: stale rows and
+    // rows that repeat the pack default were never on their screen.
+    const cleared = meaningfulOverrides(
+      deps.service.packOverlay.list(deps.pack.manifest.id),
+      stageDefaults(),
+    ).length;
+    deps.service.packOverlay.clear(deps.pack.manifest.id);
+    deps.service.applyEffectiveStages();
+    return c.json({ ok: true, cleared });
   });
 
   // ─── cluster config (cached snapshot of slow PC queries) ────────────

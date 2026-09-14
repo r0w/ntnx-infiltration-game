@@ -31,6 +31,7 @@ PC_IP = '@@{PC_IP}@@'
 PC_USERNAME = '@@{PC_USERNAME}@@'
 PC_PASSWORD = '@@{PC_PASSWORD}@@'
 CLUSTER_UUID = '@@{Game.CLUSTERUUID}@@'
+SECONDARY_SUBNET_NAME = '@@{GAME_SECONDARY_NETWORK}@@'.strip() or 'secondary'
 
 PROJECT_NAME = "production"
 PROJECT_ADMIN = "thebadguy"  # AD user (created by Add AD users task)
@@ -117,9 +118,8 @@ def get_account_uuid():
 def get_subnet_uuid(name):
     """Look up a subnet by name via the stable v3 list API.
 
-    Tolerant of cluster-prefixed names: matches `name` exactly first, then
-    falls back to `<name>-<anything>` (e.g. HPoC subnets named
-    `primary-<cluster-name>` instead of just `primary`).
+    Custom names match exactly. The default primary/secondary names also
+    accept HPoC suffixes; ambiguous matches require an explicit name.
 
     Retries with a short delay because PC's v3 subnets/list is eventually
     consistent: the upstream Setup subnets task may have JUST migrated
@@ -129,20 +129,26 @@ def get_subnet_uuid(name):
     'secondary'" 3 s after Setup subnets confirmed it exists.
     """
     for attempt in range(6):  # 6 × 5 s = 30 s cap
-        r = _SESS.post(
-            "%s/api/nutanix/v3/subnets/list" % BASE,
-            auth=AUTH, headers=HEADERS, verify=False, timeout=20,
-            data=json.dumps({"kind": "subnet", "length": 250}),
-        )
-        r.raise_for_status()
-        entities = r.json().get('entities') or []
+        entities = []
+        for offset in range(0, 20000, 250):
+            r = _SESS.post(
+                "%s/api/nutanix/v3/subnets/list" % BASE,
+                auth=AUTH, headers=HEADERS, verify=False, timeout=20,
+                data=json.dumps({"kind": "subnet", "length": 250, "offset": offset}),
+            )
+            r.raise_for_status()
+            chunk = r.json().get('entities') or []
+            entities.extend(chunk)
+            if len(chunk) < 250:
+                break
         name_lc = name.lower()
-        for e in entities:
-            if (e['status'].get('name') or '').lower() == name_lc:
-                return e['metadata']['uuid']
-        for e in entities:
-            if (e['status'].get('name') or '').lower().startswith(name_lc + '-'):
-                return e['metadata']['uuid']
+        matches = [e for e in entities if (e['status'].get('name') or '').lower() == name_lc]
+        if not matches and name_lc in ('primary', 'secondary'):
+            matches = [e for e in entities if (e['status'].get('name') or '').lower().startswith(name_lc + '-')]
+        if len(matches) > 1:
+            raise ValueError("Multiple networks match %r; configure the exact name" % name)
+        if matches:
+            return matches[0]['metadata']['uuid']
         if attempt < 5:
             print("  [warn] subnet '%s' not yet visible (attempt %d/6) — waiting 5 s" %
                   (name, attempt + 1))
@@ -174,7 +180,7 @@ def create_project(account_uuid, primary_uuid, secondary_uuid):
                 "default_subnet_reference": {"kind": "subnet", "uuid": primary_uuid},
                 "subnet_reference_list": [
                     {"kind": "subnet", "name": "primary", "uuid": primary_uuid},
-                    {"kind": "subnet", "name": "secondary", "uuid": secondary_uuid},
+                    {"kind": "subnet", "name": SECONDARY_SUBNET_NAME, "uuid": secondary_uuid},
                 ],
             },
         },
@@ -483,13 +489,13 @@ def add_user_as_project_admin(project_uuid, account_uuid, primary_uuid,
                         "kind": "subnet", "uuid": primary_uuid,
                     },
                     "subnet_reference_list": [
-                        {"kind": "subnet", "name": "secondary", "uuid": secondary_uuid},
+                        {"kind": "subnet", "name": SECONDARY_SUBNET_NAME, "uuid": secondary_uuid},
                         {"kind": "subnet", "name": "primary", "uuid": primary_uuid},
                     ],
                     "cluster_reference_list": [
                         {"kind": "cluster", "uuid": cluster_uuid}
                     ],
-                    "enable_directory_and_identity_provider_shortlist": False,
+                    "directory_reference_list": [{"kind": "directory_service", "uuid": directory_id}],
                 },
                 "description": "Production Project",
             },
@@ -539,10 +545,21 @@ def add_user_as_project_admin(project_uuid, account_uuid, primary_uuid,
         auth=AUTH, headers=HEADERS, verify=False, timeout=60,
         data=json.dumps(payload),
     )
-    if r.status_code >= 400:
-        print("[warn] projects_internal PUT returned %d: %s" % (r.status_code, r.text[:300]))
-        return False
-    return True
+    r.raise_for_status()
+    # projects_internal accepts writes before directory/member validation finishes.
+    for _ in range(60):
+        current = _SESS.get("%s/api/nutanix/v3/projects/%s" % (BASE, project_uuid),
+                            auth=AUTH, headers=HEADERS, verify=False, timeout=20)
+        current.raise_for_status()
+        status = current.json().get("status", {})
+        if status.get("state") in ("ERROR", "FAILED"):
+            raise Exception("Project membership failed: %s" % json.dumps(status.get("message_list", [])))
+        members = status.get("resources", {}).get("user_reference_list", [])
+        if status.get("state") == "COMPLETE" and any(u.get("uuid") == user_uuid for u in members):
+            return True
+        time.sleep(2)
+    raise Exception("Project membership did not complete; inspect the update task")
+
 
 
 def main():
@@ -558,12 +575,12 @@ def main():
     else:
         account_uuid = get_account_uuid()
         primary_uuid = get_subnet_uuid('primary')
-        secondary_uuid = get_subnet_uuid('secondary')
+        secondary_uuid = get_subnet_uuid(SECONDARY_SUBNET_NAME)
         if not primary_uuid:
-            print("[warn] no subnet named 'primary' — falling back to 'secondary'")
+            print("[warn] no subnet named 'primary' — falling back to %r" % SECONDARY_SUBNET_NAME)
             primary_uuid = secondary_uuid
         if not secondary_uuid:
-            print("[FAIL] no subnet named 'secondary' — Setup subnets must run first")
+            print("[FAIL] configured network %r missing — Setup subnets must run first" % SECONDARY_SUBNET_NAME)
             return 2
         print("Creating project '%s'" % PROJECT_NAME)
         project_uuid = create_project(account_uuid, primary_uuid, secondary_uuid)
@@ -574,8 +591,8 @@ def main():
     # Look up the resources we'll need for the PUT — fetch fresh in case the
     # cached uuids drift between create_project and now.
     account_uuid = get_account_uuid()
-    primary_uuid = get_subnet_uuid('primary') or get_subnet_uuid('secondary')
-    secondary_uuid = get_subnet_uuid('secondary')
+    primary_uuid = get_subnet_uuid('primary') or get_subnet_uuid(SECONDARY_SUBNET_NAME)
+    secondary_uuid = get_subnet_uuid(SECONDARY_SUBNET_NAME)
 
     directory_id = get_directory_id()
     if not directory_id:
@@ -603,14 +620,17 @@ def main():
 
     print("Adding '%s' (uuid=%s) as Project Admin (role=%s)..." %
           (PROJECT_ADMIN, user_uuid, role_uuid))
-    ok = add_user_as_project_admin(
-        project_uuid, account_uuid, primary_uuid, secondary_uuid,
-        CLUSTER_UUID, user_uuid, role_uuid, directory_id, spec_version,
-    )
-    if ok:
-        print("[ok]   ACP set: '%s' is Project Admin on '%s'" % (PROJECT_ADMIN, PROJECT_NAME))
-    else:
-        print("[warn] ACP PUT failed — operator can re-add manually via Prism UI")
+    try:
+        add_user_as_project_admin(
+            project_uuid, account_uuid, primary_uuid, secondary_uuid,
+            CLUSTER_UUID, user_uuid, role_uuid, directory_id, spec_version,
+        )
+    except Exception as exc:
+        print("[FAIL] Project membership could not be confirmed: %s" % exc)
+        print("Inspect the project update task and '%s' access to '%s' before resuming installation." %
+              (PROJECT_ADMIN, PROJECT_NAME))
+        return 1
+    print("[ok]   ACP set: '%s' is Project Admin on '%s'" % (PROJECT_ADMIN, PROJECT_NAME))
 
     # Calm SetVariable task captures the line `ProjectUUID=...` from stdout.
     print("ProjectUUID=%s" % project_uuid)

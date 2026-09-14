@@ -258,3 +258,22 @@ def test_create_project_raises_on_genuine_failure():
         assert False, "expected create_project to raise on a genuine 400"
     except Exception as e:
         assert "create project failed" in str(e)
+
+
+def test_main_reports_membership_failure_without_claiming_readiness(capsys):
+    ns = _load(FakeSession())
+    ns.update(CLUSTER_UUID='cluster', find_existing_project=lambda: 'project',
+              get_account_uuid=lambda: 'account', get_subnet_uuid=lambda _: 'subnet',
+              get_directory_id=lambda: 'directory', import_ldap_user=lambda _: None,
+              get_user_uuid=lambda _: 'user', get_project_admin_role_uuid=lambda: 'role',
+              get_project_spec_version=lambda _: 1)
+    def failed(*args):
+        raise Exception('membership failed')
+    ns['add_user_as_project_admin'] = failed
+    assert ns['main']() == 1
+    output = capsys.readouterr().out
+    assert '[FAIL]' in output and 'before resuming' in output
+    assert 'ProjectUUID=' not in output
+    ns['add_user_as_project_admin'] = lambda *args: True
+    assert ns['main']() == 0
+    assert 'ProjectUUID=project' in capsys.readouterr().out

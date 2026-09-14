@@ -13,11 +13,36 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-13
+
 ### Added
+
+- See required stages in the Pack table and click to jump to them.
+- Choose the game network and game VM SSH user at deployment.
+- Export, import and reset stage configurations from the Pack tab.
 
 ### Changed
 
+- Updated deployment and auto-play for Prism Central 7.6 and Self-Service 4.4.0.
+- Search and filter stages in the Pack tab.
+- Clearer instructions for project identity sources and category ownership.
+- Deployment guide explains how to create a project if none exists.
+- Choose the target project when launching the prerequisites runbook.
+
 ### Fixed
+
+- Auto-play retrieves the LCM update count if it was unavailable at startup.
+- Storage policy updates preserve existing performance settings.
+- Pack dialogs clear messages from previous operations.
+
+- Auto-play matches the instructions for VM recovery, policies, network ranges, disk size and schedules, including existing reports.
+- Disabling a stage can also disable all dependent stages; imported configurations report broken dependencies.
+
+- CloneProd shares the required network with the source VM's project and reports clone failures.
+- Project setup reports incomplete membership; auto-play fixes VM ownership and category assignment.
+- Installation waits for Policy Engine and reports missing status or failed downloads.
+- Installation retries temporary VM creation failures and correctly recognizes existing VMs on resume.
+- Fixed installation failures with older cluster APIs and erasure coding settings.
 
 ## [1.0.4] - 2026-09-11
 
@@ -192,7 +217,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 Baseline release. See the git history for changes up to this point.
 
-[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.4...HEAD
+[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.4...v1.1.0
 [1.0.4]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.1...v1.0.2

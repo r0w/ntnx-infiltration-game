@@ -11,7 +11,7 @@ Power: on `hpoc` (dedicated cluster) the VMs are powered ON. On `other`
 OFF — the player still sees the production inventory for the AD-login
 narrative, but we don't burn compute on a cluster we don't own.
 
-Idempotent: skips a VM if a VM with the same name already exists.
+Resumable: reuse matching VMs and finish their project and power configuration.
 
 Calm injects @@{PC_IP}@@, @@{PC_USERNAME}@@, @@{PC_PASSWORD}@@,
 @@{Game.CLUSTERUUID}@@, @@{Game.ProjectUUID}@@, @@{CLUSTER_PROFILE}@@.
@@ -37,7 +37,7 @@ CAT_KEY = "Environment"
 CAT_VALUE = "Production"
 PROJECT_NAME = "production"
 IMAGE_NAME = "Ubuntu2204"
-SECONDARY_SUBNET_NAME = "secondary"
+SECONDARY_SUBNET_NAME = '@@{GAME_SECONDARY_NETWORK}@@'.strip() or "secondary"
 
 VM_SPECS = [
     {"name": "prd-ransom-probe-1",        "numSockets": 2, "memorySizeGB": 4},
@@ -85,7 +85,7 @@ def wait_for_task(response, v3=False):
             if last in ('FAILED', 'CANCELED', 'CANCELLED'):
                 messages = [task.get('legacyErrorMessage') or '',
                             task.get('error_detail') or '']
-                messages.extend(m.get('message', '') if isinstance(m, dict) else str(m)
+                messages.extend(('%s %s' % (m.get('code', ''), m.get('message', ''))) if isinstance(m, dict) else str(m)
                                 for m in task.get('errorMessages', []))
                 return False, 'task %s: %s' % (last, ' '.join(str(m) for m in messages if m))
         time.sleep(2)
@@ -102,18 +102,24 @@ def _req_retry(method, url, attempts=5, backoff=4, timeout=20, **kwargs):
     wrap the VM-create POST (retrying a mutation risks double-create)."""
     last = None
     for i in range(attempts):
+        delay = backoff
         try:
             r = requests.request(method, url, auth=AUTH, headers=HEADERS,
                                   verify=False, timeout=timeout, **kwargs)
         except requests.RequestException as e:
             last = "network error: %s" % str(e)[:200]
         else:
-            if r.status_code < 500:
+            if r.status_code < 500 and r.status_code != 429:
                 return r
             last = "%d %s" % (r.status_code, r.text[:200])
+            retry_after = r.headers.get('Retry-After', '')
+            if retry_after.isdigit():
+                delay = max(backoff, int(retry_after))
+                if delay > 300:
+                    raise Exception('API asks for a retry after %ds; resume installation later' % delay)
         if i < attempts - 1:
             print("  [retry %d/%d] %s -> %s" % (i + 1, attempts, url.split('?')[0], last))
-            time.sleep(backoff)
+            time.sleep(delay)
     raise Exception("request failed after %d attempts: %s %s -> %s"
                     % (attempts, method, url, last))
 
@@ -130,21 +136,21 @@ def get_category_uuid():
 
 
 def get_subnet_uuid(name):
-    r = _req_retry(
-        "GET", "%s/api/networking/v4.0/config/subnets?$limit=100" % BASE,
-    )
-    r.raise_for_status()
-    subs = r.json().get('data') or []
-    name_lc = (name or '').lower()
-    for s in subs:
-        if (s.get('name') or '').lower() == name_lc:
-            return s['extId']
-    # Tolerate cluster-prefixed names (e.g. `secondary-<cluster>`), casing
-    # included; same pattern as setup_production_project.get_subnet_uuid.
-    for s in subs:
-        if (s.get('name') or '').lower().startswith(name_lc + '-'):
-            return s['extId']
-    return None
+    subs = []
+    for page in range(200):
+        r = _req_retry("GET", "%s/api/networking/v4.0/config/subnets?$limit=100&$page=%d" % (BASE, page))
+        r.raise_for_status()
+        chunk = r.json().get('data') or []
+        subs.extend(chunk)
+        if len(chunk) < 100:
+            break
+    name_lc = name.lower()
+    matches = [s for s in subs if (s.get('name') or '').lower() == name_lc]
+    if not matches and name_lc == 'secondary':
+        matches = [s for s in subs if (s.get('name') or '').lower().startswith('secondary-')]
+    if len(matches) > 1:
+        raise ValueError("Multiple networks match %r; configure the exact name" % name)
+    return matches[0]['extId'] if matches else None
 
 
 def get_image_uuid():
@@ -160,14 +166,52 @@ def get_image_uuid():
     return None
 
 
-def vm_exists(name):
-    r = requests.get(
-        "%s/api/vmm/v4.0/ahv/config/vms?$filter=name eq '%s'" % (BASE, name),
-        auth=AUTH, headers=HEADERS, verify=False, timeout=20,
+def find_vm(name):
+    r = _req_retry(
+        'GET', "%s/api/vmm/v4.0/ahv/config/vms" % BASE,
+        params={'$filter': "name eq '%s'" % name, '$limit': 100,
+                '$select': 'extId,name,cluster,categories,nics'},
     )
-    if r.status_code >= 400:
-        return False
-    return bool(r.json().get('data'))
+    r.raise_for_status()  # Failed inventory reads must never mean 'absent'.
+    matches = r.json().get('data') or []
+    if len(matches) > 1:
+        raise Exception('Multiple VMs named %s; resolve the ambiguity before resuming' % name)
+    return matches[0] if matches else None
+
+
+def validate_existing_vm(vm, cat_uuid, subnet_uuid):
+    if (vm.get('cluster') or {}).get('extId') != CLUSTER_UUID:
+        raise Exception('Existing VM belongs to another cluster; refusing to reuse it')
+    categories = [c.get('extId') for c in vm.get('categories') or []]
+    subnets = [((n.get('networkInfo') or n.get('nicNetworkInfo') or {}).get('subnet') or {}).get('extId')
+               for n in vm.get('nics') or []]
+    if cat_uuid not in categories or subnet_uuid not in subnets:
+        raise Exception('Existing VM does not match the production category/network; inspect it before resuming')
+
+
+def ensure_vm(spec, cat_uuid, subnet_uuid, image_uuid):
+    for attempt in range(3):
+        vm = find_vm(spec['name'])
+        if vm:
+            validate_existing_vm(vm, cat_uuid, subnet_uuid)
+            return True, 'existing VM verified; completing project and power configuration'
+        ok, message = create_vm(spec, cat_uuid, subnet_uuid, image_uuid)
+        if ok:
+            return True, message
+        # Only retry a confirmed failed task. A timeout or lost POST response
+        # can still create a VM later; leave that task for operator inspection.
+        retryable = message.startswith('task FAILED:') and any(
+            code in message for code in ('VMM-10011', 'RETRYABLE_ERROR',
+                                         'VMM-30604', 'SUBNET_NOT_FOUND_ERROR'))
+        if not retryable or attempt == 2:
+            if 'SUBNET_NOT_FOUND' in message or 'VMM-30604' in message or 'subnet not found' in message.lower():
+                message += ('; the migrated network is not usable for VM creation yet, even if '
+                            'migration says COMPLETED. See the migrated-network recovery steps '
+                            'in docs/OPERATOR.md. Keep Advanced mode and the existing subnet.')
+            return False, message
+        print('[retry %d/2] Confirmed VM creation failure: %s' % (attempt + 1, message))
+        time.sleep(30 * (attempt + 1))
+    return False, 'VM creation retry limit reached'
 
 
 def create_vm(spec, cat_uuid, subnet_uuid, image_uuid):
@@ -226,15 +270,11 @@ def assign_project_and_set_power(vm_name, power_on):
     MAX_POLLS = 300
     vm_uuid = None
     for _ in range(MAX_POLLS):
-        r = requests.get(
-            "%s/api/vmm/v4.0/ahv/config/vms?$filter=name eq '%s'" % (BASE, vm_name),
-            auth=AUTH, headers=HEADERS, verify=False, timeout=20,
-        )
-        if r.status_code == 200:
-            data = r.json().get('data') or []
-            if data:
-                vm_uuid = data[0]['extId']
-                break
+        vm = find_vm(vm_name)
+        if vm:
+            vm_uuid = vm['extId']
+            break
+        time.sleep(2)
     if not vm_uuid:
         return False, "VM did not appear within %d polls" % MAX_POLLS
 
@@ -288,10 +328,7 @@ def main():
               "no compute burned)." % CLUSTER_PROFILE)
 
     for spec in VM_SPECS:
-        if vm_exists(spec['name']):
-            print("  [skip] %-30s already present" % spec['name'])
-            continue
-        ok, msg = create_vm(spec, cat_uuid, subnet_uuid, image_uuid)
+        ok, msg = ensure_vm(spec, cat_uuid, subnet_uuid, image_uuid)
         if not ok:
             print("  [FAIL] %-30s — %s" % (spec['name'], msg))
             return 1

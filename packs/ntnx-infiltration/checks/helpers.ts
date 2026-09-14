@@ -1,3 +1,4 @@
+import { checkSdk, listAllSdk } from './sdk';
 import type { CheckContext, Logger, NutanixClient } from '@ntnx-game/engine';
 
 /**
@@ -37,46 +38,6 @@ export function getTrigram(ctx: CheckContext): string {
     throw new Error('Trigram not set — stage 1 (login) must run before any domain check.');
   }
   return trigram;
-}
-
-/**
- * GET a Nutanix v4 list endpoint, walking pages until exhausted, and return
- * the flat `data` array. v4 caps `$limit` at 100 per page, so any cluster
- * with >100 entities of a kind would silently fall off the first page —
- * a freshly-created `{trigram}-vm` on a HPoC carrying 184 VMs from prior
- * runs would never be found, causing false-negative checks.
- *
- * Strips any caller-provided `$limit`/`$page` and forces `$limit=100` per
- * page; loops `$page=N` from 0 until a short page comes back (or the
- * `metadata.totalAvailableResults` is reached). Capped at 200 pages
- * (= 20 000 entities) as a defensive upper bound — well past anything
- * we'd realistically see, and prevents an infinite loop on a misbehaving
- * endpoint that always claims `isTruncated`.
- */
-export async function listAll<T>(ctx: CheckContext, path: string): Promise<T[]> {
-  const PAGE = 100;
-  const PAGE_CAP = 200;
-  // Drop any caller-set $limit/$page — we own pagination here.
-  const stripped = path
-    .replace(/([?&])(?:\$limit|%24limit)=\d+/g, '$1')
-    .replace(/([?&])(?:\$page|%24page)=\d+/g, '$1')
-    .replace(/[?&]$/, '')
-    .replace(/&&+/g, '&');
-  const sep = stripped.includes('?') ? '&' : '?';
-  const all: T[] = [];
-  for (let page = 0; page < PAGE_CAP; page++) {
-    const url = `${stripped}${sep}%24limit=${PAGE}&%24page=${page}`;
-    const res = await ctx.nutanix.request<{
-      data?: T[];
-      metadata?: { totalAvailableResults?: number };
-    }>('GET', url);
-    const chunk = res.data ?? [];
-    all.push(...chunk);
-    if (chunk.length < PAGE) break;
-    const total = res.metadata?.totalAvailableResults;
-    if (typeof total === 'number' && all.length >= total) break;
-  }
-  return all;
 }
 
 /** Find the first entity with a matching name field, or undefined. */
@@ -140,9 +101,8 @@ export async function lookupSubnetUuid(
   ctx: CheckContext,
   name: string,
 ): Promise<string | undefined> {
-  const subnets = await listAll<{ extId?: string; name?: string }>(
-    ctx,
-    '/api/networking/v4.0/config/subnets',
+  const subnets = await listAllSdk<{ extId?: string; name?: string }>(
+    p => checkSdk(ctx.nutanix).networking.subnets.listSubnets(p)
   );
   return findByName(subnets, name)?.extId;
 }
@@ -151,9 +111,8 @@ export async function lookupImageUuid(
   ctx: CheckContext,
   name: string,
 ): Promise<string | undefined> {
-  const images = await listAll<{ extId?: string; name?: string }>(
-    ctx,
-    '/api/vmm/v4.0/content/images',
+  const images = await listAllSdk<{ extId?: string; name?: string }>(
+    p => checkSdk(ctx.nutanix).vmm.images.listImages(p)
   );
   return findByName(images, name)?.extId;
 }
@@ -179,9 +138,8 @@ export async function lookupCategoryUuid(
   key: string,
   value: string,
 ): Promise<string | undefined> {
-  const categories = await listAll<{ extId?: string; key?: string; value?: string }>(
-    ctx,
-    '/api/prism/v4.2/config/categories',
+  const categories = await listAllSdk<{ extId?: string; key?: string; value?: string }>(
+    p => checkSdk(ctx.nutanix).prism.categories.listCategories(p)
   );
   return categories.find((c) => c?.key === key && c?.value === value)?.extId;
 }
@@ -190,9 +148,8 @@ export async function lookupProtectionPolicyUuid(
   ctx: CheckContext,
   name: string,
 ): Promise<string | undefined> {
-  const policies = await listAll<{ extId?: string; name?: string }>(
-    ctx,
-    '/api/datapolicies/v4.2/config/protection-policies',
+  const policies = await listAllSdk<{ extId?: string; name?: string }>(
+    p => checkSdk(ctx.nutanix).datapolicies.protection.listProtectionPolicies(p)
   );
   return findByName(policies, name)?.extId;
 }
@@ -233,9 +190,8 @@ export async function lookupUserUuid(
   ctx: CheckContext,
   name: string,
 ): Promise<string | undefined> {
-  const users = await listAll<{ extId?: string; username?: string }>(
-    ctx,
-    '/api/iam/v4.0/authn/users',
+  const users = await listAllSdk<{ extId?: string; username?: string }>(
+    p => checkSdk(ctx.nutanix).iam.users.listUsers(p)
   );
   return users.find((u) => (u?.username ?? '').toLowerCase() === name.toLowerCase())?.extId;
 }

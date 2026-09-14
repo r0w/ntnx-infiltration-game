@@ -33,11 +33,46 @@ PC_IP = '@@{PC_IP}@@'
 PC_USERNAME = '@@{PC_USERNAME}@@'
 PC_PASSWORD = '@@{PC_PASSWORD}@@'
 CLUSTER_UUID = '@@{Game.CLUSTERUUID}@@'
+CLUSTER_PROFILE = '@@{CLUSTER_PROFILE}@@'
 
 PC_BASE = "https://%s:9440" % PC_IP
 BASE = "%s/api/clustermgmt" % PC_BASE
 AUTH = (PC_USERNAME, PC_PASSWORD)
 HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
+
+# PC 7.5 serves these v4 namespaces at v4.2; PC 7.3 stops at v4.1 and 404s
+# anything pinned higher. Probe once per namespace, highest first.
+_NS_VER = {}
+
+
+def ns_version(ns, probe, candidates=('v4.2', 'v4.1', 'v4.0')):
+    """Highest version of a v4 namespace this PC actually serves."""
+    if ns in _NS_VER:
+        return _NS_VER[ns]
+    for v in candidates:
+        code = None
+        for _ in range(2):  # a blip must not demote the version
+            try:
+                code = requests.get("%s/api/%s/%s/%s" % (PC_BASE, ns, v, probe),
+                                    auth=AUTH, headers=HEADERS,
+                                    verify=False, timeout=30).status_code
+                break
+            except Exception:
+                pass
+        if code is None:
+            # Unreachable tells us nothing about which versions exist. Stop
+            # probing rather than demote the whole run on a network blip.
+            break
+        if code != 404:
+            print("[ver]  %s -> %s" % (ns, v))
+            _NS_VER[ns] = v
+            return v
+    # Inconclusive: keep the newest so a bad probe can't downgrade a healthy
+    # cluster. If every version really 404s, the real call fails loudly.
+    print("[ver]  %s -> %s (probe inconclusive, keeping newest)"
+          % (ns, candidates[0]))
+    _NS_VER[ns] = candidates[0]
+    return candidates[0]
 
 
 def fetch(version, path):
@@ -74,7 +109,8 @@ def discover_unconfigured_nodes(cluster_uuid, max_polls=60):
     if not task_ext_id:
         return None, "discover task missing extId"
 
-    task_url = "%s/api/prism/v4.2/config/tasks/%s" % (PC_BASE, task_ext_id)
+    task_url = "%s/api/prism/%s/config/tasks/%s" % (
+        PC_BASE, ns_version('prism', 'config/tasks?$limit=1'), task_ext_id)
     last_status = None
     succeeded = False
     for _ in range(max_polls):
@@ -93,8 +129,8 @@ def discover_unconfigured_nodes(cluster_uuid, max_polls=60):
 
     short_id = task_ext_id.split(':')[-1]
     resp_url = (
-        "%s/api/clustermgmt/v4.2/config/task-response/%s?taskResponseType=UNCONFIGURED_NODES"
-        % (PC_BASE, short_id)
+        "%s/api/clustermgmt/%s/config/task-response/%s?taskResponseType=UNCONFIGURED_NODES"
+        % (PC_BASE, ns_version('clustermgmt', 'config/clusters?$limit=1'), short_id)
     )
     try:
         rr = requests.get(resp_url, auth=AUTH, headers=HEADERS, verify=False, timeout=20)
@@ -103,6 +139,30 @@ def discover_unconfigured_nodes(cluster_uuid, max_polls=60):
         return node_list, None
     except Exception as e:
         return None, "GET task-response failed: %s" % str(e)[:200]
+
+
+def policy_ready():
+    """Readiness is separate from the activation task's best-effort result."""
+    if CLUSTER_PROFILE != 'hpoc':
+        return True
+    try:
+        r = requests.get(PC_BASE + '/api/calm/v3.0/features/policy',
+                         auth=AUTH, headers=HEADERS, verify=False, timeout=20)
+        r.raise_for_status()
+        feature = r.json() or {}
+        enabled = ((feature.get('spec') or {}).get('feature_status') or {}).get('is_enabled') is True
+        config = (((feature.get('status') or {}).get('feature_status') or {}).get('config') or {})
+        if enabled and config.get('state') in (None, 'COMPLETED'):
+            print('[ok] Policy Engine enabled; approval-policy stages are ready')
+            return True
+        reason = 'state=%s, enabled=%s, message=%s' % (
+            config.get('state'), enabled, config.get('state_message'))
+    except (requests.RequestException, ValueError) as exc:
+        reason = 'status could not be read: %s' % str(exc)[:150]
+    print('[WARN] Policy Engine is NOT confirmed ready (%s). Installation may continue, '
+          'but approval-policy stages require activation. Check Prism Central > '
+          'Settings > Calm (/dm/settings/policy_enablement), then run Verify State again.' % reason)
+    return False
 
 
 def main():
@@ -162,7 +222,10 @@ def main():
         return 1
 
     print()
-    print("All checks passed. Game install complete.")
+    if policy_ready():
+        print("Cluster checks passed. Game container startup is checked separately.")
+    else:
+        print("Cluster checks passed with a Policy Engine readiness warning.")
     return 0
 
 

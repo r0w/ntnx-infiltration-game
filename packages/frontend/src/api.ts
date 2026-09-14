@@ -291,6 +291,8 @@ export interface AdminPackStageEntry {
   needs: string[];
   captures: string[];
   brokenMissingVars: string[];
+  brokenMissingStages?: string[];
+  dependsOn?: string[];
   /** Always-enforced capability requirements. */
   requires: string[];
   /** Capability requirements only enforced when `clusterProfile === 'other'`. */
@@ -314,7 +316,29 @@ export interface AdminPackPayload {
 
 export interface AdminPackTogglePreview {
   requested: string;
-  cascade: Array<{ stageName: string; missingVars: string[] }>;
+  cascade: Array<{ stageName: string; missingVars: string[]; missingStages?: string[] }>;
+}
+
+export interface AdminPackConfigPayload {
+  /** Portable string carrying every operator override. */
+  config: string;
+  packId: string;
+  overriddenCount: number;
+}
+
+export interface AdminPackConfigImportResult {
+  ok: true;
+  packId: string;
+  applied: string[];
+  /** In the config, absent from this pack: stages deleted since the export. */
+  missingStages: string[];
+  /** In this pack, absent from the config: stages added since the export.
+   *  Left at their JSON default. */
+  newStages: string[];
+  /** Local overrides the import wiped (it replaces, it doesn't merge). */
+  clearedStages: string[];
+  /** Stages the imported setup leaves active with no surviving producer. */
+  brokenStages: string[];
 }
 
 export interface AdminLunchStatus {
@@ -446,12 +470,19 @@ export const api = {
     stageName: string,
     field: 'active' | 'adminGate',
     value: boolean | null,
+    cascade = false,
   ) =>
     adminPost<{ ok: true; stageName: string; field: string; value: boolean | null }>(
       `/admin/pack/stages/${encodeURIComponent(stageName)}/toggle?field=${field}`,
       password,
-      { value },
+      { value, cascade },
     ),
+  adminPackConfig: (password: string) =>
+    adminGet<AdminPackConfigPayload>('/admin/pack/config', password),
+  adminPackConfigImport: (password: string, config: string) =>
+    adminPost<AdminPackConfigImportResult>('/admin/pack/config', password, { config }),
+  adminPackConfigReset: (password: string) =>
+    adminPost<{ ok: true; cleared: number }>('/admin/pack/config/reset', password),
   adminPackPreviewDisable: (password: string, stageName: string) =>
     adminGet<AdminPackTogglePreview>(
       `/admin/pack/preview-disable/${encodeURIComponent(stageName)}`,

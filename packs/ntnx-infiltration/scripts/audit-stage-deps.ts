@@ -31,7 +31,7 @@ type StageJson = {
 
 // Variables seeded from env via SessionService.initialVariables (see
 // packages/server/src/index.ts). Treated as always-available producers.
-const ENV_SEEDED = new Set(['PC', 'PCUser', 'PCPassword', 'Vlanid', 'ImageURL']);
+const ENV_SEEDED = new Set(['PC', 'PCUser', 'PCPassword', 'Vlanid', 'ImageURL', 'SecondaryNetwork']);
 
 // Known check → captured variable names. Derived from reading
 // packs/ntnx-infiltration/checks/index.ts — each check's `captured` return.

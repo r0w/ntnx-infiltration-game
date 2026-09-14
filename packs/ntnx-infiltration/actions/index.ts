@@ -1,3 +1,4 @@
+import { ensureRecoveryPoint } from '../acts/recovery';
 import type { ActionContext } from '@ntnx-game/engine';
 import type { NutanixSdk } from '@ntnx-game/nutanix';
 import { deleteV4Entity, listAllSdk } from '../acts/helpers';
@@ -39,6 +40,7 @@ async function deleteVM(ctx: ActionContext): Promise<void> {
     ctx.logger.info('deleteVM: no VM found to delete', { name });
     return;
   }
+  await ensureRecoveryPoint(ctx, vm.extId);
   await deleteV4Entity(ctx, '/api/vmm/v4.0/ahv/config/vms', vm.extId);
   ctx.logger.info('deleteVM: VM deleted', { name });
 }
@@ -56,7 +58,7 @@ async function restoreVM(ctx: ActionContext): Promise<void> {
     ctx.logger.info('mock: restoreVM cleared deleted mark', { name });
     return;
   }
-  ctx.logger.warn('restoreVM live-mode handler not implemented yet', { name });
+  ctx.logger.info('restoreVM: waiting for the player or auto-play to restore the VM', { name });
 }
 
 /**
@@ -122,18 +124,7 @@ async function createRecoveryPoint(ctx: ActionContext): Promise<void> {
     ctx.logger.info('createRecoveryPoint: no VMUUID captured yet, skipping');
     return;
   }
-  try {
-    await ctx.nutanix.rest.request(
-      'POST',
-      '/api/dataprotection/v4.0/config/recovery-points',
-      { vmRecoveryPoints: [{ vmExtId: vmUuid }] },
-    );
-    ctx.logger.info('createRecoveryPoint: snapshot created', { vmUuid });
-  } catch (err) {
-    ctx.logger.warn('createRecoveryPoint: snapshot failed', {
-      err: String(err).slice(0, 200),
-    });
-  }
+  await ensureRecoveryPoint(ctx, vmUuid);
 }
 
 export const actions = {

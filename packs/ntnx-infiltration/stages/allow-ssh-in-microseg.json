@@ -22,5 +22,8 @@
   },
   "needs": [
     "Trigram"
+  ],
+  "dependsOn": [
+    "create-microseg-policy"
   ]
 }
