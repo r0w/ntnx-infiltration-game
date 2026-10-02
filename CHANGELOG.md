@@ -13,6 +13,10 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ## [Unreleased]
 
+### Changed
+
+- The report stage accepts a 03:00 schedule regardless of the report timezone.
+
 ## [1.1.0] - 2026-09-13
 
 ### Added
