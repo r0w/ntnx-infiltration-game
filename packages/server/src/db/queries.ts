@@ -27,6 +27,7 @@ export interface SessionRow {
   pending_check_retry_variable: string | null;
   pending_check_retry_offset: number | null;
   stage_entered_at: number | null;
+  help_enabled: number | null;
 }
 
 export interface SessionRecord {
@@ -50,6 +51,9 @@ export interface SessionRecord {
   /** When the session entered its current stage segment (ms epoch). Reset on
    *  every current_stage transition; backs per-stage wall-time telemetry. */
   stageEnteredAt: number | null;
+  /** Per-session override of the step-by-step help: `null` = follow the
+   *  global flag, `true` / `false` = forced on / off for this player. */
+  helpEnabled: boolean | null;
 }
 
 function rowToSession(row: SessionRow): SessionRecord {
@@ -83,6 +87,8 @@ function rowToSession(row: SessionRow): SessionRecord {
           }
         : null,
     stageEnteredAt: row.stage_entered_at,
+    helpEnabled:
+      row.help_enabled === null || row.help_enabled === undefined ? null : row.help_enabled === 1,
   };
 }
 
@@ -181,6 +187,15 @@ export class SessionQueries {
       });
   }
 
+  /** Set (`true` / `false`) or clear (`null` = follow the global flag) the
+   *  per-session help override. Returns the number of rows changed. */
+  setHelpEnabled(id: string, enabled: boolean | null): number {
+    const r = this.db
+      .prepare('UPDATE sessions SET help_enabled = $v WHERE id = $id')
+      .run({ $id: id, $v: enabled === null ? null : enabled ? 1 : 0 });
+    return Number(r.changes);
+  }
+
   markFinished(id: string): void {
     this.db
       .prepare('UPDATE sessions SET finished_at = $ts WHERE id = $id')
@@ -219,6 +234,11 @@ export class SessionQueries {
            s.started_at AS started_at,
            s.finished_at AS finished_at,
            s.locale AS locale,
+           s.help_enabled AS help_enabled,
+           (SELECT COUNT(*) FROM help_usage
+              WHERE session_id = s.id) AS help_uses,
+           (SELECT COALESCE(SUM(penalty_sec), 0) FROM help_usage
+              WHERE session_id = s.id) AS help_penalty_sec,
            (SELECT value FROM session_variables
               WHERE session_id = s.id AND name = 'Trigram') AS trigram_var,
            (SELECT value FROM session_variables
@@ -250,6 +270,9 @@ export class SessionQueries {
         started_at: number;
         finished_at: number | null;
         locale: string;
+        help_enabled: number | null;
+        help_uses: number;
+        help_penalty_sec: number;
         trigram_var: string | null;
         username_var: string | null;
         pin_var: string | null;
@@ -271,6 +294,9 @@ export class SessionQueries {
       startedAt: r.started_at,
       finishedAt: r.finished_at,
       lastActivityAt: r.last_activity_at,
+      helpUses: r.help_uses,
+      helpPenaltySec: r.help_penalty_sec,
+      helpEnabled: r.help_enabled === null ? null : r.help_enabled === 1,
       locale: r.locale,
       lastFailStage: r.last_fail_stage,
       lastFailDetail: r.last_fail_detail,
@@ -301,13 +327,21 @@ export class SessionQueries {
            (SELECT COUNT(*) FROM stage_history
               WHERE session_id = s.id AND status = 'disabled') AS stages_disabled,
            (SELECT MAX(checked_at) FROM stage_history
-              WHERE session_id = s.id) AS last_activity_at
+              WHERE session_id = s.id) AS last_activity_at,
+           (SELECT COUNT(*) FROM help_usage
+              WHERE session_id = s.id) AS help_uses,
+           (SELECT COALESCE(SUM(penalty_sec), 0) FROM help_usage
+              WHERE session_id = s.id) AS help_penalty_sec,
+           -- Finish time + the help penalties: what finished players are
+           -- ranked on. NULL while unfinished (those tie here, as before).
+           (s.finished_at + 1000 * (SELECT COALESCE(SUM(penalty_sec), 0) FROM help_usage
+              WHERE session_id = s.id)) AS finish_effective_at
          FROM sessions s
          WHERE s.pack_id = $packId
          ORDER BY
            CASE WHEN s.finished_at IS NOT NULL THEN 0 ELSE 1 END ASC,
            stages_passed DESC,
-           s.finished_at ASC,
+           finish_effective_at ASC,
            last_activity_at DESC,
            s.started_at ASC`,
       )
@@ -321,6 +355,8 @@ export class SessionQueries {
         stages_passed: number;
         stages_disabled: number;
         last_activity_at: number | null;
+        help_uses: number;
+        help_penalty_sec: number;
       }>;
     return rows.map((r) => ({
       sessionId: r.session_id,
@@ -332,6 +368,8 @@ export class SessionQueries {
       startedAt: r.started_at,
       finishedAt: r.finished_at,
       lastActivityAt: r.last_activity_at,
+      helpUses: r.help_uses,
+      helpPenaltySec: r.help_penalty_sec,
     }));
   }
 }
@@ -349,12 +387,18 @@ export interface ScoreboardRow {
   startedAt: number;
   finishedAt: number | null;
   lastActivityAt: number | null;
+  /** Stages whose step-by-step help the player displayed. */
+  helpUses: number;
+  /** Total help penalty in seconds. Added to the finish time in the ranking. */
+  helpPenaltySec: number;
 }
 
 export interface AdminSessionRow extends ScoreboardRow {
   /** Captured PIN (plaintext in `session_variables`). Admin-only. */
   pin: string | null;
   locale: string;
+  /** Per-session help override: `null` = follows the global flag. */
+  helpEnabled: boolean | null;
   /** Latest 'failed' stage_history row. Self-cleans on pass (the upsert
    *  flips the row to 'passed'), but an admin-skip can leave a stale one —
    *  the route only surfaces it when it matches the stage being played. */
@@ -438,6 +482,81 @@ export class VariableQueries {
     return rows
       .map((r) => Number.parseInt(parseJsonString(r.value) ?? '', 10))
       .filter((n) => Number.isFinite(n));
+  }
+}
+
+export interface HelpUsageRow {
+  stageName: string;
+  /** Penalty frozen when the help was first displayed. */
+  penaltySec: number;
+  usedAt: number;
+}
+
+/**
+ * Step-by-step help usage: one row per (session, stage) whose help the
+ * player displayed. The row doubles as the "already charged" marker, so a
+ * stage is billed once no matter how often its help is shown again.
+ */
+export class HelpUsageQueries {
+  constructor(private readonly db: Database) {}
+
+  get(sessionId: string, stageName: string): HelpUsageRow | null {
+    const row = this.db
+      .prepare(
+        'SELECT stage_name, penalty_sec, used_at FROM help_usage WHERE session_id = $sid AND stage_name = $stage',
+      )
+      .get({ $sid: sessionId, $stage: stageName }) as
+      | { stage_name: string; penalty_sec: number; used_at: number }
+      | null;
+    return row ? { stageName: row.stage_name, penaltySec: row.penalty_sec, usedAt: row.used_at } : null;
+  }
+
+  /**
+   * Record the first display of a stage's help. Insert-or-ignore: returns
+   * `true` when the row was created (the player is charged now), `false`
+   * when the stage was already billed (the stored penalty is kept).
+   */
+  record(sessionId: string, stageName: string, penaltySec: number, usedAt = Date.now()): boolean {
+    const r = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO help_usage (session_id, stage_name, penalty_sec, used_at)
+         VALUES ($sid, $stage, $penalty, $at)`,
+      )
+      .run({ $sid: sessionId, $stage: stageName, $penalty: penaltySec, $at: usedAt });
+    return Number(r.changes) > 0;
+  }
+
+  list(sessionId: string): HelpUsageRow[] {
+    const rows = this.db
+      .prepare(
+        'SELECT stage_name, penalty_sec, used_at FROM help_usage WHERE session_id = $sid ORDER BY used_at ASC',
+      )
+      .all({ $sid: sessionId }) as Array<{ stage_name: string; penalty_sec: number; used_at: number }>;
+    return rows.map((r) => ({ stageName: r.stage_name, penaltySec: r.penalty_sec, usedAt: r.used_at }));
+  }
+
+  /** Every usage row of a pack, grouped by session id. Backs the /admin detail. */
+  listByPack(packId: string): Map<string, HelpUsageRow[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT h.session_id, h.stage_name, h.penalty_sec, h.used_at
+         FROM help_usage h JOIN sessions s ON s.id = h.session_id
+         WHERE s.pack_id = $packId
+         ORDER BY h.used_at ASC`,
+      )
+      .all({ $packId: packId }) as Array<{
+        session_id: string;
+        stage_name: string;
+        penalty_sec: number;
+        used_at: number;
+      }>;
+    const bySession = new Map<string, HelpUsageRow[]>();
+    for (const r of rows) {
+      const list = bySession.get(r.session_id) ?? [];
+      list.push({ stageName: r.stage_name, penaltySec: r.penalty_sec, usedAt: r.used_at });
+      bySession.set(r.session_id, list);
+    }
+    return bySession;
   }
 }
 
@@ -742,6 +861,8 @@ export interface PackOverlayRow {
   active: boolean | null;
   /** null = use the JSON default; boolean = override. */
   adminGate: boolean | null;
+  /** Step-by-step help penalty in seconds. null = use the JSON default. */
+  helpPenaltySec: number | null;
 }
 
 /**
@@ -756,17 +877,19 @@ export class PackOverlayQueries {
   list(packId: string): PackOverlayRow[] {
     const rows = this.db
       .prepare(
-        `SELECT stage_name, active, admin_gate FROM pack_overlay WHERE pack_id = $pid`,
+        `SELECT stage_name, active, admin_gate, help_penalty_sec FROM pack_overlay WHERE pack_id = $pid`,
       )
       .all({ $pid: packId }) as Array<{
         stage_name: string;
         active: number | null;
         admin_gate: number | null;
+        help_penalty_sec: number | null;
       }>;
     return rows.map((r) => ({
       stageName: r.stage_name,
       active: r.active === null ? null : r.active === 1,
       adminGate: r.admin_gate === null ? null : r.admin_gate === 1,
+      helpPenaltySec: r.help_penalty_sec,
     }));
   }
 
@@ -790,13 +913,32 @@ export class PackOverlayQueries {
          ON CONFLICT(pack_id, stage_name) DO UPDATE SET ${col} = excluded.${col}`,
       )
       .run({ $pid: packId, $sid: stageName, $v: v });
-    // Garbage-collect rows that ended up with NO overrides — keeps the
-    // table sparse and `list()` cheap.
+    this.dropEmptyRow(packId, stageName);
+  }
+
+  /**
+   * Set (seconds) or clear (`null` = the JSON value) the step-by-step help
+   * penalty override of a stage. The other fields of the row are preserved.
+   */
+  setHelpPenalty(packId: string, stageName: string, seconds: number | null): void {
+    this.db
+      .prepare(
+        `INSERT INTO pack_overlay (pack_id, stage_name, help_penalty_sec)
+         VALUES ($pid, $sid, $v)
+         ON CONFLICT(pack_id, stage_name) DO UPDATE SET help_penalty_sec = excluded.help_penalty_sec`,
+      )
+      .run({ $pid: packId, $sid: stageName, $v: seconds });
+    this.dropEmptyRow(packId, stageName);
+  }
+
+  /** Garbage-collect a row that ended up with NO overrides: keeps the
+   *  table sparse and `list()` cheap. */
+  private dropEmptyRow(packId: string, stageName: string): void {
     this.db
       .prepare(
         `DELETE FROM pack_overlay
            WHERE pack_id = $pid AND stage_name = $sid
-             AND active IS NULL AND admin_gate IS NULL`,
+             AND active IS NULL AND admin_gate IS NULL AND help_penalty_sec IS NULL`,
       )
       .run({ $pid: packId, $sid: stageName });
   }
@@ -810,18 +952,19 @@ export class PackOverlayQueries {
   replaceAll(packId: string, rows: readonly PackOverlayRow[]): void {
     const del = this.db.prepare(`DELETE FROM pack_overlay WHERE pack_id = $pid`);
     const ins = this.db.prepare(
-      `INSERT INTO pack_overlay (pack_id, stage_name, active, admin_gate)
-       VALUES ($pid, $sid, $a, $g)`,
+      `INSERT INTO pack_overlay (pack_id, stage_name, active, admin_gate, help_penalty_sec)
+       VALUES ($pid, $sid, $a, $g, $h)`,
     );
     this.db.transaction(() => {
       del.run({ $pid: packId });
       for (const r of rows) {
-        if (r.active === null && r.adminGate === null) continue; // nothing to store
+        if (r.active === null && r.adminGate === null && r.helpPenaltySec === null) continue; // nothing to store
         ins.run({
           $pid: packId,
           $sid: r.stageName,
           $a: r.active === null ? null : r.active ? 1 : 0,
           $g: r.adminGate === null ? null : r.adminGate ? 1 : 0,
+          $h: r.helpPenaltySec,
         });
       }
     })();

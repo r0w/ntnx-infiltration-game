@@ -2,11 +2,13 @@ import type {
   CreateSessionRequest,
   CreateSessionResponse,
   DisabledStage,
+  HelpResponse,
+  HelpSnapshot,
   MessageUnit,
   SubmitInputRequest,
 } from '@ntnx-game/shared';
 
-export type { DisabledStage };
+export type { DisabledStage, HelpResponse, HelpSnapshot };
 
 export interface AdvanceResponse {
   kind: 'units' | 'awaiting-input' | 'finished' | 'switch-session' | 'gated';
@@ -39,6 +41,9 @@ export interface SessionSnapshot {
   pendingCheck?: { stageName: string } | null;
   locale: string;
   finishedAt: number | null;
+  /** Step-by-step help state; polled by the heartbeat so an operator toggle
+   *  reaches the player without a reload. */
+  help?: HelpSnapshot;
   replay?: MessageUnit[] | null;
 }
 
@@ -79,6 +84,15 @@ async function adminPost<T>(path: string, password: string, body?: unknown): Pro
     method: 'POST',
     headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return handle<T>(res);
+}
+
+async function adminPut<T>(path: string, password: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'PUT',
+    headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   });
   return handle<T>(res);
 }
@@ -142,6 +156,10 @@ export interface PackInfo {
     requires: string[];
     hasCheck: boolean;
     captures: string[];
+    /** The stage ships a step-by-step help block. */
+    hasHelp: boolean;
+    /** What the first display of that help costs, in seconds (0 = free). */
+    helpPenaltySec: number;
   }>;
 }
 
@@ -164,6 +182,11 @@ export interface ScoreboardEntry {
   startedAt: number;
   finishedAt: number | null;
   lastActivityAt: number | null;
+  /** Stages whose step-by-step help the player displayed (absent from
+   *  peers running an older version). */
+  helpUses?: number;
+  /** Total help penalty in seconds, added to the finish time in the ranking. */
+  helpPenaltySec?: number;
   status: 'playing' | 'finished';
 }
 
@@ -244,6 +267,20 @@ export interface AdminUserEntry {
   locale: string;
   /** Last failed check on the stage being played; null once it passes. */
   lastFail: { stage: string; detail: string | null; at: number } | null;
+  /** Per-player help override: `null` follows the global switch. */
+  helpEnabled: boolean | null;
+  /** Effective help flag (the override if set, else the global switch). */
+  helpEffective: boolean;
+  /** Stages whose help the player displayed. */
+  helpUses: number;
+  /** Total penalty in seconds. */
+  helpPenaltySec: number;
+  helpStages: Array<{ stage: string; penaltySec: number }>;
+}
+
+export interface AdminHelpStatus {
+  /** Global switch (off until the operator turns it on). */
+  enabled: boolean;
 }
 
 /** One row of the append-only check-attempt log (admin Logs tab). */
@@ -300,6 +337,14 @@ export interface AdminPackStageEntry {
   /** Caps the stage needs (after `requiresOnOther` overlay) that aren't
    *  active on the server — non-empty → gate will skip the stage. */
   missingCapabilities: string[];
+  /** The stage carries a step-by-step help block. */
+  hasHelp: boolean;
+  /** Seconds the first display of the help adds to a player's finish time
+   *  (operator override applied). Meaningless when `hasHelp` is false. */
+  helpPenaltySec: number;
+  /** The same value as declared in the pack files. */
+  helpPenaltyDefaultSec: number;
+  helpPenaltyOverridden: boolean;
 }
 
 export interface AdminPackPayload {
@@ -383,6 +428,13 @@ export const api = {
   /** Phase 2 of the two-phase check: run the check deferred by submitInput. */
   resolveCheck: (id: string) =>
     post<AdvanceResponse>(`/session/${id}/resolve-check`),
+  /**
+   * Show the step-by-step help of the stage being played. A first display
+   * that costs time answers `confirm-required` until re-posted with
+   * `confirm: true`; showing it again is free. See routes/stage.ts.
+   */
+  requestHelp: (id: string, confirm = false, penaltySec?: number) =>
+    post<HelpResponse>(`/session/${id}/help`, { confirm, penaltySec }),
   skipTo: (id: string, stageName: string) =>
     post<{ skipped: string[]; finalStage: string | null }>(
       `/session/${id}/skip-to/${encodeURIComponent(stageName)}`,
@@ -477,6 +529,13 @@ export const api = {
       password,
       { value, cascade },
     ),
+  /** `null` goes back to the cost declared in the pack files. */
+  adminHelpPenaltySet: (password: string, stageName: string, seconds: number | null) =>
+    adminPut<{ ok: true; stageName: string; seconds: number; overridden: boolean }>(
+      `/admin/pack/stages/${encodeURIComponent(stageName)}/help-penalty`,
+      password,
+      { seconds },
+    ),
   adminPackConfig: (password: string) =>
     adminGet<AdminPackConfigPayload>('/admin/pack/config', password),
   adminPackConfigImport: (password: string, config: string) =>
@@ -487,6 +546,17 @@ export const api = {
     adminGet<AdminPackTogglePreview>(
       `/admin/pack/preview-disable/${encodeURIComponent(stageName)}`,
       password,
+    ),
+  adminHelpStatus: (password: string) =>
+    adminGet<AdminHelpStatus>('/admin/help', password),
+  adminHelpSet: (password: string, enabled: boolean) =>
+    adminPut<{ ok: true; enabled: boolean }>('/admin/help', password, { enabled }),
+  /** `null` clears the override: the player follows the global switch again. */
+  adminUserHelpSet: (password: string, sessionId: string, enabled: boolean | null) =>
+    adminPut<{ ok: true; sessionId: string; enabled: boolean | null }>(
+      `/admin/users/${sessionId}/help`,
+      password,
+      { enabled },
     ),
   adminLunchStatus: (password: string) =>
     adminGet<AdminLunchStatus>('/admin/lunch', password),

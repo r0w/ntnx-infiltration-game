@@ -20,6 +20,9 @@ import {
   type AdminUserEntry,
 } from './api';
 import { EMAIL_RE } from '@ntnx-game/shared';
+import { HelpCostCell } from './HelpCostCell';
+import { HelpMenu } from './HelpMenu';
+import { formatPenalty } from './helpLabels';
 import { ConfirmModal, Modal } from './Modal';
 import { stageState, stateNote, STATE_ORDER, type StageState } from './pack-state';
 
@@ -160,6 +163,10 @@ function AdminDashboard({
   const [gates, setGates] = useState<AdminGateEntry[] | null>(null);
   const [lunch, setLunch] = useState<AdminLunchStatus | null>(null);
   const [lunchBusy, setLunchBusy] = useState(false);
+  // Global switch of the step-by-step help (off until the operator turns it
+  // on). A player's own override, set from the table, wins over it.
+  const [helpGlobal, setHelpGlobal] = useState<boolean | null>(null);
+  const [helpBusy, setHelpBusy] = useState(false);
   // Intelligent Ops state, page-wide: create-report hard-depends on it and
   // enabling is a manual Prism step, so the operator must see the warning
   // from any tab (same idea as the lunch strip), not just Cluster.
@@ -231,13 +238,14 @@ function AdminDashboard({
 
   const refresh = useCallback(async () => {
     try {
-      const [usersPayload, gatesPayload, packPayload, lunchPayload, selfPayload, peersPayload] = await Promise.all([
+      const [usersPayload, gatesPayload, packPayload, lunchPayload, selfPayload, peersPayload, helpPayload] = await Promise.all([
         api.adminUsers(password),
         api.adminGates(password),
         api.adminPack(password),
         api.adminLunchStatus(password),
         api.adminSelfLabel(password),
         api.adminPeers(password),
+        api.adminHelpStatus(password),
       ]);
       setEntries(usersPayload.entries);
       setGates(gatesPayload.entries);
@@ -245,6 +253,7 @@ function AdminDashboard({
       setPackBrokenCount(packPayload.brokenCount);
       setPackMeta({ clusterProfile: packPayload.clusterProfile, mode: packPayload.mode });
       setLunch(lunchPayload);
+      setHelpGlobal(helpPayload.enabled);
       setSelfLabel(selfPayload.label);
       setHasPeers(peersPayload.entries.length > 0);
       setError(null);
@@ -329,13 +338,64 @@ function AdminDashboard({
     }
   };
 
+  const toggleHelp = async () => {
+    if (helpGlobal === null) return;
+    setHelpBusy(true);
+    try {
+      const next = !helpGlobal;
+      await api.adminHelpSet(password, next);
+      setHelpGlobal(next);
+      void refresh();
+    } catch (err) {
+      setError(`help toggle failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setHelpBusy(false);
+    }
+  };
+
+  // `null` clears the player's override: they follow the global switch again.
+  const setUserHelp = async (entry: AdminUserEntry, value: boolean | null) => {
+    try {
+      await api.adminUserHelpSet(password, entry.sessionId, value);
+      setEntries((prev) =>
+        (prev ?? []).map((e) =>
+          e.sessionId === entry.sessionId
+            ? { ...e, helpEnabled: value, helpEffective: value ?? helpGlobal ?? false }
+            : e,
+        ),
+      );
+      void refresh();
+    } catch (err) {
+      setError(`help override failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
   // Stages whose live value differs from what their pack file declares.
   // Counts real drift, not overlay rows: an override that happens to match
   // the default is invisible to the operator, so it must not raise a flag.
   const packDriftCount =
     packStages === null
       ? null
-      : packStages.filter((s) => s.activeOverridden || s.adminGateOverridden).length;
+      : packStages.filter(
+          (s) => s.activeOverridden || s.adminGateOverridden || s.helpPenaltyOverridden,
+        ).length;
+
+  // Resolves true once the server took the new cost, so the editor can close.
+  // `null` goes back to the cost declared in the pack files.
+  const setHelpPenalty = async (stage: AdminPackStageEntry, seconds: number | null) => {
+    setPackBusyId(stage.stageName);
+    try {
+      await api.adminHelpPenaltySet(password, stage.stageName, seconds);
+      void refresh();
+      return true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`pack help cost failed: ${msg}`);
+      return false;
+    } finally {
+      setPackBusyId(null);
+    }
+  };
 
   const togglePackField = async (
     stage: AdminPackStageEntry,
@@ -572,6 +632,25 @@ function AdminDashboard({
           </div>
         )}
 
+        {helpGlobal !== null && (
+          <div className="admin-header-group admin-header-group-actions">
+            <button
+              type="button"
+              className={`admin-lunch-btn ${helpGlobal ? 'admin-help-btn-on' : ''}`}
+              disabled={helpBusy}
+              onClick={() => void toggleHelp()}
+              title={
+                helpGlobal
+                  ? 'step-by-step help is ON for every player not forced off — click to switch it off'
+                  : 'step-by-step help is OFF for every player not forced on — click to switch it on'
+              }
+            >
+              <span className="admin-lunch-icon" aria-hidden="true">💡</span>
+              {helpBusy ? '…' : helpGlobal ? 'help: on' : 'help: off'}
+            </button>
+          </div>
+        )}
+
         <div className="admin-header-group admin-header-group-links">
           <Link to="/" className="admin-header-link" target="_blank" rel="noreferrer">
             game<span className="admin-header-link-arrow" aria-hidden="true">↗</span>
@@ -773,6 +852,8 @@ function AdminDashboard({
                 <th>PIN</th>
                 <th>Stage</th>
                 <th>Progress</th>
+                <th>Help</th>
+                <th>Penalties</th>
                 <th>Started</th>
                 <th>Session</th>
                 <th aria-label="actions" />
@@ -829,6 +910,34 @@ function AdminDashboard({
                       : `${e.stagesPassed} passed / ${e.totalStages} total`
                   }>
                     {e.stagesPassed} / {e.effectiveTotalStages}
+                  </td>
+                  <td>
+                    <HelpMenu
+                      value={e.helpEnabled}
+                      globalOn={helpGlobal ?? false}
+                      label={`help for ${e.trigram ?? e.sessionId.slice(0, 8)}`}
+                      onChange={(value) => void setUserHelp(e, value)}
+                    />
+                  </td>
+                  <td>
+                    {e.helpUses > 0 ? (
+                      <span
+                        className="admin-penalties c-yellow"
+                        title={e.helpStages
+                          .map((h) => `${h.stage}${h.penaltySec > 0 ? ` (${formatPenalty(h.penaltySec)})` : ''}`)
+                          .join(', ')}
+                      >
+                        {e.helpUses}
+                        {e.helpPenaltySec > 0 && (
+                          <>
+                            <span className="c-dim"> | </span>
+                            {formatPenalty(e.helpPenaltySec)}
+                          </>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="c-dim">—</span>
+                    )}
                   </td>
                   <td className="c-dim">{fmtAge(e.startedAt)}</td>
                   <td className="admin-td-sid c-dim" title={e.sessionId}>
@@ -914,6 +1023,7 @@ function AdminDashboard({
             busyId={packBusyId}
             onTogglePackField={togglePackField}
             onRequestDisable={requestDisable}
+            onSetHelpPenalty={setHelpPenalty}
           />
         </section>
       )}
@@ -1463,6 +1573,7 @@ function PackEditor({
   busyId,
   onTogglePackField,
   onRequestDisable,
+  onSetHelpPenalty,
 }: {
   stages: AdminPackStageEntry[] | null;
   meta: { clusterProfile: 'hpoc' | 'other'; mode: 'mock' | 'test' | 'live' } | null;
@@ -1473,6 +1584,7 @@ function PackEditor({
     value: boolean,
   ) => void;
   onRequestDisable: (s: AdminPackStageEntry) => void;
+  onSetHelpPenalty: (s: AdminPackStageEntry, seconds: number | null) => Promise<boolean>;
 }) {
   const [filter, setFilter] = useState<StageState | 'all'>('all');
   const [query, setQuery] = useState('');
@@ -1601,6 +1713,7 @@ function PackEditor({
               <th>stage</th>
               <th>active</th>
               <th>gate</th>
+              <th>help cost</th>
               <th>vars</th>
               <th>requires stages</th>
             </tr>
@@ -1671,6 +1784,13 @@ function PackEditor({
                       {s.adminGateOverridden && <span className="pack-toggle-mark">·</span>}
                     </button>
                   </td>
+                  <td>
+                    <HelpCostCell
+                      stage={s}
+                      busy={busy}
+                      onSave={(seconds) => onSetHelpPenalty(s, seconds)}
+                    />
+                  </td>
                   <td className="pack-vars c-dim">
                     {s.needs.length === 0 && s.captures.length === 0 ? (
                       <span className="pack-vars-none">—</span>
@@ -1712,7 +1832,7 @@ function PackEditor({
             })}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={6} className="pack-empty">
+                <td colSpan={7} className="pack-empty">
                   no stage matches. <button type="button" className="app-reset" onClick={() => { setFilter('all'); setQuery(''); }}>show all {rows.length}</button>
                 </td>
               </tr>

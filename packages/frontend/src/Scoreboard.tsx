@@ -4,6 +4,7 @@ import {
   api,
   type ScoreboardEntry,
 } from './api';
+import { formatPenalty } from './helpLabels';
 
 const REFRESH_MS = 5000;
 // Legacy Python scoreboard fit up to 8 rows per column and added columns as
@@ -223,6 +224,11 @@ function AgentCard({
       : entry.lastActivityAt !== null && idleMs > 60_000
         ? `${fmtDuration(now - entry.startedAt)} · idle ${fmtDuration(idleMs)}`
         : fmtDuration(now - entry.startedAt);
+  // Step-by-step help is part of the score: each stage whose help the player
+  // displayed is counted, and its penalty (if any) is added to the finish time
+  // in the ranking. The badge keeps the cost visible next to the clock.
+  const helpUses = entry.helpUses ?? 0;
+  const helpCost = formatPenalty(entry.helpPenaltySec ?? 0);
   return (
     <div className={`agent-card agent-${entry.status} agent-rank-${rankTier(entry.rank)}`}>
       <div className="agent-topline">
@@ -254,7 +260,24 @@ function AgentCard({
       </div>
       <div className="agent-meta">
         <span className="agent-stage">{stageLabel}</span>
-        <span className="agent-time">{timeLabel}</span>
+        <span className="agent-time">
+          {helpUses > 0 && (
+            <>
+              <span
+                className="agent-help"
+                title={
+                  `step-by-step help used on ${helpUses} stage${helpUses === 1 ? '' : 's'}` +
+                  (helpCost ? ` — ${helpCost} added to the finish time` : '')
+                }
+              >
+                💡×{helpUses}
+                {helpCost && ` ${helpCost}`}
+              </span>
+              {' · '}
+            </>
+          )}
+          {timeLabel}
+        </span>
       </div>
     </div>
   );
@@ -337,6 +360,10 @@ function makeDemoPayload(count: number, combined: boolean): DisplayPayload {
       startedAt,
       finishedAt,
       lastActivityAt,
+      // Demo only: a few agents lean on the step-by-step help so the badge
+      // (with and without a time penalty) can be checked on the projector.
+      helpUses: i % 4 === 1 ? 2 : i % 4 === 3 ? 1 : 0,
+      helpPenaltySec: i % 4 === 1 ? 270 : 0,
       status: finishedAt !== null ? 'finished' : 'playing',
       peerLabel,
     };

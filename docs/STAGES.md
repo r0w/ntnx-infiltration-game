@@ -6,6 +6,7 @@ The 39 stages of the `ntnx-infiltration` pack, in play order.
 - `order` is the position in `pack.json.stages[]` (1-indexed reading order). Reordering a stage means moving its name in that array; existing sessions stay attached to the name, not the position.
 - `name` is the canonical identifier (kebab-case). It is the field used everywhere: filename `<name>.json`, SQLite columns (`stage_name`), API payload, `pack.json.stages[]`, logs, DevPanel.
 - `check.fn` is the check function registered in `packs/ntnx-infiltration/checks/index.ts`. A dash means the stage is narrative or input-only (no validation against the cluster).
+- Stages **18** (`create-microseg-policy`, +2 min), **19** (`allow-ssh-in-microseg`, +3 min) and **33** (`create-ncm-playbook`, +2 min 30 s) carry a step-by-step help block (`help` + `helpPenaltySec` in their JSON). The penalty is what the first display adds to the finish time.
 
 ## Stages
 

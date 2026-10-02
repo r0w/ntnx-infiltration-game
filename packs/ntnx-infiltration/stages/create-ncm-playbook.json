@@ -23,5 +23,15 @@
   },
   "needs": [
     "Trigram"
-  ]
+  ],
+  "help": [
+    "stage-033.help-01",
+    "stage-033.help-02",
+    "stage-033.help-03",
+    "stage-033.help-04",
+    "stage-033.help-05",
+    "stage-033.help-06",
+    "stage-033.help-07"
+  ],
+  "helpPenaltySec": 150
 }

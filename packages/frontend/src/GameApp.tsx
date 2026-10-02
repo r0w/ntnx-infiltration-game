@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { api, ApiError, type PackInfo } from './api';
 import { DevPanel } from './DevPanel';
-import { FauxTerminal } from './FauxTerminal';
+import { FauxTerminal, type FauxTerminalHelp } from './FauxTerminal';
 import { LoginForm } from './LoginForm';
 import { ConfirmModal } from './Modal';
 import { useSession, CONTINUE_VAR, AUTOFILLABLE_VARS } from './useSession';
@@ -215,6 +215,19 @@ export function GameApp() {
     !['lore', 'login', 'recovery-gate'].includes(session.currentStage);
   const autoPlayVisible = devToolsAllowed && identityCaptured;
 
+  // Step-by-step help for the stage being played: usable when it is switched
+  // on for this player (global switch, or the operator's per-player override)
+  // and the stage ships a help block. The server enforces both anyway.
+  const helpStage = session.awaitingStageName
+    ? pack?.stages.find((s) => s.name === session.awaitingStageName)
+    : undefined;
+  const help: FauxTerminalHelp = {
+    available: session.helpEnabled && !!helpStage?.hasHelp,
+    penaltySec: helpStage?.helpPenaltySec ?? 0,
+    used: !!session.awaitingStageName && session.helpUsedStages.includes(session.awaitingStageName),
+    onRequest: session.askHelp,
+  };
+
   // Force autoplay off whenever the toggle isn't visible — mode flipped to
   // live, identity reset (logout / switch agent), etc. should never leave a
   // stale "armed" state behind.
@@ -274,6 +287,7 @@ export function GameApp() {
         onAutoPlayOk={handleAutoPlayOk}
         onAdvance={handleAdvance}
         onSwitchIdentity={inIdentityCapture ? handleSwitchIdentity : undefined}
+        help={help}
       />
       {session.error && <div className="app-error">{session.error}</div>}
       {autoPlayError && <div className="app-error">{autoPlayError}</div>}

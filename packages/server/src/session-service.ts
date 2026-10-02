@@ -15,12 +15,13 @@ import type {
 } from '@ntnx-game/engine';
 import { ActionRegistry, StageRunner, resolveKey } from '@ntnx-game/engine';
 import { withMockOverlay, withVariableInterpolation } from '@ntnx-game/nutanix';
-import type { DisabledStage, MessageUnit } from '@ntnx-game/shared';
+import type { DisabledStage, HelpResponse, HelpSnapshot, MessageUnit } from '@ntnx-game/shared';
 import {
   AttemptQueries,
   ClusterCacheQueries,
   ClusterConfigQueries,
   GateUnlockQueries,
+  HelpUsageQueries,
   HistoryQueries,
   MockOverlayQueries,
   PackOverlayQueries,
@@ -30,6 +31,7 @@ import {
   type SessionRecord,
 } from './db/queries';
 import { applyOverlay } from './pack-overlay';
+import { readHelpEnabledGlobally, resolveHelpEnabled, writeHelpEnabledGlobally } from './help';
 import type { Telemetry } from './telemetry';
 import {
   clusterCacheForSession,
@@ -145,6 +147,7 @@ export class SessionService {
   readonly variables: VariableQueries;
   readonly history: HistoryQueries;
   readonly attempts: AttemptQueries;
+  readonly helpUsage: HelpUsageQueries;
   readonly clusterCache: ClusterCacheQueries;
   readonly clusterConfig: ClusterConfigQueries;
   readonly mockOverlay: MockOverlayQueries;
@@ -189,6 +192,7 @@ export class SessionService {
     this.variables = new VariableQueries(deps.db);
     this.history = new HistoryQueries(deps.db);
     this.attempts = new AttemptQueries(deps.db);
+    this.helpUsage = new HelpUsageQueries(deps.db);
     this.clusterCache = new ClusterCacheQueries(deps.db);
     this.clusterConfig = new ClusterConfigQueries(deps.db);
     this.mockOverlay = new MockOverlayQueries(deps.db);
@@ -510,6 +514,81 @@ export class SessionService {
   capturedTrigram(sessionId: string): string | null {
     const v = this.variables.all(sessionId).Trigram;
     return typeof v === 'string' && v.length > 0 ? v : null;
+  }
+
+  // ---------------- step-by-step help ----------------
+
+  /** Global help flag (operator switch in /admin). Off until turned on. */
+  isHelpEnabledGlobally(): boolean {
+    return readHelpEnabledGlobally(this.clusterConfig);
+  }
+
+  setHelpEnabledGlobally(enabled: boolean): void {
+    writeHelpEnabledGlobally(this.clusterConfig, enabled);
+  }
+
+  /** Effective flag for one session: the player's override wins over the global flag. */
+  isHelpEnabledFor(session: SessionRecord): boolean {
+    return resolveHelpEnabled(session.helpEnabled, this.isHelpEnabledGlobally());
+  }
+
+  /** Force help on / off for one player, or clear the override with `null`. */
+  setSessionHelp(sessionId: string, enabled: boolean | null): void {
+    if (this.sessions.setHelpEnabled(sessionId, enabled) === 0) {
+      throw new HttpError(404, 'Session not found');
+    }
+  }
+
+  helpSnapshot(session: SessionRecord): HelpSnapshot {
+    return {
+      enabled: this.isHelpEnabledFor(session),
+      usedStages: this.helpUsage.list(session.id).map((r) => r.stageName),
+    };
+  }
+
+  /**
+   * Display the step-by-step help of the stage the player is awaiting input
+   * in. The first display is billed once per (session, stage): the stage's
+   * penalty is frozen in `help_usage` and added to the finish time by the
+   * ranking; showing it again is free. A first display that costs time must
+   * be confirmed explicitly, so a stray click never bills the player. The
+   * server enforces the on/off flags; the UI only hides what it cannot use.
+   * The operator can change a stage's penalty live: a confirmation that names
+   * an amount (`confirmedPenaltySec`) only counts if it is still the current
+   * cost, so a player never pays more than the figure they agreed to.
+   * Never touches the awaiting / pending-check state.
+   */
+  requestHelp(
+    sessionId: string,
+    opts: { confirm?: boolean; confirmedPenaltySec?: number } = {},
+  ): HelpResponse {
+    const session = this.getSession(sessionId);
+    if (session.finishedAt) throw new HttpError(409, 'Session already finished');
+    if (!this.isHelpEnabledFor(session)) throw new HttpError(403, 'Help is disabled');
+    if (!session.awaiting) throw new HttpError(409, 'Session is not awaiting input');
+    const stage = this.runner.stageByName(session.awaiting.stageName);
+    if (!stage || !stage.help || stage.help.length === 0) {
+      throw new HttpError(404, 'No help for this stage');
+    }
+
+    const used = this.helpUsage.get(session.id, stage.name);
+    const penaltySec = used?.penaltySec ?? Math.max(0, Math.floor(stage.helpPenaltySec ?? 0));
+    if (!used && penaltySec > 0) {
+      const confirmed =
+        opts.confirm === true &&
+        (opts.confirmedPenaltySec === undefined || opts.confirmedPenaltySec === penaltySec);
+      if (!confirmed) return { status: 'confirm-required', stageName: stage.name, penaltySec };
+    }
+    const charged = used ? false : this.helpUsage.record(session.id, stage.name, penaltySec);
+    const vars = variablesForSession(session.id, this.variables, this.initialVariables);
+    const units = this.runner.renderHelp(stage, vars, session.locale, this.bundle);
+    this.logger.info('help displayed', {
+      sessionId: session.id,
+      stage: stage.name,
+      penaltySec,
+      charged,
+    });
+    return { status: 'ok', stageName: stage.name, units, penaltySec, charged };
   }
 
   /**

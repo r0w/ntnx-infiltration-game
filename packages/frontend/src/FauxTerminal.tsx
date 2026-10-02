@@ -1,7 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { formatPenalty, helpLabels } from './helpLabels';
 import { BrailleSpinner, TerminalItem, VERIFYING_LABELS } from './renderer';
 import { usePageBreakScrollPin } from './usePageBreakScrollPin';
-import { awaitingLabel, CONTINUE_VAR, AUTOFILLABLE_VARS, type GatedAt, type RenderItem } from './useSession';
+import {
+  awaitingLabel,
+  CONTINUE_VAR,
+  AUTOFILLABLE_VARS,
+  type GatedAt,
+  type HelpOutcome,
+  type RenderItem,
+} from './useSession';
+
+/** What the terminal needs to offer the step-by-step help of the stage being played. */
+export interface FauxTerminalHelp {
+  /** Usable right now: switched on for this player AND the stage has a help block. */
+  available: boolean;
+  /** What the first display costs, in seconds (0 = free: no cost is shown). */
+  penaltySec: number;
+  /** Already displayed for this stage: showing it again is free. */
+  used: boolean;
+  /** `penaltySec` is the cost on screen when the player confirmed. */
+  onRequest: (confirm: boolean, penaltySec?: number) => Promise<HelpOutcome>;
+}
 
 export interface FauxTerminalProps {
   items: RenderItem[];
@@ -47,6 +67,8 @@ export interface FauxTerminalProps {
    * starts.
    */
   onSwitchIdentity?: () => void;
+  /** Step-by-step help of the stage being played. Absent = no help UI. */
+  help?: FauxTerminalHelp;
 }
 
 export function FauxTerminal({
@@ -64,6 +86,7 @@ export function FauxTerminal({
   onAutoPlayOk,
   onAdvance,
   onSwitchIdentity,
+  help,
 }: FauxTerminalProps) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -143,7 +166,72 @@ export function FauxTerminal({
   // content is above the fold, fresh text fills down from the separator.
   // Once content after the pagebreak exceeds the viewport, fall back to
   // scroll-to-bottom so the typewriter stays visible.
-  usePageBreakScrollPin(scrollerRef, [items, activeIdx]);
+  const { holdAt } = usePageBreakScrollPin(scrollerRef, [items, activeIdx]);
+
+  // Step-by-step help. `helpConfirm` holds the cost being confirmed (null =
+  // no confirmation pending); `helpNote` is a dim one-liner under the prompt.
+  const labels = helpLabels(locale);
+  const [helpConfirm, setHelpConfirm] = useState<number | null>(null);
+  const [helpNote, setHelpNote] = useState<string | null>(null);
+  const [helpBusy, setHelpBusy] = useState(false);
+
+  // A new prompt (next stage) starts clean: drop a stale confirmation / note.
+  useEffect(() => {
+    setHelpConfirm(null);
+    setHelpNote(null);
+  }, [awaitingVariable, help?.available]);
+
+  const showHelp = async (confirm: boolean, penaltySec?: number) => {
+    if (!help || helpBusy) return;
+    setHelpBusy(true);
+    setHelpNote(null);
+    const out = await help.onRequest(confirm, penaltySec);
+    setHelpBusy(false);
+    if (out.status === 'confirm-required') {
+      setHelpConfirm(out.penaltySec);
+    } else {
+      setHelpConfirm(null);
+      if (out.status === 'error') setHelpNote(out.message.replace(/^\d{3}\s/, ''));
+    }
+  };
+
+  // Entry point shared by the button and the `?` / `help` shortcut. When the
+  // first display costs time, ask first; a stray click must never bill.
+  const askHelp = () => {
+    if (!help || !help.available) {
+      setHelpNote(labels.unavailable);
+      return;
+    }
+    if (help.penaltySec > 0 && !help.used) {
+      setHelpNote(null);
+      setHelpConfirm(help.penaltySec);
+      return;
+    }
+    void showHelp(false);
+  };
+
+  // A freshly shown help block is read from its first step, not its last
+  // line: scroll to its top and park the pin there (see holdAt).
+  let lastHelpId: string | null = null;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i]!;
+    if (it.kind === 'help' && !it.hidden) {
+      lastHelpId = it.id;
+      break;
+    }
+  }
+  const heldHelpRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!lastHelpId || heldHelpRef.current === lastHelpId) return;
+    const raf = requestAnimationFrame(() => {
+      const el = scrollerRef.current?.querySelector<HTMLElement>(`[data-help-id="${lastHelpId}"]`);
+      if (el) {
+        heldHelpRef.current = lastHelpId;
+        holdAt(el);
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [lastHelpId, activeIdx, holdAt]);
 
   // Gate banner forces a scroll-to-bottom — overrides usePageBreakScrollPin's
   // userParked guard. The pin hook respects user scroll-up to avoid yanking
@@ -206,6 +294,26 @@ export function FauxTerminal({
     e.preventDefault();
     if (busy || !awaitingVariable) return;
     const v = inputValue;
+    // Confirming the help cost: a bare Enter says yes (it must not also
+    // press "continue" on the stage).
+    if (helpConfirm !== null) {
+      setInputValue('');
+      void showHelp(true, helpConfirm);
+      return;
+    }
+    // `?` (and `help`, when this stage has some) asks for the help instead of
+    // being sent as an answer. Trigram / PIN prompts only accept their own
+    // characters, so they never reach this.
+    const word = v.trim().toLowerCase();
+    if (
+      awaitingVariable !== 'Trigram' &&
+      awaitingVariable !== 'PIN' &&
+      (word === '?' || (word === 'help' && help?.available))
+    ) {
+      setInputValue('');
+      askHelp();
+      return;
+    }
     // Named-var prompts (Trigram, PIN, NodeSerial, etc.) reject empty
     // submits silently at the input level so the player doesn't
     // accidentally send "" and trigger an opaque "No <var> captured"
@@ -236,6 +344,7 @@ export function FauxTerminal({
             skipPauses={skipPauses}
             isActive={idx === activeIdx}
             onDone={advanceSequencer}
+            locale={locale}
           />
         ))}
         {gatedAt && activeIdx >= items.length && (
@@ -264,6 +373,19 @@ export function FauxTerminal({
         )}
         {awaitingVariable && activeIdx >= items.length && (
           <div className="terminal-input-wrap">
+            {helpConfirm !== null && (
+              <div className="terminal-help-confirm" role="alert">
+                <span className="c-yellow" aria-hidden="true">⚠</span>{' '}
+                {labels.confirm(formatPenalty(helpConfirm))}{' '}
+                <button type="button" className="terminal-help-choice" onClick={() => void showHelp(true, helpConfirm)}>
+                  [{labels.yes}]
+                </button>
+                <button type="button" className="terminal-help-choice" onClick={() => setHelpConfirm(null)}>
+                  [{labels.no}]
+                </button>
+              </div>
+            )}
+            {helpNote && <div className="terminal-help-note c-dim">{helpNote}</div>}
             <form
               onSubmit={handleSubmit}
               className="terminal-input-line"
@@ -290,9 +412,17 @@ export function FauxTerminal({
                   } else if (awaitingVariable === 'PIN') {
                     v = v.replace(/\D/g, '').slice(0, 4);
                   }
+                  // Typing anything cancels a pending help confirmation.
+                  if (helpConfirm !== null) setHelpConfirm(null);
+                  if (helpNote) setHelpNote(null);
                   setInputValue(v);
                 }}
                 onKeyDown={(e) => {
+                  if (e.key === 'Escape' && helpConfirm !== null) {
+                    e.preventDefault();
+                    setHelpConfirm(null);
+                    return;
+                  }
                   if (e.key === 'ArrowDown' && onSwitchIdentity) {
                     e.preventDefault();
                     setInputValue('');
@@ -322,6 +452,22 @@ export function FauxTerminal({
                   &nbsp;&nbsp;[↓ switch agent]
                 </span>
               )}
+              {help?.available && !busy && (
+                <button
+                  type="button"
+                  className="terminal-help-btn"
+                  disabled={helpBusy}
+                  onClick={(e) => {
+                    // The terminal's click-to-focus would swallow the click's selection.
+                    e.stopPropagation();
+                    askHelp();
+                    inputRef.current?.focus();
+                  }}
+                >
+                  [? {help.used ? labels.review : labels.button}
+                  {!help.used && help.penaltySec > 0 ? ` · ${formatPenalty(help.penaltySec)}` : ''}]
+                </button>
+              )}
             </form>
           </div>
         )}
@@ -336,12 +482,14 @@ function Line({
   skipPauses,
   isActive,
   onDone,
+  locale,
 }: {
   item: RenderItem;
   typingSpeedMs: number;
   skipPauses: boolean;
   isActive: boolean;
   onDone: () => void;
+  locale: string;
 }) {
   const doneRef = useRef(false);
   useEffect(() => {
@@ -372,6 +520,7 @@ function Line({
       skipPauses={skipPauses}
       isActive={isActive}
       onDone={handleDone}
+      locale={locale}
     />
   );
 }
