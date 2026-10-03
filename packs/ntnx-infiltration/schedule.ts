@@ -28,7 +28,7 @@ export function dailyScheduleError(job: JobResources | undefined, appUuid: strin
   if (job.state && job.state !== 'ACTIVE') return 'enable the schedule.';
 }
 
-/** Auto-play uses UTC; player reports may use any valid named timezone. */
+/** Auto-play schedules reports at 03:00 UTC. */
 export function nextReportTime(now = new Date()): string {
   const start = new Date(now);
   start.setUTCHours(3, 0, 0, 0);
@@ -36,13 +36,20 @@ export function nextReportTime(now = new Date()): string {
   return start.toISOString();
 }
 
-export function reportRunsAtThree(startTime?: string, timezone = 'UTC'): boolean {
+/** The report timezone is not graded: 03:00 counts whether Prism stored the
+ * start as a UTC instant or converted it from the selected timezone. */
+export function reportRunsAtThree(startTime?: string, timezone?: string): boolean {
   if (!startTime) return false;
-  try {
-    return new Intl.DateTimeFormat('en-GB', {
-      timeZone: timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-    }).format(new Date(startTime)) === '03:00';
-  } catch { return false; }
+  const start = new Date(startTime);
+  if (Number.isNaN(start.getTime())) return false;
+  return ['UTC', timezone].some(timeZone => {
+    if (!timeZone) return false;
+    try {
+      return new Intl.DateTimeFormat('en-GB', {
+        timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+      }).format(start) === '03:00';
+    } catch { return false; }
+  });
 }
 
 /** GET responses include union discriminators that report PUT rejects. */

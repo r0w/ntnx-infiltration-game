@@ -1236,7 +1236,7 @@ async function CheckReport(ctx: CheckContext): Promise<CheckResult> {
       };
     }
     if (found.schedule?.frequency !== 1 || !reportRunsAtThree(found.schedule?.startTime, found.timezone)) {
-      return { pass: false, detail: `Report '${expected}' must run every day at 03:00 in its configured timezone.` };
+      return { pass: false, detail: `Report '${expected}' must run every day at 03:00.` };
     }
     const recipients = found.notificationPolicy?.recipients ?? [];
     if (recipients.length === 0) {
