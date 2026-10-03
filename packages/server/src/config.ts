@@ -126,7 +126,7 @@ export function loadConfig(env = process.env): ServerConfig {
     clusterProfile: asProfile(env.CLUSTER_PROFILE),
     typingSpeedMs: asInt(env.TYPING_SPEED_MS, 15),
     publicDir: env.PUBLIC_DIR,
-    // Default to Jammy (cohérent w/ BP substrate; Noble cidata is unreliable
+    // Default to Jammy (consistent w/ BP substrate; Noble cidata is unreliable
     // on some HPoC AHV builds — cf. project_ahv_use_jammy memory).
     gameImageUrl:
       env.GAME_IMAGE_URL ||

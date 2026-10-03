@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, type RefObject } from 'react';
 
 /**
  * Keeps the most-recent `<pagebreak/>` marker pinned at the top of a scroll
@@ -24,14 +24,32 @@ import { useEffect, useRef, type RefObject } from 'react';
  *
  * RAF debouncing coalesces the fan-in so a single frame only runs one
  * apply — prevents feedback loops from our own paddingBottom writes.
+ *
+ * Returns `holdAt(el)`: scrolls `el`'s top to the viewport top and parks the
+ * pin there, so later layout shifts (screenshots finishing loading) don't
+ * pull the view back down. Used when a step-by-step help block opens: it is
+ * read from its first step, not from its last line. Scrolling back to the
+ * bottom un-parks as usual.
  */
 export function usePageBreakScrollPin(
   scrollerRef: RefObject<HTMLElement | null>,
   triggers: ReadonlyArray<unknown>,
-): void {
+): { holdAt: (el: HTMLElement) => void } {
   // Refs so parked-state survives the trigger-driven effect re-runs below.
   const userParkedRef = useRef(false);
   const lastProgrammaticTopRef = useRef(-1);
+
+  const holdAt = useCallback(
+    (el: HTMLElement) => {
+      const scroller = scrollerRef.current;
+      if (!scroller) return;
+      const top = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      userParkedRef.current = true;
+      lastProgrammaticTopRef.current = top;
+      scroller.scrollTop = top;
+    },
+    [scrollerRef],
+  );
 
   // Scroll listener: mounted once per scroller. Distinguishes our writes
   // (matches lastProgrammaticTopRef within 1px) from real user scrolls.
@@ -106,4 +124,6 @@ export function usePageBreakScrollPin(
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollerRef, ...triggers]);
+
+  return { holdAt };
 }

@@ -113,6 +113,25 @@ async function loadStages(dir: string, order: string[]): Promise<StageDefinition
     stages.push(parsed as StageDefinition);
   }
   for (const stage of stages) {
+    if (stage.help !== undefined) {
+      if (
+        !Array.isArray(stage.help) ||
+        stage.help.length === 0 ||
+        stage.help.some((key) => typeof key !== 'string' || key.length === 0)
+      ) {
+        throw new Error(`stage "${stage.name}" help must be a non-empty array of locale keys`);
+      }
+    }
+    if (stage.helpPenaltySec !== undefined) {
+      if (!Number.isInteger(stage.helpPenaltySec) || stage.helpPenaltySec < 0) {
+        throw new Error(`stage "${stage.name}" helpPenaltySec must be a non-negative integer (seconds)`);
+      }
+      if (stage.help === undefined) {
+        throw new Error(`stage "${stage.name}" sets helpPenaltySec but has no help`);
+      }
+    }
+  }
+  for (const stage of stages) {
     if (stage.dependsOn === undefined) continue;
     if (!Array.isArray(stage.dependsOn) || stage.dependsOn.some((name) => typeof name !== 'string')) {
       throw new Error(`stage "${stage.name}" dependsOn must be an array of stage names`);

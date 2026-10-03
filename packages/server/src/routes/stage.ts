@@ -44,6 +44,18 @@ export function buildStageRoutes(deps: StageRoutesDeps): Hono {
     return c.json(r);
   });
 
+  // Step-by-step help for the stage the player is awaiting input in. A first
+  // display that costs time answers `confirm-required` until the client
+  // re-posts with `confirm: true`; see SessionService.requestHelp.
+  router.post('/:id/help', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { confirm?: unknown; penaltySec?: unknown };
+    const r = service.requestHelp(c.req.param('id'), {
+      confirm: body.confirm === true,
+      confirmedPenaltySec: typeof body.penaltySec === 'number' ? body.penaltySec : undefined,
+    });
+    return c.json(r);
+  });
+
   router.post('/:id/skip-to/:stage', async (c) => {
     const stageName = c.req.param('stage');
     if (!stageName) throw new HttpError(400, 'missing stage name');

@@ -99,6 +99,7 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
 
   app.get('/api/pack', (c) => {
     const locales = getEffectiveLocales();
+    const effectiveByName = new Map(service.listEffectiveStages().map((s) => [s.name, s]));
     return c.json({
       id: deps.pack.manifest.id,
       name: deps.pack.manifest.name,
@@ -123,6 +124,13 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
         requires: s.requires ?? [],
         hasCheck: !!s.check,
         captures: s.captures ?? [],
+        // Step-by-step help: whether the stage has any, and what the first
+        // display costs (seconds, 0 = free). Whether the player may use it
+        // is per session: see `help` on GET /api/session/:id.
+        hasHelp: (s.help?.length ?? 0) > 0,
+        // The operator can change the cost live (Pack tab): read it from the
+        // effective stages, not from the pack file.
+        helpPenaltySec: effectiveByName.get(s.name)?.helpPenaltySec ?? s.helpPenaltySec ?? 0,
       })),
     });
   });

@@ -88,6 +88,15 @@ Creation is anonymous: `POST /api/session { locale? }` returns a `sessionId` kep
 
 On reload, `GET /api/session/:id` returns a `replay: MessageUnit[]` re-rendered up to the awaiting input (from the current variables + cache). The frontend prepends a `[resumed at …]` line and streams the replay, then the input field appears. A `409` on advance re-hydrates the client; a `404` (DB reset) drops the stale session back to the login screen.
 
+## Step-by-step help
+
+A stage can ship an optional help block (`help`: locale keys, `helpPenaltySec`: seconds), shown only when the player asks. `POST /api/session/:id/help` renders it through the same pipeline as the stage text (`StageRunner.renderHelp`: locale fallback, `{Var}` substitution, flow tags dropped) and returns plain `MessageUnit[]`; the frontend wraps them in a framed, foldable block with zoomable screenshots. The call never touches the awaiting / pending-check state.
+
+- **On/off**: the global flag lives in `cluster_config.help_enabled` (off by default, toggled in `/admin`); `sessions.help_enabled` is a per-session override (`NULL` follows the global flag, `1` / `0` force it). The player-level value wins in both directions, and the server enforces it, so the UI only mirrors it. The client learns the effective flag from the session snapshot, which the heartbeat polls every 5 s.
+- **Cost**: the first display of a stage records a `help_usage` row whose `penalty_sec` is frozen at that moment; showing it again is free. A first display that costs time answers `confirm-required` until the client re-posts with `confirm: true` and the amount it showed (`penaltySec`); a confirmation naming another amount than the current cost is refused with a new `confirm-required`, so a cost the operator changed in between is never billed unseen.
+- **Cost override**: the operator can change a stage's cost from the Pack tab (`PUT /api/admin/pack/stages/:name/help-penalty`). It is stored in `pack_overlay.help_penalty_sec` (`NULL` = the pack's `helpPenaltySec`, and a value equal to the pack default is stored as `NULL`), applied on top of the stage by `applyOverlay` like the active / gate overrides, range 0-3600 s. It is part of the portable `NIG1.` config and counts as drift. `/api/pack` and `/api/admin/pack` expose the effective cost; `help_usage.penalty_sec` is never rewritten.
+- **Ranking**: finished players are ordered by finish time plus the sum of their penalties (`listScoreboard` and `mergeScoreboards`); players still playing keep their order. Peers on an older version send no penalty and count as 0.
+
 ## Dev iteration
 
 `GET /api/pack` lists every stage; `POST /api/session/:id/goto/:stage` jumps forward or backward, clearing `stage_history` from the target while preserving variables + cache. The frontend `DevPanel` turns both into a clickable stage grid, colour-coded by impact and capability.

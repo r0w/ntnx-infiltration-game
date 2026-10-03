@@ -1,6 +1,6 @@
 /**
  * Portable stage configuration: the operator's pack overlay (which stages
- * are on/off, which are gated) squeezed into one string they can copy out
+ * are on/off, which are gated, what their step-by-step help costs) squeezed into one string they can copy out
  * of one instance and paste into another.
  *
  * Payload, before compression:
@@ -8,7 +8,7 @@
  *     v: 1,
  *     p: "<pack id>",
  *     s: ["<every stage the source pack had, in order>"],
- *     o: { "<stage>": { active?, adminGate? } }
+ *     o: { "<stage>": { active?, adminGate?, helpPenaltySec? } }
  *   }
  *
  * Only overridden fields are carried. The full stage roster rides along
@@ -21,6 +21,7 @@
  * string and two operators can compare configs by eye.
  */
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
+import { HELP_PENALTY_MAX_SEC } from '@ntnx-game/shared';
 import type { PackOverlayRow } from './db/queries';
 
 /** Marks the payload as ours and pins the format version. */
@@ -35,6 +36,8 @@ const MAX_PAYLOAD_BYTES = 1024 * 1024;
 export interface PackConfigOverride {
   active?: boolean;
   adminGate?: boolean;
+  /** Step-by-step help penalty, in seconds. */
+  helpPenaltySec?: number;
 }
 
 export interface DecodedPackConfig {
@@ -64,6 +67,9 @@ export interface PackStageDefaults {
   name: string;
   active: boolean;
   adminGate: boolean;
+  /** Step-by-step help penalty in seconds; `null` when the stage has no help
+   *  (an override of it would say nothing, so it is never carried). */
+  helpPenaltySec: number | null;
 }
 
 /**
@@ -90,8 +96,12 @@ export function meaningfulOverrides(
     if (!d) continue;
     const active = r.active === null || r.active === d.active ? null : r.active;
     const adminGate = r.adminGate === null || r.adminGate === d.adminGate ? null : r.adminGate;
-    if (active === null && adminGate === null) continue;
-    out.push({ stageName: r.stageName, active, adminGate });
+    const helpPenaltySec =
+      r.helpPenaltySec === null || d.helpPenaltySec === null || r.helpPenaltySec === d.helpPenaltySec
+        ? null
+        : r.helpPenaltySec;
+    if (active === null && adminGate === null && helpPenaltySec === null) continue;
+    out.push({ stageName: r.stageName, active, adminGate, helpPenaltySec });
   }
   return out;
 }
@@ -111,6 +121,7 @@ export function encodePackConfig(
     const o: PackConfigOverride = {};
     if (r.active !== null) o.active = r.active;
     if (r.adminGate !== null) o.adminGate = r.adminGate;
+    if (r.helpPenaltySec !== null) o.helpPenaltySec = r.helpPenaltySec;
     if (Object.keys(o).length > 0) overrides[r.stageName] = o;
   }
   return (
@@ -176,6 +187,15 @@ export function decodePackConfig(input: string): DecodedPackConfig {
       }
       o[field] = v;
     }
+    const penalty = entry.helpPenaltySec;
+    if (penalty !== undefined && penalty !== null) {
+      if (!Number.isInteger(penalty) || (penalty as number) < 0 || (penalty as number) > HELP_PENALTY_MAX_SEC) {
+        throw new PackConfigError(
+          `override '${stageName}.helpPenaltySec' must be a whole number of seconds from 0 to ${HELP_PENALTY_MAX_SEC}`,
+        );
+      }
+      o.helpPenaltySec = penalty as number;
+    }
     if (Object.keys(o).length > 0) overrides[stageName] = o;
   }
   return { packId: obj.p, stages, overrides };
@@ -183,7 +203,12 @@ export function decodePackConfig(input: string): DecodedPackConfig {
 
 export interface PackConfigPlan {
   /** Overrides that map onto a stage this pack actually has. */
-  applied: Array<{ stageName: string; active: boolean | null; adminGate: boolean | null }>;
+  applied: Array<{
+    stageName: string;
+    active: boolean | null;
+    adminGate: boolean | null;
+    helpPenaltySec: number | null;
+  }>;
   /** Overridden names the local pack no longer has: stages deleted since
    *  the config was exported. Their override is dropped. */
   missingStages: string[];
@@ -220,7 +245,12 @@ export function planPackConfigImport(
       missingStages.push(stageName);
       continue;
     }
-    applied.push({ stageName, active: o.active ?? null, adminGate: o.adminGate ?? null });
+    applied.push({
+      stageName,
+      active: o.active ?? null,
+      adminGate: o.adminGate ?? null,
+      helpPenaltySec: o.helpPenaltySec ?? null,
+    });
   }
   applied.sort((a, b) => a.stageName.localeCompare(b.stageName));
   // Without a roster we can't tell a new stage from one the source pack

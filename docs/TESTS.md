@@ -16,7 +16,7 @@ bun test -t "lunch lock"                           # by name
 | File | What it pins |
 |---|---|
 | `message-parser.test.ts` | The JSX-like grammar: `{Var}` substitution, `<pause/>`, `<input/>`, links, color/style stacking, escaping |
-| `stage-runner.test.ts` | Stage rendering + ordering, gating, locale fallback, await-input index |
+| `stage-runner.test.ts` | Stage rendering + ordering, gating, locale fallback, await-input index, step-by-step help rendering (flow tags dropped, variables, fallback) |
 | `capability-gate.test.ts` | The gate verdicts: inactive, passed, missing capability, destructive-off-hpoc, missing upstream, admin gate |
 | `variables.test.ts` | The `Variables` store: get/set/delete, listeners, snapshot shape |
 | `lcm-updates.test.ts` | Stage-29 update counting (`dedupedUpdateCount`, `isReadingSettled`) |
@@ -36,10 +36,14 @@ bun test -t "lunch lock"                           # by name
 |---|---|
 | `session-service.test.ts` | The gameplay state machine: advance, input, capture + substitute, destructive gating, `skipTo`, cheers, `<action/>` dispatch, retry rewind, re-auth, admin gates, lunch lock |
 | `admin.test.ts` | `/api/admin/*`: login, users, delete cascade, gates, pack toggles, lunch status, stage-config export/import/reset |
-| `pack-config.test.ts` | The portable stage-config string: encode/decode, compression, stage drift both ways, pack mismatch |
+| `pack-config.test.ts` | The portable stage-config string: encode/decode, compression, stage drift both ways, pack mismatch, help-cost overrides (round trip, range, no-help stages, default-equal values dropped) |
 | `check-trigram.test.ts` | Trigram shape + collision (returning-agent re-auth) |
 | `dep-analysis.test.ts` | Cascade-disable preview: which downstream stages break when an upstream producer is off |
 | `scoreboard.test.ts` | Sort, anonymous filtering, UUID anti-leak, packId scoping |
+| `help.test.ts` | Step-by-step help: off by default, player override beats the global switch, confirmation before a costly first display, billed once and frozen, ranking with penalties (local + combined), player and admin routes |
+| `help-pack.test.ts` | Loader rejects malformed `help` / `helpPenaltySec`; shipped help blocks keep their keys, images and variables consistent |
+| `help-cost.test.ts` | Operator help-cost override: admin route (set, reset, validation, stages without help), effect on the next display only, confirmed-amount guard, `/api/pack` exposure, overlay storage and cleanup |
+| `migrate.test.ts` | `sessions.help_enabled` and `pack_overlay.help_penalty_sec` are added to an existing database (UpdateGame keeps the SQLite file) and the migrations are idempotent |
 | `cluster-profile.test.ts` | Explicit `hpoc`/`other`, fallback to `other` when unset |
 | `ssh.test.ts` | `/api/ssh/ping` argv validation + probe error remapping |
 | `auto-fill-current.test.ts` | Auto-fillable vars (NodeSerial, NumberUpdates, Runway…) resolve in mock |
@@ -61,6 +65,8 @@ bun test -t "lunch lock"                           # by name
 |---|---|
 | `ssh-console.test.ts` | Tab-completion + `classifyPingLine` (timeout → fail, 0% loss → pass) |
 | `pack-state.test.ts` | What the Pack tab shows per stage: the five states, their precedence, and the reason line |
+| `help-labels.test.ts` | Penalty formatting (`+2 min`, `+1 min 30 s`, none at 0 s) and the help UI strings of every locale |
+| `help-cost.test.ts` | The help-cost editor's pure helpers: minutes / seconds split, validation (whole numbers, 59 s, one hour cap), `free` / `2 min 30 s` display |
 
 The React components, typewriter, and polling loop aren't unit-tested; they're thin views over state whose HTTP contract is covered by the route + e2e tests.
 

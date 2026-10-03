@@ -7,10 +7,12 @@ type ModalProps = {
   /** Widens the card. For dialogs holding something that needs room, like
    *  a long config string that would otherwise wrap into a ribbon. */
   wide?: boolean;
+  /** Extra class on the card, for dialogs that need their own sizing. */
+  className?: string;
   children: ReactNode;
 };
 
-export function Modal({ title, onClose, busy = false, wide = false, children }: ModalProps) {
+export function Modal({ title, onClose, busy = false, wide = false, className, children }: ModalProps) {
   const titleId = useId();
 
   useEffect(() => {
@@ -31,7 +33,11 @@ export function Modal({ title, onClose, busy = false, wide = false, children }: 
         if (ev.target === ev.currentTarget && !busy) onClose();
       }}
     >
-      <div className={wide ? 'modal-card modal-card-wide' : 'modal-card'}>
+      <div
+        className={
+          (wide ? 'modal-card modal-card-wide' : 'modal-card') + (className ? ` ${className}` : '')
+        }
+      >
         <h2 id={titleId} className="modal-title">{title}</h2>
         {children}
       </div>

@@ -13,6 +13,13 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ## [Unreleased]
 
+### Added
+
+- Step-by-step help on demand: a `[? help]` button, or typing `?`, shows an illustrated walkthrough of the stage with copyable values. Available on the Security Policy, SSH rule and NCM playbook stages, in English, French and German.
+- Help counts in the score: each stage can set a time penalty, in seconds, added to the finish time in the ranking. The scoreboard shows a badge, the Agents table has a Penalties column, and the player confirms before a costly first display.
+- Switch the help on or off for everyone, or for one player, from `/admin`. It is off by default, and the player's setting wins over the global one. The per-player setting is a small menu in the Agents table.
+- Change a stage's help cost without redeploying: the Pack tab has a new HELP COST column with a quick editor and a reset to the pack value. The cost is part of the exported and imported config, and players who already used a help keep what they were charged.
+
 ### Changed
 
 - The report stage accepts a 03:00 schedule regardless of the report timezone.

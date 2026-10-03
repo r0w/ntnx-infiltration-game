@@ -2983,3 +2983,278 @@ a.terminal-link:visited {
 .pack-dependency:hover { text-decoration: underline; }
 .pack-dependency:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 .pack-dependency-missing { color: var(--st-broken); }
+
+/* ─── Step-by-step help ─────────────────────────────────────────────── */
+
+/* Button at the right of the prompt line: [? help · +2 min] */
+.terminal-help-btn {
+  margin-left: 12px;
+  padding: 0 2px;
+  background: none;
+  border: 0;
+  color: var(--dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.terminal-help-btn:hover:not(:disabled) { color: var(--accent); }
+.terminal-help-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.terminal-help-btn:disabled { opacity: 0.5; cursor: wait; }
+
+.terminal-help-confirm {
+  margin: 2px 0 4px;
+  color: var(--fg);
+  font-size: 13px;
+}
+.terminal-help-choice {
+  margin-left: 6px;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.terminal-help-choice:hover { text-decoration: underline; }
+.terminal-help-note { margin: 2px 0 4px; font-size: 12px; }
+
+/* The framed block itself. */
+.help-block {
+  margin: 10px 0;
+  border: 1px solid rgba(124, 220, 254, 0.4);
+  border-radius: 6px;
+  background: rgba(124, 220, 254, 0.03);
+  white-space: normal;
+}
+.help-retired { display: none; }
+.help-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: 0;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.help-block.is-open .help-head { border-bottom: 1px solid rgba(124, 220, 254, 0.25); }
+.help-head:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
+.help-title { font-weight: 600; }
+.help-pill {
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 4px;
+  background: rgba(224, 192, 104, 0.14);
+  color: var(--yellow);
+  font-size: 12px;
+}
+.help-pill + .help-fold { margin-left: 0; }
+.help-fold {
+  margin-left: auto;
+  color: var(--dim);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.help-body {
+  padding: 12px 14px;
+  white-space: pre-wrap;
+}
+.help-body .code-block { margin: 6px 0; }
+.help-figure { margin: 8px 0 14px; }
+.help-shot {
+  position: relative;
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: zoom-in;
+}
+.help-shot img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+}
+.help-zoom-hint {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(10, 14, 18, 0.78);
+  color: var(--dim);
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.help-shot:hover .help-zoom-hint,
+.help-shot:focus-visible .help-zoom-hint { opacity: 1; }
+.help-caption {
+  margin-top: 4px;
+  color: var(--dim);
+  font-size: 12px;
+}
+.help-foot {
+  padding: 7px 14px;
+  border-top: 1px solid rgba(124, 220, 254, 0.25);
+  color: var(--dim);
+  font-size: 12px;
+}
+/* Enlarged screenshot: near full width so Prism's small labels stay legible;
+   the card scrolls when the capture is taller than the window. */
+.modal-card-zoom {
+  width: min(1100px, 100%);
+  max-height: 94vh;
+  overflow-y: auto;
+}
+.help-zoom {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0 0 12px;
+  border-radius: 4px;
+}
+
+/* Scoreboard badge and /admin controls. */
+.agent-help { color: var(--yellow); }
+.admin-help-btn-on { border-color: var(--green); color: var(--green); }
+.admin-penalties { white-space: nowrap; }
+
+/* Per-player help setting: a chip that opens a small menu. Neutral while the
+   player follows the global switch, green / red once forced either way. */
+.admin-help-chip {
+  --chip: var(--dim);
+  background: transparent;
+  border: 1px solid #2a3540;
+  border-radius: 3px;
+  color: var(--chip);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.admin-help-chip:hover,
+.admin-help-chip.is-open { border-color: #3a4854; }
+.admin-help-chip:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.admin-help-chip-on { --chip: var(--green); border-color: rgba(123, 216, 143, 0.35); }
+.admin-help-chip-off { --chip: var(--red); border-color: rgba(255, 107, 107, 0.35); }
+.admin-help-chip-hint { font-style: normal; opacity: 0.7; }
+.admin-help-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--chip);
+  flex: none;
+}
+.admin-help-caret { font-size: 9px; opacity: 0.7; }
+
+/* Floating panels of the Pack / Users tables (portal, fixed position). */
+.admin-pop {
+  position: fixed;
+  z-index: 1100;
+  box-sizing: border-box;
+  background: var(--bg-panel);
+  border: 1px solid #2a3540;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 12px 14px;
+  font-size: 12px;
+}
+.admin-pop[role='menu'] { padding: 4px; }
+.admin-pop-title {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.admin-help-menu { display: flex; flex-direction: column; }
+.admin-help-item {
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--fg);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  padding: 6px 8px;
+  text-align: left;
+}
+.admin-help-item small { color: var(--dim); margin-left: auto; font-size: 11px; }
+.admin-help-item:hover,
+.admin-help-item:focus-visible { background: rgba(124, 220, 254, 0.1); outline: none; }
+.admin-help-item.is-selected { color: var(--accent); }
+.admin-help-check { width: 12px; flex: none; color: var(--accent); }
+
+/* Help-cost editor (Pack tab). */
+.pack-toggle-help { color: var(--accent); border-color: rgba(124, 220, 254, 0.35); }
+.pack-toggle-help.is-open { border-color: var(--accent); }
+.admin-help-editor { display: flex; flex-direction: column; }
+.admin-help-fields { display: flex; align-items: center; gap: 6px; }
+.admin-help-input {
+  background: var(--bg);
+  border: 1px solid #2a3540;
+  border-radius: 3px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 6px;
+  text-align: right;
+  width: 52px;
+}
+.admin-help-input:focus-visible { border-color: var(--accent); outline: none; }
+.admin-help-unit { color: var(--dim); margin-right: 8px; }
+.admin-help-error { color: var(--red); margin-top: 6px; font-size: 11px; }
+.admin-help-presets { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
+.admin-help-preset {
+  background: transparent;
+  border: 1px solid #2a3540;
+  border-radius: 10px;
+  color: var(--dim);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 8px;
+}
+.admin-help-preset:hover { border-color: #3a4854; color: var(--fg); }
+.admin-help-preset.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(124, 220, 254, 0.08);
+}
+.admin-help-note { color: var(--dim); font-size: 11px; line-height: 1.45; margin: 10px 0 0; }
+.admin-help-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+.admin-help-actions .modal-btn { padding: 4px 12px; }
+.admin-help-reset {
+  background: transparent;
+  border: 0;
+  color: var(--yellow);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  margin-right: auto;
+  padding: 0;
+  text-decoration: underline;
+}
+.admin-help-reset:disabled { opacity: 0.4; cursor: wait; }
+.admin-help-save:not(:disabled) { border-color: var(--accent); color: var(--accent); }
