@@ -99,12 +99,16 @@ test('storage act adds Critical while preserving existing category bindings',asy
   expect(writes[0].encryptionSpec.encryptionState).toBe('ENABLED');
 });
 
-test('reports use the next 03:00 and validate the selected timezone',async()=>{
+test('reports use the next 03:00 and accept 03:00 in any timezone',async()=>{
   const {nextReportTime, reportRunsAtThree}=await import('../../../packs/ntnx-infiltration/schedule');
   expect(nextReportTime(new Date('2026-09-13T02:59:00Z'))).toBe('2026-09-13T03:00:00.000Z');
   expect(nextReportTime(new Date('2026-09-13T03:00:00Z'))).toBe('2026-09-14T03:00:00.000Z');
   expect(reportRunsAtThree('2026-09-13T01:00:00Z','Europe/Zurich')).toBe(true);
-  expect(reportRunsAtThree('2026-09-13T03:00:00Z','Europe/Zurich')).toBe(false);
+  expect(reportRunsAtThree('2026-09-13T03:00:00Z','Europe/Zurich')).toBe(true);
+  expect(reportRunsAtThree('2026-09-13T03:00:00Z','Invalid/Zone')).toBe(true);
+  expect(reportRunsAtThree('2026-09-13T03:00:00Z')).toBe(true);
+  expect(reportRunsAtThree('2026-09-13T02:00:00Z','Europe/Zurich')).toBe(false);
+  expect(reportRunsAtThree('2026-09-13T12:00:00Z','UTC')).toBe(false);
   expect(reportRunsAtThree(undefined)).toBe(false);
   expect(reportRunsAtThree('invalid')).toBe(false);
 });
