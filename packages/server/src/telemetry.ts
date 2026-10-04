@@ -20,6 +20,8 @@ export interface TelemetryDeps {
   url?: string;
   /** Optional bearer token sent as Authorization header. */
   token?: string;
+  /** VM address supplied by the deployment; container interfaces are only a fallback. */
+  deploymentIp?: string;
   packId: string;
   packVersion: string;
   /** Operator-facing server mode — lets Central separate live events from
@@ -83,7 +85,7 @@ export class Telemetry {
     this.url = (deps.url ?? '').trim().replace(/\/+$/, '');
     this.token = deps.token || undefined;
     this.enabled = this.url.length > 0;
-    const ip = localIp();
+    const ip = deps.deploymentIp?.trim() || localIp();
     const firstBootDate = this.enabled ? this.firstBootDate() : '';
     this.deploymentId = `${ip}-${firstBootDate}`;
     const version = getVersionInfo();

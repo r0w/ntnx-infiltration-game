@@ -57,6 +57,7 @@ describe('Telemetry', () => {
         db,
         url: `http://127.0.0.1:${server.port}`,
         token: 'secret',
+        deploymentIp: '10.38.66.43',
       });
       t.record({ type: 'session_started', sessionId: 's1' });
       t.record({
@@ -72,10 +73,12 @@ describe('Telemetry', () => {
       expect(outboxCount(db)).toBe(0);
       expect(received.length).toBe(1);
       const payload = received[0] as {
-        deployment: { id: string; packId: string; mode: string };
+        deployment: { id: string; ip: string; packId: string; mode: string };
         events: Array<{ type: string; stageId?: string; ts: number }>;
       };
       expect(payload.deployment.id).toBe(t.deploymentId);
+      expect(payload.deployment.ip).toBe('10.38.66.43');
+      expect(payload.deployment.id).toStartWith('10.38.66.43-');
       expect(payload.deployment.packId).toBe('test-pack');
       expect(payload.deployment.mode).toBe('test');
       expect(payload.events.map((e) => e.type)).toEqual(['session_started', 'stage_passed']);
@@ -84,6 +87,18 @@ describe('Telemetry', () => {
     } finally {
       server.stop(true);
     }
+  });
+
+  test('different VMs booted on the same day have distinct Central identities', () => {
+    const firstDb = openDatabase({ path: ':memory:' });
+    const secondDb = openDatabase({ path: ':memory:' });
+    const first = new Telemetry({ ...baseDeps, db: firstDb, url: 'http://127.0.0.1:9', deploymentIp: '10.38.66.43' });
+    const second = new Telemetry({ ...baseDeps, db: secondDb, url: 'http://127.0.0.1:9', deploymentIp: '10.38.66.93' });
+    const restarted = new Telemetry({ ...baseDeps, db: firstDb, url: 'http://127.0.0.1:9', deploymentIp: '10.38.66.43' });
+    expect(first.deploymentId).not.toBe(second.deploymentId);
+    expect(restarted.deploymentId).toBe(first.deploymentId);
+    firstDb.close();
+    secondDb.close();
   });
 
   test('unreachable central: flush swallows the error and keeps the backlog', async () => {

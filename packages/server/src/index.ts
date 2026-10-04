@@ -145,6 +145,7 @@ async function main() {
     logger: consoleLogger,
     url: cfg.nigCentralUrl,
     token: cfg.nigCentralToken,
+    deploymentIp: cfg.nigDeploymentIp,
     packId: pack.manifest.id,
     packVersion: pack.manifest.version,
     serverMode: cfg.mode,

@@ -25,6 +25,10 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 - The report stage accepts a 03:00 schedule regardless of the report timezone.
 - In `test` and `mock` modes, text now appears instantly and `<pause>` beats are skipped by default. The dev panel's speed slider and "no pauses" box still override this, and `live` keeps the pack's pacing.
 
+### Fixed
+
+- Central telemetry uses the game VM address supplied by the blueprint instead of the Docker bridge IP, distinguishing VMs first started on the same day. Update Game also sets this address for existing installations.
+
 ## [1.1.0] - 2026-09-13
 
 ### Added
