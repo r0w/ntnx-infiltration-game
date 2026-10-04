@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, spyOn, test } from 'bun:test';
 import { openDatabase } from '../src/db/database';
 import { SessionQueries } from '../src/db/queries';
 import { Telemetry } from '../src/telemetry';
@@ -57,6 +57,7 @@ describe('Telemetry', () => {
         db,
         url: `http://127.0.0.1:${server.port}`,
         token: 'secret',
+        deploymentIp: '10.38.66.43',
       });
       t.record({ type: 'session_started', sessionId: 's1' });
       t.record({
@@ -72,10 +73,12 @@ describe('Telemetry', () => {
       expect(outboxCount(db)).toBe(0);
       expect(received.length).toBe(1);
       const payload = received[0] as {
-        deployment: { id: string; packId: string; mode: string };
+        deployment: { id: string; ip: string; packId: string; mode: string };
         events: Array<{ type: string; stageId?: string; ts: number }>;
       };
       expect(payload.deployment.id).toBe(t.deploymentId);
+      expect(payload.deployment.ip).toBe('10.38.66.43');
+      expect(payload.deployment.id).toStartWith('10.38.66.43-');
       expect(payload.deployment.packId).toBe('test-pack');
       expect(payload.deployment.mode).toBe('test');
       expect(payload.events.map((e) => e.type)).toEqual(['session_started', 'stage_passed']);
@@ -86,6 +89,18 @@ describe('Telemetry', () => {
     }
   });
 
+  test('different VMs booted on the same day have distinct Central identities', () => {
+    const firstDb = openDatabase({ path: ':memory:' });
+    const secondDb = openDatabase({ path: ':memory:' });
+    const first = new Telemetry({ ...baseDeps, db: firstDb, url: 'http://127.0.0.1:9', deploymentIp: '10.38.66.43' });
+    const second = new Telemetry({ ...baseDeps, db: secondDb, url: 'http://127.0.0.1:9', deploymentIp: '10.38.66.93' });
+    const restarted = new Telemetry({ ...baseDeps, db: firstDb, url: 'http://127.0.0.1:9', deploymentIp: '10.38.66.43' });
+    expect(first.deploymentId).not.toBe(second.deploymentId);
+    expect(restarted.deploymentId).toBe(first.deploymentId);
+    firstDb.close();
+    secondDb.close();
+  });
+
   test('unreachable central: flush swallows the error and keeps the backlog', async () => {
     const db = openDatabase({ path: ':memory:' });
     // Port 9 (discard) is closed on any sane host — connection refused.
@@ -93,6 +108,67 @@ describe('Telemetry', () => {
     t.record({ type: 'session_started', sessionId: 's1' });
     await t.flush(); // must not throw
     expect(outboxCount(db)).toBe(1);
+  });
+
+  test('telemetry initialization failure disables statistics without throwing', () => {
+    const db = openDatabase({ path: ':memory:' });
+    db.exec('DROP TABLE cluster_config');
+    const t = new Telemetry({ ...baseDeps, db, url: 'http://127.0.0.1:9', deploymentIp: '10.38.66.43' });
+    expect(t.enabled).toBe(false);
+    expect(() => { t.record({ type: 'session_started', sessionId: 's1' }); t.start(); t.stop(); }).not.toThrow();
+    expect(outboxCount(db)).toBe(0);
+    db.close();
+  });
+
+  test('broken outbox never propagates an error to the game', async () => {
+    const db = openDatabase({ path: ':memory:' });
+    const t = new Telemetry({ ...baseDeps, db, url: 'http://127.0.0.1:9', deploymentIp: '10.38.66.43' });
+    db.exec('DROP TABLE telemetry_outbox');
+    expect(() => t.record({ type: 'session_started', sessionId: 's1' })).not.toThrow();
+    await expect(t.flush()).resolves.toBeUndefined();
+    db.close();
+  });
+
+  test('logging failures cannot escape telemetry startup or error handling', async () => {
+    const db = openDatabase({ path: ':memory:' });
+    const fail = () => { throw new Error('log output unavailable'); };
+    const deps = { ...baseDeps, db, logger: { debug: fail, info: fail, warn: fail, error: fail }, url: 'http://127.0.0.1:9' };
+    const t = new Telemetry(deps);
+    db.exec('DROP TABLE telemetry_outbox');
+    expect(() => t.start()).not.toThrow();
+    expect(() => t.record({ type: 'session_started', sessionId: 's1' })).not.toThrow();
+    await expect(t.flush()).resolves.toBeUndefined();
+    t.stop();
+    db.exec('DROP TABLE cluster_config');
+    expect(() => new Telemetry(deps)).not.toThrow();
+    db.close();
+  });
+
+  test('a stalled send runs in the background and times out without blocking new events', async () => {
+    const db = openDatabase({ path: ':memory:' });
+    const t = new Telemetry({ ...baseDeps, db, url: 'http://central.invalid', deploymentIp: '10.38.66.43' });
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const timeout = spyOn(AbortSignal, 'timeout').mockImplementation(() => realTimeout(20));
+    let sending = false;
+    const request = spyOn(globalThis, 'fetch').mockImplementation((_url, init) => new Promise((_resolve, reject) => {
+      sending = true;
+      init!.signal!.addEventListener('abort', () => reject(init!.signal!.reason), { once: true });
+    }));
+    try {
+      t.record({ type: 'session_started', sessionId: 's1' });
+      t.start();
+      expect(sending).toBe(true);
+      t.record({ type: 'stage_passed', sessionId: 's1', stageId: 'eg-001' });
+      expect(outboxCount(db)).toBe(2);
+      expect(timeout).toHaveBeenCalledWith(5000);
+      await Bun.sleep(40);
+      expect(outboxCount(db)).toBe(2);
+      request.mockResolvedValue(Response.json({ ok: true }));
+      await t.flush();
+      expect(outboxCount(db)).toBe(0);
+    } finally {
+      t.stop(); request.mockRestore(); timeout.mockRestore(); db.close();
+    }
   });
 });
 
