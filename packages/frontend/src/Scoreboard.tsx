@@ -1,59 +1,61 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   api,
   type ScoreboardEntry,
 } from './api';
 import { formatPenalty } from './helpLabels';
+import { scoreboardLayout } from './scoreboardDisplay';
+import { advanceDemo, makeDemoPayload, MAX_DEMO_AGENTS, type DisplayPayload } from './scoreboardDemo';
+import { useScoreboardDisplaySettings } from './useScoreboardDisplaySettings';
+import { useScoreboardScroll } from './useScoreboardScroll';
 
 const REFRESH_MS = 5000;
-// Legacy Python scoreboard fit up to 8 rows per column and added columns as
-// the roster grew. Same heuristic here, with a cap that covers up to 4
-// concurrent HPoCs (~40 agents at 8 per col = 5 cols). Cards shrink via
-// container queries when columns get narrow — no separate compact mode.
-const MAX_ROWS_PER_COL = 8;
-const MAX_COLS = 5;
 // `?demo=N` bypasses the fetch and renders a canned roster — useful for
 // previewing the layout at different densities without seeding the DB.
 const DEMO_PARAM = 'demo';
 const COMBINED_PARAM = 'combined';
-const DEMO_PRESETS = [5, 12, 40] as const;
-
-interface DisplayPayload {
-  packId: string;
-  packName: string;
-  mode: 'mock' | 'live';
-  totalStages: number;
-  entries: Array<ScoreboardEntry & { peerLabel?: string | null }>;
-  /** Set in combined mode; identifies the cluster this server runs on so
-   *  local entries (peerLabel === null) can still be cluster-tagged. */
-  selfLabel?: string | null;
-}
 
 export function Scoreboard() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const demoRaw = searchParams.get(DEMO_PARAM);
   const demoCount = useMemo(() => {
     if (demoRaw === null) return null;
-    const n = Number.parseInt(demoRaw, 10);
-    return Number.isFinite(n) && n > 0 ? Math.min(n, 40) : null;
+    const n = Number(demoRaw);
+    return Number.isInteger(n) && n > 0 ? Math.min(n, MAX_DEMO_AGENTS) : null;
   }, [demoRaw]);
   const combined = searchParams.get(COMBINED_PARAM) === '1';
   const [livePayload, setLivePayload] = useState<DisplayPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshAt, setLastRefreshAt] = useState<number>(Date.now());
+  const rosterRef = useRef<HTMLDivElement>(null);
+  const [rosterSize, setRosterSize] = useState({ width: 0, height: 0 });
+  const { settings: displaySettings } = useScoreboardDisplaySettings();
+
+  useEffect(() => {
+    if (rosterRef.current) rosterRef.current.scrollTop = 0;
+  }, [displaySettings.mode]);
 
   useEffect(() => {
     document.title = 'NIG - scoreboard';
+    const roster = rosterRef.current;
+    if (!roster) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setRosterSize({ width, height });
+    });
+    observer.observe(roster);
+    return () => observer.disconnect();
   }, []);
 
-  // Demo payload is memoized on (demoCount, combined) so switching either
-  // re-seeds without flickering while we stay on the same combo. Combined
-  // demo spreads entries across a few fake clusters for layout validation.
-  const demoPayload = useMemo<DisplayPayload | null>(
-    () => (demoCount !== null ? makeDemoPayload(demoCount, combined) : null),
-    [demoCount, combined],
-  );
+  const simulate = searchParams.get('simulate') === '1';
+  const [demoPayload, setDemoPayload] = useState<DisplayPayload | null>(null);
+  useEffect(() => {
+    setDemoPayload(demoCount !== null ? makeDemoPayload(demoCount, combined) : null);
+    if (demoCount === null || !simulate) return;
+    const timer = setInterval(() => setDemoPayload((current) => advanceDemo(current)), REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [demoCount, combined, simulate]);
   const payload = demoPayload ?? livePayload;
 
   useEffect(() => {
@@ -82,109 +84,61 @@ export function Scoreboard() {
   }, [demoCount, combined]);
 
   const count = payload?.entries.length ?? 0;
-  const cols = count === 0 ? 1 : Math.min(Math.ceil(count / MAX_ROWS_PER_COL), MAX_COLS);
-  const rows = count === 0 ? 1 : Math.ceil(count / cols);
-  // Row heights are tiered so the layout breathes deliberately across the
-  // whole range: 1-row boards don't balloon, mid-range boards (3-7 rows)
-  // still leave top+bottom gutters rather than stretching to fill, and
-  // the 8-row dense case fills the viewport because we need every pixel
-  // for 40-agent events. `align-content: center` (applied via .is-sparse)
-  // centers the leftover breathing space instead of piling cards at top.
-  const rowSize = rowSizeFor(rows);
-  const isSparse = rows < 8;
+  const layout = scoreboardLayout(count, rosterSize.width, rosterSize.height, displaySettings.mode);
+  const scrolling = displaySettings.mode === 'scroll';
+  useScoreboardScroll(rosterRef, scrolling && count > 0, displaySettings.paused, displaySettings.speed, layout.visibleHeight, rosterSize.height);
 
   return (
     <div className="scoreboard-projector">
       <header className="scoreboard-header">
-        <Link to="/" className="scoreboard-back" aria-label="back to game">←</Link>
         <h1 className="scoreboard-title">Status of Undercover Agents</h1>
-        <LiveDot lastRefreshAt={lastRefreshAt} />
+        <div className="scoreboard-status">
+          <span>{count} {count === 1 ? 'agent' : 'agents'}</span>
+          {demoCount !== null ? <span className="scoreboard-demo-indicator">demo</span> : <LiveDot lastRefreshAt={lastRefreshAt} />}
+        </div>
       </header>
-      {error && <div className="scoreboard-error">scoreboard: {error}</div>}
-      {!payload ? (
-        <div className="scoreboard-empty">loading…</div>
-      ) : payload.entries.length === 0 ? (
-        <div className="scoreboard-empty">
-          No agents deployed yet.<br /><span className="c-dim">Start a session to appear on the board.</span>
-        </div>
-      ) : (
-        <div
-          className={`scoreboard-grid${isSparse ? ' is-sparse' : ''}`}
-          style={{
-            gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-            gridTemplateRows: `repeat(${rows}, ${rowSize})`,
-          }}
-        >
-          {payload.entries.map((e) => (
-            <AgentCard
-              key={e.sessionId}
-              entry={e}
-              clusterLabel={combined ? (e.peerLabel ?? payload.selfLabel ?? null) : null}
-            />
-          ))}
-        </div>
-      )}
-      {(demoCount !== null || livePayload?.mode === 'mock') && (
-        <DemoSwitch
-          current={demoCount}
-          onPick={(n) => {
-            // Preserve ?combined=1 across demo-preset clicks so the
-            // combined layout can be previewed at different densities.
-            const next = new URLSearchParams(searchParams);
-            next.set(DEMO_PARAM, String(n));
-            setSearchParams(next);
-          }}
-          onExit={() => {
-            const next = new URLSearchParams(searchParams);
-            next.delete(DEMO_PARAM);
-            setSearchParams(next);
-          }}
-        />
-      )}
+      {error && demoCount === null && <div className="scoreboard-error">scoreboard: {error}</div>}
+      <div className={`scoreboard-roster${scrolling ? '' : ' is-fit'}`} ref={rosterRef} role="region" aria-label="Agent rankings" tabIndex={0}>
+        {!payload ? (
+          <div className="scoreboard-empty">loading…</div>
+        ) : payload.entries.length === 0 ? (
+          <div className="scoreboard-empty">
+            No agents deployed yet.<br /><span className="c-dim">Start a session to appear on the board.</span>
+          </div>
+        ) : (
+          <div className="scoreboard-canvas" style={{ height: layout.visibleHeight }}>
+            <div
+              className={`scoreboard-grid${layout.compact ? ' is-dense' : ''}`}
+              style={{
+                gridTemplateColumns: `repeat(${layout.cols}, minmax(0, 1fr))`,
+                gridTemplateRows: `repeat(${layout.rows}, minmax(88px, 1fr))`,
+                width: layout.width,
+                height: layout.height,
+                transform: `scale(${layout.scale})`,
+              }}
+            >
+              {payload.entries.map((e) => (
+                <AgentCard
+                  key={e.sessionId}
+                  entry={e}
+                  simple={displaySettings.view === 'simple'}
+                  highlightProgress={displaySettings.highlightProgress}
+                  clusterLabel={combined ? (e.peerLabel ?? payload.selfLabel ?? null) : null}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
-  );
-}
-
-function DemoSwitch({
-  current,
-  onPick,
-  onExit,
-}: {
-  /** Current demo preset, or `null` when running on live data. */
-  current: number | null;
-  onPick: (n: number) => void;
-  onExit: () => void;
-}) {
-  const isLive = current === null;
-  return (
-    <nav className="scoreboard-demo-switch" aria-label="demo preset">
-      <span className="scoreboard-demo-label">demo</span>
-      {DEMO_PRESETS.map((n) => (
-        <button
-          key={n}
-          type="button"
-          className={`scoreboard-demo-btn${n === current ? ' is-active' : ''}`}
-          onClick={() => onPick(n)}
-        >
-          {n}
-        </button>
-      ))}
-      <button
-        type="button"
-        className={`scoreboard-demo-btn scoreboard-demo-exit${isLive ? ' is-active' : ''}`}
-        onClick={onExit}
-        title={isLive ? 'already live' : 'exit demo mode'}
-        disabled={isLive}
-      >
-        live
-      </button>
-    </nav>
   );
 }
 
 function AgentCard({
   entry,
   clusterLabel,
+  simple,
+  highlightProgress,
 }: {
   entry: ScoreboardEntry & { peerLabel?: string | null };
   /** Resolved cluster tag to render on the card. `null` in non-combined
@@ -192,7 +146,22 @@ function AgentCard({
    *  combined mode — either the peer label for remote entries or the
    *  server's `selfLabel` for local entries. */
   clusterLabel: string | null;
+  simple: boolean;
+  highlightProgress: boolean;
 }) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const previousProgress = useRef(entry.stagesPassed);
+  useEffect(() => {
+    const advanced = entry.stagesPassed > previousProgress.current;
+    previousProgress.current = entry.stagesPassed;
+    const card = cardRef.current;
+    if (!card || !advanced || !highlightProgress || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const animation = card.animate([
+      { boxShadow: 'inset 0 0 28px rgba(124, 220, 254, 0.3)', borderColor: '#7cdcfe' },
+      { boxShadow: 'inset 0 0 0 rgba(124, 220, 254, 0)', borderColor: getComputedStyle(card).borderColor },
+    ], { duration: 2200, easing: 'ease-out' });
+    return () => animation.cancel();
+  }, [entry.stagesPassed, highlightProgress]);
   // Percent denominator = `effectiveTotalStages` from the server (raw pack
   // total minus stages filtered for cluster reasons: missing caps,
   // destructive-on-other, pack-disabled by overlay). Earlier we computed
@@ -230,21 +199,19 @@ function AgentCard({
   const helpUses = entry.helpUses ?? 0;
   const helpCost = formatPenalty(entry.helpPenaltySec ?? 0);
   return (
-    <div className={`agent-card agent-${entry.status} agent-rank-${rankTier(entry.rank)}`}>
+    <div ref={cardRef} className={`agent-card agent-${entry.status} agent-rank-${rankTier(entry.rank)}${simple ? ' agent-simple' : ''}`}>
       <div className="agent-topline">
         <span className="agent-rank">#{entry.rank}</span>
-        <span className="agent-heading">
+        <span className="agent-heading" title={`${agentName} · ${trigramLabel}`}>
           <span className="agent-username">{agentName}</span>
-          <span className="agent-aka"> a.k.a. </span>
           <span className="agent-trigram">{trigramLabel}</span>
-          {clusterLabel && (
-            <span className="agent-cluster" title={`cluster: ${clusterLabel}`}>
-              · {clusterLabel}
-            </span>
-          )}
         </span>
         <span className="agent-percent">{percent}%</span>
       </div>
+      {(!simple || clusterLabel) && <div className="agent-details">
+        <span className="agent-cluster" title={clusterLabel ? `cluster: ${clusterLabel}` : undefined}>{clusterLabel}</span>
+        {!simple && <span className="agent-time">{timeLabel}</span>}
+      </div>}
       <div
         className="agent-progress"
         role="progressbar"
@@ -258,27 +225,21 @@ function AgentCard({
           style={{ width: `${percent}%` }}
         />
       </div>
-      <div className="agent-meta">
-        <span className="agent-stage">{stageLabel}</span>
-        <span className="agent-time">
-          {helpUses > 0 && (
-            <>
-              <span
-                className="agent-help"
-                title={
-                  `step-by-step help used on ${helpUses} stage${helpUses === 1 ? '' : 's'}` +
-                  (helpCost ? ` — ${helpCost} added to the finish time` : '')
-                }
-              >
-                💡×{helpUses}
-                {helpCost && ` ${helpCost}`}
-              </span>
-              {' · '}
-            </>
-          )}
-          {timeLabel}
-        </span>
-      </div>
+      {!simple && <div className="agent-meta">
+        <span className="agent-stage" title={stageLabel}>{stageLabel}</span>
+        {helpUses > 0 && (
+          <span
+            className="agent-help"
+            title={
+              `step-by-step help used on ${helpUses} stage${helpUses === 1 ? '' : 's'}` +
+              (helpCost ? ` — ${helpCost} added to the finish time` : '')
+            }
+          >
+            💡×{helpUses}
+            {helpCost && ` ${helpCost}`}
+          </span>
+        )}
+      </div>}
     </div>
   );
 }
@@ -296,104 +257,6 @@ function LiveDot({ lastRefreshAt }: { lastRefreshAt: number }) {
       <span className="scoreboard-live-dot" /> live
     </span>
   );
-}
-
-function makeDemoPayload(count: number, combined: boolean): DisplayPayload {
-  // Deterministic-ish seed so re-renders stay stable within a session.
-  const NAMES = [
-    'Alice', 'Bob', 'Carol', 'David', 'Eve', 'Frank', 'Grace', 'Hank',
-    'Iris', 'Jack', 'Kim', 'Leo', 'Maya', 'Nate', 'Olga', 'Pete',
-    'Quin', 'Rosa', 'Sam', 'Tina', 'Uri', 'Vera', 'Wade', 'Xena',
-    'Yves', 'Zoe', 'Anna', 'Ben', 'Cleo', 'Drew', 'Elle', 'Finn',
-    'Gina', 'Hugo', 'Ida', 'Jude', 'Kai', 'Luca', 'Mira', 'Noor',
-  ];
-  const STAGE_NAMES = [
-    'login', 'recovery-gate', 'intro-tank-greet', 'intro-mission',
-    'intro-credentials', 'create-admin-user', 'create-auth-policy',
-    'network-recon', 'create-project', 'create-subnet', 'add-ubuntu-image',
-    'create-vm', 'live-migrate', 'scan-host', 'create-category',
-    'apply-category-to-vm', 'create-storage-policy', 'create-security-policy',
-    'allow-ssh-in-microseg', 'extract-payload', 'create-protection-policy',
-    'create-approval-policy', 'trigger-incident', 'incident-freeze',
-    'incident-reconnect', 'incident-welcome', 'restore-vm-from-recovery',
-    'vault-breach', 'expand-cluster', 'lcm-check-updates', 'create-report',
-    'cleanup-stage-1', 'cleanup-stage-2', 'ncm-playbook', 'self-service-clone',
-    'sched-day2', 'update-blueprint', 'mission-report', 'outro',
-  ];
-  const TOTAL = STAGE_NAMES.length;
-  // In combined mode, sprinkle entries across a fixed set of fake clusters
-  // so the cluster-tag rendering can be validated at any density. First
-  // slot is `null` (= local) so the player's own cluster tag is also
-  // exercised by the demo via `selfLabel` below.
-  const FAKE_PEERS: Array<string | null> = [null, 'POC-37', 'DM3-POC042', 'EMEA-LAB-7'];
-  const now = Date.now();
-  const entries: Array<ScoreboardEntry & { peerLabel?: string | null }> = Array.from({ length: count }, (_, i) => {
-    // Distribute progress across the roster: top few near-finished, a
-    // cluster mid-game, some just started, 1-2 finished at the very top,
-    // 1 idle. Anonymous (pre-trigram) entries are filtered out of the
-    // public scoreboard so we don't seed them into the demo either.
-    const isFinished = i === 0 && count >= 3;
-    const isIdle = count >= 4 && i === 2;
-    const progressRatio = isFinished
-      ? 1
-      : Math.max(0.05, 1 - (i / count) * 0.95);
-    const stagesPassed = Math.round(progressRatio * TOTAL);
-    const nextIdx = isFinished ? null : Math.min(stagesPassed, TOTAL - 1);
-    const startedAt = now - (3 + Math.floor(Math.random() * 120)) * 60_000;
-    const finishedAt = isFinished ? now - 8 * 60_000 : null;
-    const lastActivityAt = isFinished
-      ? finishedAt
-      : isIdle
-        ? now - 4 * 60_000
-        : now - Math.floor(Math.random() * 40_000);
-    const peerLabel = combined ? FAKE_PEERS[i % FAKE_PEERS.length]! : null;
-    return {
-      rank: i + 1,
-      sessionId: `demo-${i + 1}`,
-      trigram: NAMES[i % NAMES.length].slice(0, 3).toUpperCase(),
-      username: NAMES[i % NAMES.length],
-      stageName: nextIdx !== null ? STAGE_NAMES[nextIdx] ?? null : null,
-      stagesPassed,
-      stagesDisabled: 0,
-      totalStages: TOTAL,
-      effectiveTotalStages: TOTAL,
-      startedAt,
-      finishedAt,
-      lastActivityAt,
-      // Demo only: a few agents lean on the step-by-step help so the badge
-      // (with and without a time penalty) can be checked on the projector.
-      helpUses: i % 4 === 1 ? 2 : i % 4 === 3 ? 1 : 0,
-      helpPenaltySec: i % 4 === 1 ? 270 : 0,
-      status: finishedAt !== null ? 'finished' : 'playing',
-      peerLabel,
-    };
-  });
-  return {
-    packId: 'demo',
-    packName: 'Demo Roster',
-    mode: 'mock',
-    totalStages: TOTAL,
-    // Self-label shows up on local (peerLabel === null) entries in the
-    // demo so the player-perspective cluster tag is also covered.
-    selfLabel: combined ? 'THIS-DEMO' : null,
-    entries,
-  };
-}
-
-function rowSizeFor(rows: number): string {
-  // Targeted at a 1080p projector; `vh` keeps proportions on 4K too.
-  // Each cap is chosen so `rows × cap` stays below viewport height by a
-  // breathing margin. >= 8 rows = dense, fill everything.
-  const caps: Record<number, string> = {
-    1: 'clamp(200px, 42vh, 340px)',
-    2: 'clamp(170px, 32vh, 280px)',
-    3: 'clamp(160px, 24vh, 240px)',
-    4: 'clamp(150px, 20vh, 220px)',
-    5: 'clamp(140px, 16vh, 190px)',
-    6: 'clamp(130px, 13vh, 160px)',
-    7: 'clamp(120px, 11vh, 140px)',
-  };
-  return caps[rows] ?? 'minmax(0, 1fr)';
 }
 
 function rankTier(rank: number): 'gold' | 'silver' | 'bronze' | 'plain' {

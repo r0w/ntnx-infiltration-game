@@ -15,6 +15,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- Scoreboard display settings in Admin: fit everyone or scroll smoothly in both directions, with speed, pause, simplified projection and progress highlights. Settings persist on the game server and update its scoreboards automatically.
+- Mock scoreboard previews for 1–200 participants, with presets, cluster labels and optional random progress every five seconds.
 - Step-by-step help on demand: a `[? help]` button, or typing `?`, shows an illustrated walkthrough of the stage with copyable values. Available on the Security Policy, SSH rule and NCM playbook stages, in English, French and German.
 - Help counts in the score: each stage can set a time penalty, in seconds, added to the finish time in the ranking. The scoreboard shows a badge, the Agents table has a Penalties column, and the player confirms before a costly first display.
 - Switch the help on or off for everyone, or for one player, from `/admin`. It is off by default, and the player's setting wins over the global one. The per-player setting is a small menu in the Agents table.
@@ -22,6 +24,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- Scoreboard layout adapts to the screen and participant count, including 50 players at 1920×1080. Progress fills each card's background, and display controls live in Admin to keep the projected view clean.
 - The report stage accepts a 03:00 schedule regardless of the report timezone.
 - In `test` and `mock` modes, text now appears instantly and `<pause>` beats are skipped by default. The dev panel's speed slider and "no pauses" box still override this, and `live` keeps the pack's pacing.
 
