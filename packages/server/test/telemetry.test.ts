@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, spyOn, test } from 'bun:test';
 import { openDatabase } from '../src/db/database';
 import { SessionQueries } from '../src/db/queries';
 import { Telemetry } from '../src/telemetry';
@@ -108,6 +108,52 @@ describe('Telemetry', () => {
     t.record({ type: 'session_started', sessionId: 's1' });
     await t.flush(); // must not throw
     expect(outboxCount(db)).toBe(1);
+  });
+
+  test('telemetry initialization failure disables statistics without throwing', () => {
+    const db = openDatabase({ path: ':memory:' });
+    db.exec('DROP TABLE cluster_config');
+    const t = new Telemetry({ ...baseDeps, db, url: 'http://127.0.0.1:9', deploymentIp: '10.38.66.43' });
+    expect(t.enabled).toBe(false);
+    expect(() => { t.record({ type: 'session_started', sessionId: 's1' }); t.start(); t.stop(); }).not.toThrow();
+    expect(outboxCount(db)).toBe(0);
+    db.close();
+  });
+
+  test('broken outbox never propagates an error to the game', async () => {
+    const db = openDatabase({ path: ':memory:' });
+    const t = new Telemetry({ ...baseDeps, db, url: 'http://127.0.0.1:9', deploymentIp: '10.38.66.43' });
+    db.exec('DROP TABLE telemetry_outbox');
+    expect(() => t.record({ type: 'session_started', sessionId: 's1' })).not.toThrow();
+    await expect(t.flush()).resolves.toBeUndefined();
+    db.close();
+  });
+
+  test('a stalled send runs in the background and times out without blocking new events', async () => {
+    const db = openDatabase({ path: ':memory:' });
+    const t = new Telemetry({ ...baseDeps, db, url: 'http://central.invalid', deploymentIp: '10.38.66.43' });
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const timeout = spyOn(AbortSignal, 'timeout').mockImplementation(() => realTimeout(20));
+    let sending = false;
+    const request = spyOn(globalThis, 'fetch').mockImplementation((_url, init) => new Promise((_resolve, reject) => {
+      sending = true;
+      init!.signal!.addEventListener('abort', () => reject(init!.signal!.reason), { once: true });
+    }));
+    try {
+      t.record({ type: 'session_started', sessionId: 's1' });
+      t.start();
+      expect(sending).toBe(true);
+      t.record({ type: 'stage_passed', sessionId: 's1', stageId: 'eg-001' });
+      expect(outboxCount(db)).toBe(2);
+      expect(timeout).toHaveBeenCalledWith(5000);
+      await Bun.sleep(40);
+      expect(outboxCount(db)).toBe(2);
+      request.mockResolvedValue(Response.json({ ok: true }));
+      await t.flush();
+      expect(outboxCount(db)).toBe(0);
+    } finally {
+      t.stop(); request.mockRestore(); timeout.mockRestore(); db.close();
+    }
   });
 });
 

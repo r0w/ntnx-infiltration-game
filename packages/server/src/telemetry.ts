@@ -85,8 +85,20 @@ export class Telemetry {
     this.url = (deps.url ?? '').trim().replace(/\/+$/, '');
     this.token = deps.token || undefined;
     this.enabled = this.url.length > 0;
-    const ip = deps.deploymentIp?.trim() || localIp();
-    const firstBootDate = this.enabled ? this.firstBootDate() : '';
+    let ip = 'unknown';
+    let firstBootDate = '';
+    if (this.enabled) {
+      try {
+        ip = deps.deploymentIp?.trim() || localIp();
+        firstBootDate = this.firstBootDate();
+      } catch (err) {
+        // Optional statistics must never prevent the game from starting.
+        this.enabled = false;
+        this.logger.warn('telemetry initialization failed; disabled for this process', {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     this.deploymentId = `${ip}-${firstBootDate}`;
     const version = getVersionInfo();
     this.deployment = {

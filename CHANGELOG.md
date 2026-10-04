@@ -28,6 +28,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 ### Fixed
 
 - Central telemetry uses the game VM address supplied by the blueprint instead of the Docker bridge IP, distinguishing VMs first started on the same day. Update Game also sets this address for existing installations.
+- If telemetry initialization fails, statistics are disabled for that process so the game can still start.
 
 ## [1.1.0] - 2026-09-13
 
