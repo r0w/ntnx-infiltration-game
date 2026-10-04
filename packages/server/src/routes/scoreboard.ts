@@ -5,13 +5,12 @@ import { SessionQueries, ScoreboardPeerQueries, ClusterConfigQueries } from '../
 import type { LoadedPack } from '../pack-loader';
 import type { SessionService } from '../session-service';
 import { consoleLogger } from '../logger';
+import { readScoreboardDisplay } from '../scoreboard-display';
 
 export interface ScoreboardRoutesDeps {
   db: Database;
   pack: LoadedPack;
-  /** Surfaced in the response so the frontend can enable the demo-preset
-   *  switcher whenever the backend is running in mock mode (no need to
-   *  opt in via URL param). Inferred from the NutanixClient at wire-up. */
+  /** Transport mode, inferred from the NutanixClient at wire-up. */
   mode: NutanixClient['mode'];
   /** Needed for `effectivePlayableCount` — the denominator used by the
    *  frontend's percent computation. */
@@ -84,6 +83,10 @@ export function buildScoreboardRoutes(deps: ScoreboardRoutesDeps): Hono {
   const sessions = new SessionQueries(deps.db);
   const peers = new ScoreboardPeerQueries(deps.db);
   const clusterConfig = new ClusterConfigQueries(deps.db);
+  router.get('/display', (c) => {
+    c.header('Cache-Control', 'no-store');
+    return c.json(readScoreboardDisplay(clusterConfig));
+  });
   // Pack order is the source of truth for "next stage after X". Keep a
   // positional index so the scoreboard row doesn't need to re-scan the
   // array for each session.

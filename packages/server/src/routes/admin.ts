@@ -32,7 +32,8 @@ import {
   sendMailtrapEmail,
 } from '../email';
 import { EmailRosterQueries, type ClusterConfigQueries, type EmailRosterRow } from '../db/queries';
-import { EMAIL_RE, HELP_PENALTY_MAX_SEC, substituteSeat, substituteVars } from '@ntnx-game/shared';
+import { EMAIL_RE, HELP_PENALTY_MAX_SEC, substituteSeat, substituteVars, isScoreboardDisplaySettings } from '@ntnx-game/shared';
+import { SCOREBOARD_DISPLAY_KEY } from '../scoreboard-display';
 
 export interface AdminRoutesDeps {
   db: Database;
@@ -998,6 +999,13 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   });
 
   // ─── scoreboard peers ───────────────────────────────────────────────
+  router.put('/scoreboard-display', async (c) => {
+    const body: unknown = await c.req.json().catch(() => null);
+    if (!isScoreboardDisplaySettings(body)) throw new HttpError(400, 'invalid scoreboard display settings');
+    deps.service.clusterConfig.set(SCOREBOARD_DISPLAY_KEY, body, 'admin');
+    return c.json(body);
+  });
+
   // Admin-curated list of peer instances whose `/api/scoreboard` is
   // merged into this server's `/api/scoreboard/combined`. baseUrl is the
   // peer game's HTTP base (e.g. `http://10.55.89.44:3000`); the combined

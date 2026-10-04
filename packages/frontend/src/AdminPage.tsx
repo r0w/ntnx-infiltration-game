@@ -22,6 +22,7 @@ import {
 import { EMAIL_RE } from '@ntnx-game/shared';
 import { HelpCostCell } from './HelpCostCell';
 import { HelpMenu } from './HelpMenu';
+import { ScoreboardDisplayOptions } from './ScoreboardDisplayOptions';
 import { formatPenalty } from './helpLabels';
 import { ConfirmModal, Modal } from './Modal';
 import { stageState, stateNote, STATE_ORDER, type StageState } from './pack-state';
@@ -1037,7 +1038,12 @@ function AdminDashboard({
         />
       )}
       {tab === 'emails' && <EmailsTab password={password} />}
-      {tab === 'scoreboard' && <PeersEditor password={password} />}
+      {tab === 'scoreboard' && (
+        <>
+          <ScoreboardDisplayOptions password={password} />
+          <PeersEditor password={password} />
+        </>
+      )}
       {packDisableTarget && (
         <ConfirmModal
           title={<><span className="c-yellow">!</span> disable stage?</>}

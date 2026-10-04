@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -31,6 +32,8 @@ import {
 } from '../src/routes/admin';
 import { SessionService } from '../src/session-service';
 import { EMAIL_TEMPLATES } from '../src/email';
+import { DEFAULT_SCOREBOARD_DISPLAY } from '@ntnx-game/shared';
+import { buildScoreboardRoutes } from '../src/routes/scoreboard';
 import type { LoadedPack } from '../src/pack-loader';
 
 const SCHEMA = readFileSync(
@@ -131,6 +134,72 @@ function router(db: Database, pack: LoadedPack = fakePack()) {
   const service = makeService(db, pack);
   return buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix, clusterProfile: 'hpoc', pcEndpoint: '' });
 }
+
+describe('scoreboard display settings', () => {
+  const headers = { 'X-Admin-Password': ADMIN_PW, 'Content-Type': 'application/json' };
+  const saved = { mode: 'scroll', speed: 48, paused: true, view: 'simple', highlightProgress: false };
+  const publicRouter = (db: Database) => {
+    const pack = fakePack();
+    return buildScoreboardRoutes({ db, pack, mode: 'mock', service: makeService(db, pack), capabilities: [], clusterProfile: 'other' });
+  };
+
+  test('public readers get defaults, then the persisted settings after route reconstruction', async () => {
+    const db = freshDb();
+    const initial = await publicRouter(db).request('/display');
+    expect(initial.headers.get('Cache-Control')).toBe('no-store');
+    expect(await initial.json()).toEqual(DEFAULT_SCOREBOARD_DISPLAY);
+    const response = await router(db).request('/scoreboard-display', { method: 'PUT', headers, body: JSON.stringify(saved) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(saved);
+    expect(await (await publicRouter(db).request('/display')).json()).toEqual(saved);
+    expect((db.query('SELECT count(*) AS n FROM sessions').get() as { n: number }).n).toBe(0);
+    db.close();
+  });
+
+  test('only an authenticated admin can change the shared display', async () => {
+    const db = freshDb();
+    for (const password of ['', 'wrong']) {
+      const response = await router(db).request('/scoreboard-display', {
+        method: 'PUT', headers: { ...headers, 'X-Admin-Password': password }, body: JSON.stringify(saved),
+      });
+      expect(response.status).toBe(401);
+    }
+    expect(await (await publicRouter(db).request('/display')).json()).toEqual(DEFAULT_SCOREBOARD_DISPLAY);
+    expect((await publicRouter(db).request('/display', { method: 'PUT', body: JSON.stringify(saved) })).status).toBe(404);
+    db.close();
+  });
+
+  test('display settings survive closing and reopening the database', async () => {
+    const directory = mkdtempSync(resolve(tmpdir(), 'nig-scoreboard-display-'));
+    const path = resolve(directory, 'game.db');
+    let db = new Database(path);
+    try {
+      db.exec(SCHEMA);
+      expect((await router(db).request('/scoreboard-display', { method: 'PUT', headers, body: JSON.stringify(saved) })).status).toBe(200);
+      db.close();
+      db = new Database(path);
+      expect(await (await publicRouter(db).request('/display')).json()).toEqual(saved);
+    } finally {
+      db.close();
+      rmSync(directory, { recursive: true });
+    }
+  });
+
+  test('malformed settings never replace the last valid configuration', async () => {
+    const db = freshDb();
+    const admin = router(db);
+    await admin.request('/scoreboard-display', { method: 'PUT', headers, body: JSON.stringify(saved) });
+    for (const body of [null, {}, [], { ...saved, mode: 'other' }, { ...saved, speed: '48' },
+      { ...saved, speed: 999 }, { ...saved, paused: 'true' }, { ...saved, view: 'other' },
+      { ...saved, highlightProgress: 1 }, { ...saved, unknown: true }]) {
+      const response = await admin.request('/scoreboard-display', { method: 'PUT', headers, body: JSON.stringify(body) });
+      expect(response.status).toBe(400);
+      expect(await (await publicRouter(db).request('/display')).json()).toEqual(saved);
+    }
+    expect((await admin.request('/scoreboard-display', { method: 'PUT', headers, body: '{' })).status).toBe(400);
+    db.close();
+  });
+});
 
 describe('POST /api/admin/login', () => {
   test('wrong password → 401', async () => {

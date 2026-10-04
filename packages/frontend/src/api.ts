@@ -6,6 +6,7 @@ import type {
   HelpSnapshot,
   MessageUnit,
   SubmitInputRequest,
+  ScoreboardDisplaySettings,
 } from '@ntnx-game/shared';
 
 export type { DisabledStage, HelpResponse, HelpSnapshot };
@@ -470,6 +471,9 @@ export const api = {
     ),
   pack: () => get<PackInfo>('/pack'),
   scoreboard: () => get<ScoreboardPayload>('/scoreboard'),
+  scoreboardDisplay: (signal?: AbortSignal) => get<ScoreboardDisplaySettings>('/scoreboard/display', signal),
+  adminScoreboardDisplaySave: (password: string, settings: ScoreboardDisplaySettings) =>
+    adminPut<ScoreboardDisplaySettings>('/admin/scoreboard-display', password, settings),
   combinedScoreboard: () => get<CombinedScoreboardPayload>('/scoreboard/combined'),
   sshPing: (target: string, signal?: AbortSignal) =>
     post<{
