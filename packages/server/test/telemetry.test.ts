@@ -129,6 +129,21 @@ describe('Telemetry', () => {
     db.close();
   });
 
+  test('logging failures cannot escape telemetry startup or error handling', async () => {
+    const db = openDatabase({ path: ':memory:' });
+    const fail = () => { throw new Error('log output unavailable'); };
+    const deps = { ...baseDeps, db, logger: { debug: fail, info: fail, warn: fail, error: fail }, url: 'http://127.0.0.1:9' };
+    const t = new Telemetry(deps);
+    db.exec('DROP TABLE telemetry_outbox');
+    expect(() => t.start()).not.toThrow();
+    expect(() => t.record({ type: 'session_started', sessionId: 's1' })).not.toThrow();
+    await expect(t.flush()).resolves.toBeUndefined();
+    t.stop();
+    db.exec('DROP TABLE cluster_config');
+    expect(() => new Telemetry(deps)).not.toThrow();
+    db.close();
+  });
+
   test('a stalled send runs in the background and times out without blocking new events', async () => {
     const db = openDatabase({ path: ':memory:' });
     const t = new Telemetry({ ...baseDeps, db, url: 'http://central.invalid', deploymentIp: '10.38.66.43' });
