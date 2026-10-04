@@ -372,15 +372,17 @@ describe('ranking with help penalties', () => {
 
   test('players still playing are not reordered by help usage', async () => {
     const db = freshDb();
-    seedFinished(db, { id: 's-p1', trigram: 'PP1', startedAt: 1000, finishedAt: null, passed: ['intro', 'paid'] });
-    seedFinished(db, { id: 's-p2', trigram: 'PP2', startedAt: 2000, finishedAt: null, passed: ['intro', 'paid'] });
-    new HelpUsageQueries(db).record('s-p1', 'paid', 600);
-    const withHelp = (await fetchScoreboard(db)).map((e) => e.trigram);
-    const db2 = freshDb();
-    seedFinished(db2, { id: 's-p1', trigram: 'PP1', startedAt: 1000, finishedAt: null, passed: ['intro', 'paid'] });
-    seedFinished(db2, { id: 's-p2', trigram: 'PP2', startedAt: 2000, finishedAt: null, passed: ['intro', 'paid'] });
-    const without = (await fetchScoreboard(db2)).map((e) => e.trigram);
-    expect(withHelp).toEqual(without);
+    // LEAD is one stage ahead, so stages passed decide the order, not the clock
+    // (a tie would fall back to the last activity, which is the wall clock).
+    seedFinished(db, { id: 's-lead', trigram: 'LED', startedAt: 2000, finishedAt: null, passed: ['intro', 'paid', 'free'] });
+    seedFinished(db, { id: 's-behind', trigram: 'BHD', startedAt: 1000, finishedAt: null, passed: ['intro', 'paid'] });
+    // The leader pays 10 minutes of help: it stays ahead, since a penalty only
+    // counts once someone has finished.
+    new HelpUsageQueries(db).record('s-lead', 'paid', 600);
+
+    const entries = await fetchScoreboard(db);
+    expect(entries.map((e) => e.trigram)).toEqual(['LED', 'BHD']);
+    expect(entries[0]!.helpPenaltySec).toBe(600);
   });
 });
 
