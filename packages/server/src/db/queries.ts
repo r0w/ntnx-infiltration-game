@@ -560,6 +560,107 @@ export class HelpUsageQueries {
   }
 }
 
+export type SessionWaitReason = 'gate' | 'pause';
+
+export interface SessionWaitRow {
+  id: number;
+  sessionId: string;
+  reason: SessionWaitReason;
+  /** The gated stage for a `gate` wait, `null` for a `pause`. */
+  stageName: string | null;
+  blockedAt: number;
+  /** `null` while the session is still held. */
+  releasedAt: number | null;
+}
+
+/**
+ * Time a session spent held by the operator (admin gate or pack-wide pause)
+ * rather than playing. A session has at most one open wait at a time, which
+ * keeps the total a plain sum: see the partial unique index in schema.sql.
+ */
+export class SessionWaitQueries {
+  constructor(private readonly db: Database) {}
+
+  /**
+   * Start a wait: returns `true` when one was opened, `false` when the session
+   * was already held (its first reason is kept). A held player asks again every
+   * few seconds, so the check is a read: writing there, even an insert that is
+   * then ignored, would take the write lock each time. The insert still ignores
+   * a conflict, in case two requests race.
+   */
+  open(
+    sessionId: string,
+    reason: SessionWaitReason,
+    stageName: string | null,
+    blockedAt = Date.now(),
+  ): boolean {
+    const held = this.db
+      .prepare('SELECT 1 FROM session_waits WHERE session_id = $sid AND released_at IS NULL')
+      .get({ $sid: sessionId });
+    if (held) return false;
+    const r = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO session_waits (session_id, reason, stage_name, blocked_at)
+         VALUES ($sid, $reason, $stage, $at)`,
+      )
+      .run({ $sid: sessionId, $reason: reason, $stage: stageName, $at: blockedAt });
+    return Number(r.changes) > 0;
+  }
+
+  /** End the session's open wait, if any. Returns `true` when one was closed. */
+  close(sessionId: string, releasedAt = Date.now()): boolean {
+    const r = this.db
+      .prepare(
+        'UPDATE session_waits SET released_at = $at WHERE session_id = $sid AND released_at IS NULL',
+      )
+      .run({ $sid: sessionId, $at: releasedAt });
+    return Number(r.changes) > 0;
+  }
+
+  /** Every wait still open, across sessions. */
+  listOpen(): SessionWaitRow[] {
+    return this.rows('WHERE released_at IS NULL ORDER BY blocked_at ASC', {});
+  }
+
+  list(sessionId: string): SessionWaitRow[] {
+    return this.rows('WHERE session_id = $sid ORDER BY blocked_at ASC', { $sid: sessionId });
+  }
+
+  /** Total held time in ms; an open wait counts up to `now`. */
+  totalBlockedMs(sessionId: string, now = Date.now()): number {
+    const row = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(COALESCE(released_at, $now) - blocked_at), 0) AS ms
+         FROM session_waits WHERE session_id = $sid`,
+      )
+      .get({ $sid: sessionId, $now: now }) as { ms: number };
+    return row.ms;
+  }
+
+  private rows(clause: string, params: Record<string, string>): SessionWaitRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, session_id, reason, stage_name, blocked_at, released_at FROM session_waits ${clause}`,
+      )
+      .all(params) as Array<{
+        id: number;
+        session_id: string;
+        reason: SessionWaitReason;
+        stage_name: string | null;
+        blocked_at: number;
+        released_at: number | null;
+      }>;
+    return rows.map((r) => ({
+      id: r.id,
+      sessionId: r.session_id,
+      reason: r.reason,
+      stageName: r.stage_name,
+      blockedAt: r.blocked_at,
+      releasedAt: r.released_at,
+    }));
+  }
+}
+
 export class MockOverlayQueries {
   constructor(private readonly db: Database) {}
 

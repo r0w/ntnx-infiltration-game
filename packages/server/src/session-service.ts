@@ -27,6 +27,7 @@ import {
   PackOverlayQueries,
   PackPauseQueries,
   SessionQueries,
+  SessionWaitQueries,
   VariableQueries,
   type SessionRecord,
 } from './db/queries';
@@ -148,6 +149,7 @@ export class SessionService {
   readonly history: HistoryQueries;
   readonly attempts: AttemptQueries;
   readonly helpUsage: HelpUsageQueries;
+  readonly waits: SessionWaitQueries;
   readonly clusterCache: ClusterCacheQueries;
   readonly clusterConfig: ClusterConfigQueries;
   readonly mockOverlay: MockOverlayQueries;
@@ -193,6 +195,7 @@ export class SessionService {
     this.history = new HistoryQueries(deps.db);
     this.attempts = new AttemptQueries(deps.db);
     this.helpUsage = new HelpUsageQueries(deps.db);
+    this.waits = new SessionWaitQueries(deps.db);
     this.clusterCache = new ClusterCacheQueries(deps.db);
     this.clusterConfig = new ClusterConfigQueries(deps.db);
     this.mockOverlay = new MockOverlayQueries(deps.db);
@@ -267,6 +270,24 @@ export class SessionService {
     } else {
       this.packPauses.clear(this.packId);
       this.globallyPausedAt = null;
+      this.releaseWaits();
+    }
+  }
+
+  /**
+   * End the waits of sessions the operator no longer holds, at the instant of
+   * the unlock / resume (not when each player's next poll lands, which would
+   * credit a player who closed the tab). A session held by a pause stays held
+   * until the resume even if its gate opens first, and the other way round.
+   */
+  private releaseWaits(now = Date.now()): void {
+    const stages = this.runner.listStages();
+    for (const w of this.waits.listOpen()) {
+      const gateIdx = this.stageIndex(w.stageName);
+      const heldByGate =
+        gateIdx >= 0 && stages[gateIdx]!.adminGate === true && !this.unlockedGateIds.has(gateIdx);
+      if (this.isGloballyPaused() || heldByGate) continue;
+      this.waits.close(w.sessionId, now);
     }
   }
 
@@ -293,6 +314,8 @@ export class SessionService {
     const effective = applyOverlay(this.baseStages, overlay);
     this.runner.replaceStages(effective);
     this.unlockedGateIds = this.rebuildUnlockedSet();
+    // A stage the operator just un-gated frees the sessions parked on it.
+    this.releaseWaits();
   }
 
   /** Stage names currently unlocked by an admin (read-only snapshot). */
@@ -313,6 +336,7 @@ export class SessionService {
     if (unlocked) {
       this.gateUnlocks.unlock(this.packId, stageName);
       this.unlockedGateIds.add(idx);
+      this.releaseWaits();
     } else {
       this.gateUnlocks.lock(this.packId, stageName);
       this.unlockedGateIds.delete(idx);
@@ -826,6 +850,7 @@ export class SessionService {
     // the next transition. That matches the operator's mental model
     // ("everyone wraps up what they're doing, then we pause").
     if (this.isGloballyPaused()) {
+      this.waits.open(session.id, 'pause', null);
       return {
         kind: 'gated',
         gatedReason: 'global',
@@ -857,6 +882,10 @@ export class SessionService {
       },
       ctx.vars,
     );
+    // Safety net: a session that gets past the gates is no longer held, even
+    // when no unlock / resume ended its wait (a stage switched to ungated, say).
+    // Done before the finish below, so a finished session has no open wait.
+    if (next?.kind !== 'gated') this.waits.close(session.id);
     if (!next) {
       // Only emit on the first finish — advance() keeps returning 'finished'
       // on every poll after the last stage, and clearFinished/replays exist.
@@ -898,7 +927,9 @@ export class SessionService {
       // the last completed stage, and the client polls advance() on a 3 s
       // cadence until the admin unlocks. No `<action/>` dispatch yet either —
       // those belong to the gated stage's own render, fired only once we let
-      // the player in.
+      // the player in. The only record is the wait, so the held time can be
+      // taken off the player's clock.
+      this.waits.open(session.id, 'gate', next.stage.name);
       return {
         kind: 'gated',
         gatedReason: 'stage',

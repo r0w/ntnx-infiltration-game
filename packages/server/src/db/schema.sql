@@ -100,6 +100,24 @@ CREATE TABLE IF NOT EXISTS help_usage (
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
+-- Periods during which the operator, not the player, was holding a session:
+-- parked at an admin gate ('gate', with the gated stage) or under the pack-wide
+-- pause ('pause'). `blocked_at` is the first "gated" answer the player got;
+-- `released_at` is the operator's unlock / resume, NULL while still held. The
+-- partial unique index allows one open period per session, so a player held by
+-- a gate AND a pause has a single period and the durations can simply be summed.
+CREATE TABLE IF NOT EXISTS session_waits (
+  id INTEGER PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  stage_name TEXT,
+  blocked_at INTEGER NOT NULL,
+  released_at INTEGER,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_session_waits_session ON session_waits(session_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_session_waits_open ON session_waits(session_id) WHERE released_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS cluster_cache (
   session_id TEXT NOT NULL,
   entity_kind TEXT NOT NULL,

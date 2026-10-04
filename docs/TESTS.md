@@ -43,7 +43,8 @@ bun test -t "lunch lock"                           # by name
 | `help.test.ts` | Step-by-step help: off by default, player override beats the global switch, confirmation before a costly first display, billed once and frozen, ranking with penalties (local + combined), player and admin routes |
 | `help-pack.test.ts` | Loader rejects malformed `help` / `helpPenaltySec`; shipped help blocks keep their keys, images and variables consistent |
 | `help-cost.test.ts` | Operator help-cost override: admin route (set, reset, validation, stages without help), effect on the next display only, confirmed-amount guard, `/api/pack` exposure, overlay storage and cleanup |
-| `migrate.test.ts` | `sessions.help_enabled` and `pack_overlay.help_penalty_sec` are added to an existing database (UpdateGame keeps the SQLite file) and the migrations are idempotent |
+| `session-waits.test.ts` | Time a session is held by the operator: a wait starts at the first "gated" answer and ends at the unlock / resume (exact to the ms), one open wait per session, gate + pause overlap counted once, safety net, persistence across a restart |
+| `migrate.test.ts` | `sessions.help_enabled`, `pack_overlay.help_penalty_sec` and the `session_waits` table are added to an existing database (UpdateGame keeps the SQLite file) and the migrations are idempotent |
 | `cluster-profile.test.ts` | Explicit `hpoc`/`other`, fallback to `other` when unset |
 | `ssh.test.ts` | `/api/ssh/ping` argv validation + probe error remapping |
 | `auto-fill-current.test.ts` | Auto-fillable vars (NodeSerial, NumberUpdates, Runway…) resolve in mock |

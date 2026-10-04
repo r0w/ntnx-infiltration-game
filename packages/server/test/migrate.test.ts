@@ -175,3 +175,42 @@ describe('pack_overlay.help_penalty_sec migration', () => {
   });
 });
 
+
+describe('session_waits table', () => {
+  test('openDatabase on an old file creates it and keeps one open wait per session', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ntnx-migrate-waits-'));
+    try {
+      const path = join(dir, 'game.db');
+      const old = new Database(path, { create: true });
+      old.exec(OLD_SESSIONS);
+      old.prepare(
+        `INSERT INTO sessions (id, trigram, pin_hash, pack_id, started_at)
+         VALUES ('s1', 'abc', '', 'p', 1000)`,
+      ).run();
+      old.close();
+
+      const db = openDatabase({ path });
+      expect(columns(db, 'session_waits')).toEqual([
+        'id',
+        'session_id',
+        'reason',
+        'stage_name',
+        'blocked_at',
+        'released_at',
+      ]);
+      const insert = db.prepare(
+        `INSERT INTO session_waits (session_id, reason, stage_name, blocked_at) VALUES ('s1', 'gate', 'x', 1)`,
+      );
+      insert.run();
+      expect(() => insert.run()).toThrow();
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a fresh database has it', () => {
+    const db = openDatabase({ path: ':memory:' });
+    expect(columns(db, 'session_waits')).toContain('blocked_at');
+  });
+});
