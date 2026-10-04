@@ -1,5 +1,7 @@
 import type { ScoreboardEntry } from './api';
 
+export const MAX_DEMO_AGENTS = 200;
+
 export interface DisplayPayload {
   packId: string;
   packName: string;

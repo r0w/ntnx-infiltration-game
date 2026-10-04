@@ -1,6 +1,6 @@
 import { useRef } from 'react';
+import { MAX_DEMO_AGENTS } from './scoreboardDemo';
 
-const MAX_DEMO_AGENTS = 200;
 const DEMO_PRESETS = [5, 12, 40, 50] as const;
 
 export function ScoreboardDemoControls({

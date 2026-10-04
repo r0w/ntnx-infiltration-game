@@ -6,12 +6,11 @@ import {
 } from './api';
 import { formatPenalty } from './helpLabels';
 import { scoreboardLayout } from './scoreboardDisplay';
-import { advanceDemo, makeDemoPayload, type DisplayPayload } from './scoreboardDemo';
+import { advanceDemo, makeDemoPayload, MAX_DEMO_AGENTS, type DisplayPayload } from './scoreboardDemo';
 import { useScoreboardDisplaySettings } from './useScoreboardDisplaySettings';
 import { useScoreboardScroll } from './useScoreboardScroll';
 
 const REFRESH_MS = 5000;
-const MAX_DEMO_AGENTS = 200;
 // `?demo=N` bypasses the fetch and renders a canned roster — useful for
 // previewing the layout at different densities without seeding the DB.
 const DEMO_PARAM = 'demo';

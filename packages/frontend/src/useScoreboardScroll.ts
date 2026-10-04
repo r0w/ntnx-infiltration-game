@@ -29,8 +29,8 @@ export function useScoreboardScroll(
       const delta = last ? Math.min(time - last, 64) : 0;
       last = time;
       const max = Math.max(0, roster.scrollHeight - roster.clientHeight);
-      // Dialogs, background tabs and manual navigation suspend the movement.
-      if (document.hidden || document.querySelector('dialog[open]') || time < manualPauseUntil) {
+      // Background tabs and manual navigation suspend the movement.
+      if (document.hidden || time < manualPauseUntil) {
         position = roster.scrollTop;
         if (time < manualPauseUntil) {
           if (phase === 'top' || phase === 'bottom') phase = 'down';
