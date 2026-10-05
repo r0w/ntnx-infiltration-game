@@ -156,6 +156,21 @@ describe('scoreboard display settings', () => {
     db.close();
   });
 
+  test('every scroll speed is accepted, the fastest included, and nothing in between', async () => {
+    const db = freshDb();
+    const admin = router(db);
+    for (const speed of [12, 24, 48, 96]) {
+      const response = await admin.request('/scoreboard-display', { method: 'PUT', headers, body: JSON.stringify({ ...saved, speed }) });
+      expect(response.status).toBe(200);
+      expect(((await (await publicRouter(db).request('/display')).json()) as { speed: number }).speed).toBe(speed);
+    }
+    for (const speed of [0, 6, 72, 100, 192]) {
+      const response = await admin.request('/scoreboard-display', { method: 'PUT', headers, body: JSON.stringify({ ...saved, speed }) });
+      expect(response.status).toBe(400);
+    }
+    db.close();
+  });
+
   test('only an authenticated admin can change the shared display', async () => {
     const db = freshDb();
     for (const password of ['', 'wrong']) {

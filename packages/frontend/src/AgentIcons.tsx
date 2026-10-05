@@ -10,6 +10,15 @@ function Icon({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Resume: the triangle that goes with the two bars of {@link PauseIcon}. */
+export function PlayIcon() {
+  return (
+    <Icon>
+      <path d="M8 5v14l11-7z" />
+    </Icon>
+  );
+}
+
 /** Held at an admin gate. */
 export function PauseIcon() {
   return (

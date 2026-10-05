@@ -1,5 +1,7 @@
 export type ScoreboardDisplayMode = 'fit' | 'scroll';
-export type ScrollSpeed = 12 | 24 | 48;
+/** Auto-scroll speeds, in pixels per second. */
+export const SCROLL_SPEEDS = [12, 24, 48, 96] as const;
+export type ScrollSpeed = (typeof SCROLL_SPEEDS)[number];
 export interface ScoreboardDisplaySettings {
   mode: ScoreboardDisplayMode;
   speed: ScrollSpeed;
@@ -16,7 +18,7 @@ export function isScoreboardDisplaySettings(value: unknown): value is Scoreboard
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const v = value as Record<string, unknown>;
   return (v.mode === 'fit' || v.mode === 'scroll')
-    && (v.speed === 12 || v.speed === 24 || v.speed === 48)
+    && SCROLL_SPEEDS.some((speed) => speed === v.speed)
     && typeof v.paused === 'boolean'
     && (v.view === 'detailed' || v.view === 'simple')
     && typeof v.highlightProgress === 'boolean'

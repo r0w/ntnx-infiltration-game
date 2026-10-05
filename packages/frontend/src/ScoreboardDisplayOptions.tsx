@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { PauseIcon, PlayIcon } from './AgentIcons';
 import { ScoreboardDemoControls } from './ScoreboardDemoControls';
-import type { ScrollSpeed } from './scoreboardDisplay';
+import { ScrollSpeedMenu } from './ScrollSpeedMenu';
 import { useScoreboardDisplaySettings } from './useScoreboardDisplaySettings';
 
 export function ScoreboardDisplayOptions({ password }: { password: string }) {
@@ -36,15 +37,16 @@ export function ScoreboardDisplayOptions({ password }: { password: string }) {
           <span><strong>Highlight progress</strong><small>Briefly illuminate an agent's card when they complete a stage.</small></span>
         </label>
         <div className="scoreboard-display-actions">
-          <label className="scoreboard-speed">
+          <div className="scoreboard-speed">
             Scroll speed
-            <select value={settings.speed} disabled={settings.mode !== 'scroll'} onChange={(event) => onChange({ ...settings, speed: Number(event.target.value) as ScrollSpeed })}>
-              <option value={12}>Slow</option>
-              <option value={24}>Normal</option>
-              <option value={48}>Fast</option>
-            </select>
-          </label>
-          <button className="modal-btn" type="button" disabled={settings.mode !== 'scroll'} onClick={() => onChange({ ...settings, paused: !settings.paused })}>
+            <ScrollSpeedMenu
+              value={settings.speed}
+              disabled={settings.mode !== 'scroll'}
+              onChange={(speed) => onChange({ ...settings, speed })}
+            />
+          </div>
+          <button className="modal-btn scoreboard-scroll-btn" type="button" disabled={settings.mode !== 'scroll'} onClick={() => onChange({ ...settings, paused: !settings.paused })}>
+            {settings.paused ? <PlayIcon /> : <PauseIcon />}
             {settings.paused ? 'Resume scroll' : 'Pause scroll'}
           </button>
           <Link to="/scoreboard" target="_blank" rel="noreferrer">open scoreboard ↗</Link>

@@ -704,18 +704,19 @@ a.terminal-link:visited {
 }
 .scoreboard-display-options { margin-bottom: 20px; }
 .scoreboard-display-options fieldset { border: 0; padding: 0; margin: 20px 0; min-width: 0; }
-.scoreboard-display-options legend { font-size: 14px; margin-bottom: 12px; }
-.scoreboard-display-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; }
+.scoreboard-display-options legend { font-size: 12px; font-weight: 700; margin-bottom: 12px; }
+.scoreboard-display-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; font-size: 12px; }
 .scoreboard-preview-controls { margin-top: 24px; border-top: 1px solid #293a46; padding-top: 16px; }
-.scoreboard-preview-controls h4 { margin: 0 0 6px; }
+.scoreboard-preview-controls h4 { margin: 0 0 6px; font-size: 12px; }
+.scoreboard-preview-controls .scoreboard-display-choice { font-size: 13px; }
 .scoreboard-preview-controls .scoreboard-demo-switch { justify-content: flex-start; margin: 12px 0; }
 .scoreboard-display-choice { display: flex; align-items: start; gap: 10px; margin-bottom: 16px; cursor: pointer; }
 .scoreboard-display-choice input { accent-color: var(--accent); margin-top: 5px; }
-.scoreboard-display-choice strong { display: block; font-size: 16px; }
-.scoreboard-display-choice small { color: #9aadb9; font-size: 13px; }
-.scoreboard-speed { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; }
-.scoreboard-speed select { background: var(--bg); color: var(--fg); border: 1px solid #394c5a; border-radius: 4px; padding: 6px 10px; font: inherit; }
-.scoreboard-speed select:disabled { opacity: 0.5; }
+.scoreboard-display-choice strong { display: block; font-size: 13px; }
+.scoreboard-display-choice small { color: #9aadb9; font-size: 12px; }
+.scoreboard-speed { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; }
+/* Same size as the speed chip next to it. */
+.scoreboard-display-options .scoreboard-scroll-btn { display: inline-flex; align-items: center; padding: 2px 10px; font-size: 12px; border-radius: 3px; }
 .scoreboard-live, .scoreboard-demo-indicator {
   display: inline-flex;
   align-items: center;
@@ -1063,7 +1064,7 @@ a.terminal-link:visited {
   flex-wrap: wrap;
   gap: 4px;
   margin-top: 12px;
-  font-size: 13px;
+  font-size: 12px;
 }
 .scoreboard-demo-label { color: #9aadb9; margin-right: 6px; }
 .scoreboard-demo-btn {
@@ -3145,6 +3146,8 @@ a.terminal-link:visited {
   flex: none;
 }
 .admin-help-caret { font-size: 9px; opacity: 0.7; }
+.admin-help-chip:disabled { opacity: 0.5; cursor: default; }
+.admin-help-chip:disabled:hover { border-color: #2a3540; }
 
 /* Floating panels of the Pack / Users tables (portal, fixed position). */
 .admin-pop {

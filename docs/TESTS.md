@@ -68,6 +68,7 @@ bun test -t "lunch lock"                           # by name
 | `pack-state.test.ts` | What the Pack tab shows per stage: the five states, their precedence, and the reason line |
 | `help-labels.test.ts` | The help UI strings of every locale |
 | `duration.test.ts` | The compact time format shared by the scoreboard, the Agents table, the HELP COST column and the player's help UI (`45s`, `12m05`, `1h12`, and penalties as `+4m30`, none at 0 s) |
+| `scroll-speeds.test.ts` | The auto-scroll speeds (12, 24, 48, 96 px/s): their order, their names, and that each one is a valid display setting |
 | `scoreboard-time.test.ts` | The scoreboard card clock: playing time without the waits, the clock stopped while a player is held, idle time that restarts at the unlock |
 | `help-cost.test.ts` | The help-cost editor's pure helpers: minutes / seconds split, validation (whole numbers, 59 s, one hour cap), `free` / `2m30` display (the same format as the clocks) |
 

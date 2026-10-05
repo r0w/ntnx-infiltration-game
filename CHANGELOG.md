@@ -21,12 +21,14 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 - Help counts in the score: each stage can set a time penalty, in seconds, added to the playing time in the ranking. The scoreboard shows a badge, the Agents table has a Penalties column, and the player confirms before a costly first display.
 - Switch the help on or off for everyone, or for one player, from `/admin`. It is off by default, and the player's setting wins over the global one. The per-player setting is a small menu in the Agents table.
 - Change a stage's help cost without redeploying: the Pack tab has a new HELP COST column with a quick editor and a reset to the pack value. The cost is part of the exported and imported config, and players who already used a help keep what they were charged.
+- Auto-scroll has a fourth speed, **Turbo** (96 px/s), after Slow, Normal and Fast. The speed is now picked from a small menu like the help setting of the Agents table, which also shows each speed in pixels per second.
 - Time spent held by the operator no longer counts against a player: how long each player waited at an admin gate or under the lunch lock is recorded from the moment the game stops them to the moment you unlock or resume.
 - Scoreboard cards show the playing time, not the raw elapsed time: the clock stops while a player is held. An orange `paused` chip means a gate, a violet `lunch` chip the lunch lock, and a cyan `idle` chip means nothing was attempted for over a minute (it restarts at the unlock). The help badge is now red, with an icon, and sits to the left of the playing time. The mock previews show these states too, with presets for 5, 12, 21, 32, 40 and 50 agents.
 
 ### Changed
 
 - Scoreboard layout adapts to the screen and participant count, including 50 players at 1920×1080. Progress fills each card's background, and display controls live in Admin to keep the projected view clean.
+- The scoreboard display settings in Admin use the same text sizes as the rest of the console: the option titles were larger than the panel title.
 - The ranking now compares playing time instead of the absolute finish time: finish minus start, minus the time held at gates and by the lunch lock, plus help penalties. A late start or a long wait at a gate no longer costs a place, and players still playing are ordered as before.
 - Help penalties are shown in the same compact format as the clocks (`+4m30`, `+45s`) everywhere they appear instead of `+4 min 30 s`: on the scoreboard cards, in the Agents table, in the HELP COST column and in what the player sees (the help button, the confirmation and the help block). The penalty is red in the player's help block, like the scoreboard badge.
 - The report stage accepts a 03:00 schedule regardless of the report timezone.
