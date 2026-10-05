@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { MessageUnit } from '@ntnx-game/shared';
+import { HelpIcon } from './AgentIcons';
 import { CodeBlock } from './CodeBlock';
 import { fmtPenaltyShort } from './duration';
 import { helpLabels, type HelpLabels } from './helpLabels';
@@ -60,7 +61,7 @@ export function HelpBlock({ id, units, penaltySec, locale, isActive, onDone }: H
           setOpen((v) => !v);
         }}
       >
-        <span className="help-bulb" aria-hidden="true">💡</span>
+        <HelpIcon />
         <span className="help-title">{labels.title}</span>
         {cost && <span className="help-pill">{cost}</span>}
         <span className="help-fold">

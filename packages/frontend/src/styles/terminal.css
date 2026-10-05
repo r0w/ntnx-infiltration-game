@@ -3031,6 +3031,8 @@ a.terminal-link:visited {
 .help-block.is-open .help-head { border-bottom: 1px solid rgba(124, 220, 254, 0.25); }
 .help-head:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
 .help-title { font-weight: 600; }
+/* The joker, in the colour of the title. */
+.help-head .agent-ico { width: 1.15em; height: 1.15em; margin-right: 0; vertical-align: middle; }
 .help-pill {
   margin-left: auto;
   padding: 1px 8px;
