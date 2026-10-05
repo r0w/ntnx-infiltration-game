@@ -186,8 +186,18 @@ export interface ScoreboardEntry {
   /** Stages whose step-by-step help the player displayed (absent from
    *  peers running an older version). */
   helpUses?: number;
-  /** Total help penalty in seconds, added to the finish time in the ranking. */
+  /** Total help penalty in seconds, added to the playing time in the ranking. */
   helpPenaltySec?: number;
+  /** Time the operator held the player (admin gates, lunch lock) in waits that
+   *  are over, in ms; the card's clock and the ranking leave it out. Absent
+   *  from peers running an older version. */
+  blockedMs?: number;
+  /** Start of the wait still running, `null` when the player is not held. */
+  blockedSince?: number | null;
+  /** Why the player is held right now: `gate` = admin gate, `pause` = lunch lock. */
+  blockedReason?: 'gate' | 'pause' | null;
+  /** End of the player's latest wait; the idle clock restarts there. */
+  lastReleasedAt?: number | null;
   status: 'playing' | 'finished';
 }
 

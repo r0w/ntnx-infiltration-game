@@ -22,6 +22,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 - Switch the help on or off for everyone, or for one player, from `/admin`. It is off by default, and the player's setting wins over the global one. The per-player setting is a small menu in the Agents table.
 - Change a stage's help cost without redeploying: the Pack tab has a new HELP COST column with a quick editor and a reset to the pack value. The cost is part of the exported and imported config, and players who already used a help keep what they were charged.
 - Time spent held by the operator no longer counts against a player: how long each player waited at an admin gate or under the lunch lock is recorded from the moment the game stops them to the moment you unlock or resume.
+- Scoreboard cards show the playing time, not the raw elapsed time: the clock stops while a player is held. An orange `paused` chip means a gate, a violet `lunch` chip the lunch lock, and a cyan `idle` chip means nothing was attempted for over a minute (it restarts at the unlock). The help badge is now red, with an icon, and sits to the left of the playing time. The mock previews show these states too, with presets for 5, 12, 21, 32, 40 and 50 agents.
 
 ### Changed
 

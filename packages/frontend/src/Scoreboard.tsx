@@ -4,9 +4,11 @@ import {
   api,
   type ScoreboardEntry,
 } from './api';
-import { formatPenalty } from './helpLabels';
+import { HelpIcon, LunchIcon, PauseIcon } from './AgentIcons';
+import { fmtDuration, fmtPenaltyShort } from './duration';
 import { scoreboardLayout } from './scoreboardDisplay';
 import { advanceDemo, makeDemoPayload, MAX_DEMO_AGENTS, type DisplayPayload } from './scoreboardDemo';
+import { heldMs, idleMs, IDLE_AFTER_MS, netElapsedMs } from './scoreboardTime';
 import { useScoreboardDisplaySettings } from './useScoreboardDisplaySettings';
 import { useScoreboardScroll } from './useScoreboardScroll';
 
@@ -181,25 +183,32 @@ function AgentCard({
   const agentName = entry.username ?? 'anonymous';
   const trigramLabel = entry.trigram ?? '—';
   const stageLabel = entry.stageName ?? 'mission complete';
-  // Time line: finished sessions show total duration; playing sessions show
-  // elapsed + an "idle Xm" hint when the last stage_history touch is > 60 s
-  // old. That reveals stuck/AFK players without the noise of "updated 2s
-  // ago" ticking constantly — we only surface inactivity.
+  // Clock: the playing time, i.e. without the time the operator held the player
+  // at a gate or under the lunch lock. A held player's clock stops, and says why
+  // in a chip. Otherwise an "idle" chip appears once nothing was attempted for
+  // a minute, which reveals stuck / AFK players without the noise of "updated
+  // 2s ago" ticking constantly: we only surface inactivity.
   const now = Date.now();
-  const idleMs = entry.lastActivityAt !== null ? now - entry.lastActivityAt : 0;
-  const timeLabel =
-    entry.finishedAt !== null
-      ? `finished · ${fmtDuration(entry.finishedAt - entry.startedAt)}`
-      : entry.lastActivityAt !== null && idleMs > 60_000
-        ? `${fmtDuration(now - entry.startedAt)} · idle ${fmtDuration(idleMs)}`
-        : fmtDuration(now - entry.startedAt);
+  const net = netElapsedMs(entry, now);
+  const held = heldMs(entry, now);
+  const idle = idleMs(entry, now);
+  const timeLabel = entry.finishedAt !== null ? `finished · ${fmtDuration(net)}` : fmtDuration(net);
   // Step-by-step help is part of the score: each stage whose help the player
-  // displayed is counted, and its penalty (if any) is added to the finish time
+  // displayed is counted, and its penalty (if any) is added to the playing time
   // in the ranking. The badge keeps the cost visible next to the clock.
   const helpUses = entry.helpUses ?? 0;
-  const helpCost = formatPenalty(entry.helpPenaltySec ?? 0);
+  const helpCost = fmtPenaltyShort(entry.helpPenaltySec ?? 0);
+  const blocked = held !== null ? (entry.blockedReason === 'pause' ? 'lunch' : 'pause') : null;
+  const waited = entry.blockedMs ?? 0;
+  const timeTitle =
+    `playing time ${fmtDuration(net)}` +
+    (waited > 0 ? `, ${fmtDuration(waited)} held at gates and pauses not counted` : '') +
+    (helpCost ? `, ${helpCost} of help added in the ranking` : '');
   return (
-    <div ref={cardRef} className={`agent-card agent-${entry.status} agent-rank-${rankTier(entry.rank)}${simple ? ' agent-simple' : ''}`}>
+    <div
+      ref={cardRef}
+      className={`agent-card agent-${entry.status} agent-rank-${rankTier(entry.rank)}${simple ? ' agent-simple' : ''}${blocked ? ` is-blocked-${blocked}` : ''}`}
+    >
       <div className="agent-topline">
         <span className="agent-rank">#{entry.rank}</span>
         <span className="agent-heading" title={`${agentName} · ${trigramLabel}`}>
@@ -210,7 +219,23 @@ function AgentCard({
       </div>
       {(!simple || clusterLabel) && <div className="agent-details">
         <span className="agent-cluster" title={clusterLabel ? `cluster: ${clusterLabel}` : undefined}>{clusterLabel}</span>
-        {!simple && <span className="agent-time">{timeLabel}</span>}
+        {!simple && (
+          <span className="agent-clock">
+            {helpUses > 0 && (
+              <span
+                className="agent-help-pill"
+                title={
+                  `step-by-step help used on ${helpUses} stage${helpUses === 1 ? '' : 's'}` +
+                  (helpCost ? ` — ${helpCost} added to the playing time` : '')
+                }
+              >
+                <HelpIcon />×{helpUses}
+                {helpCost && ` ${helpCost}`}
+              </span>
+            )}
+            <span className="agent-time" title={timeTitle}>{timeLabel}</span>
+          </span>
+        )}
       </div>}
       <div
         className="agent-progress"
@@ -227,18 +252,29 @@ function AgentCard({
       </div>
       {!simple && <div className="agent-meta">
         <span className="agent-stage" title={stageLabel}>{stageLabel}</span>
-        {helpUses > 0 && (
-          <span
-            className="agent-help"
-            title={
-              `step-by-step help used on ${helpUses} stage${helpUses === 1 ? '' : 's'}` +
-              (helpCost ? ` — ${helpCost} added to the finish time` : '')
-            }
-          >
-            💡×{helpUses}
-            {helpCost && ` ${helpCost}`}
-          </span>
-        )}
+        <span className="agent-flags">
+          {held !== null && entry.blockedReason === 'pause' && (
+            <span
+              className="agent-chip chip-lunch"
+              title="held by the lunch lock: the clock is stopped until it is lifted"
+            >
+              <LunchIcon />lunch {fmtDuration(held)}
+            </span>
+          )}
+          {held !== null && entry.blockedReason !== 'pause' && (
+            <span
+              className="agent-chip chip-pause"
+              title="held at a gate: the clock is stopped until the operator unlocks it"
+            >
+              <PauseIcon />paused {fmtDuration(held)}
+            </span>
+          )}
+          {idle !== null && idle > IDLE_AFTER_MS && (
+            <span className="agent-chip chip-idle" title="no check attempted for a while">
+              idle {fmtDuration(idle)}
+            </span>
+          )}
+        </span>
       </div>}
     </div>
   );
@@ -271,15 +307,4 @@ function progressTier(percent: number): 'low' | 'mid' | 'high' | 'done' {
   if (percent >= 66) return 'high';
   if (percent >= 33) return 'mid';
   return 'low';
-}
-
-function fmtDuration(ms: number): string {
-  if (ms < 0 || !Number.isFinite(ms)) return '—';
-  const s = Math.floor(ms / 1000);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  if (h > 0) return `${h}h${String(m).padStart(2, '0')}`;
-  if (m > 0) return `${m}m${String(sec).padStart(2, '0')}`;
-  return `${sec}s`;
 }

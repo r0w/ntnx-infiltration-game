@@ -48,10 +48,13 @@ export function makeDemoPayload(count: number, combined: boolean): DisplayPayloa
   const entries: Array<ScoreboardEntry & { peerLabel?: string | null }> = Array.from({ length: count }, (_, i) => {
     // Distribute progress across the roster: top few near-finished, a
     // cluster mid-game, some just started, 1-2 finished at the very top,
-    // 1 idle. Anonymous (pre-trigram) entries are filtered out of the
-    // public scoreboard so we don't seed them into the demo either.
+    // a few idle and a few held by a gate or the lunch lock. Anonymous
+    // (pre-trigram) entries are filtered out of the public scoreboard so we
+    // don't seed them into the demo either.
     const isFinished = i === 0 && count >= 3;
-    const isIdle = count >= 4 && i === 2;
+    const isIdle = count >= 4 && (i === 2 || i % 11 === 4);
+    const heldBy: 'gate' | 'pause' | null =
+      isFinished || count < 5 ? null : i % 9 === 5 || i % 9 === 6 ? 'gate' : count >= 12 && i % 13 === 8 ? 'pause' : null;
     const progressRatio = isFinished
       ? 1
       : Math.max(0.05, 1 - (i / count) * 0.95);
@@ -59,11 +62,15 @@ export function makeDemoPayload(count: number, combined: boolean): DisplayPayloa
     const nextIdx = isFinished ? null : Math.min(stagesPassed, TOTAL - 1);
     const startedAt = now - (20 + (i * 17) % 100) * 60_000;
     const finishedAt = isFinished ? now - 8 * 60_000 : null;
+    const blockedSince =
+      heldBy !== null ? Math.max(startedAt + 60_000, now - (6 + (i * 53) % 7) * 60_000) : null;
     const lastActivityAt = isFinished
       ? finishedAt
       : isIdle
         ? now - 4 * 60_000
-        : now - (i * 7919) % 40_000;
+        : heldBy !== null
+          ? blockedSince
+          : now - (i * 7919) % 40_000;
     const peerLabel = combined ? FAKE_PEERS[i % FAKE_PEERS.length]! : null;
     return {
       rank: i + 1,
@@ -82,6 +89,12 @@ export function makeDemoPayload(count: number, combined: boolean): DisplayPayloa
       // (with and without a time penalty) can be checked on the projector.
       helpUses: i % 4 === 1 ? 2 : i % 4 === 3 ? 1 : 0,
       helpPenaltySec: i % 4 === 1 ? 270 : 0,
+      // Demo only: some players already sat out an earlier wait, others are
+      // held right now (their clock is stopped).
+      blockedMs: i % 5 === 0 ? 4 * 60_000 : i % 7 === 3 ? 2 * 60_000 : 0,
+      blockedSince,
+      blockedReason: heldBy,
+      lastReleasedAt: null,
       status: finishedAt !== null ? 'finished' : 'playing',
       peerLabel,
     };
@@ -109,8 +122,13 @@ export function advanceDemo(payload: DisplayPayload | null, random: () => number
     if (entry !== target) return entry;
     const stagesPassed = Math.min(entry.effectiveTotalStages, entry.stagesPassed + 1);
     const finished = stagesPassed === entry.effectiveTotalStages;
+    // Moving on means the player is not held any more.
+    const wasHeld = entry.blockedSince != null;
     return {
       ...entry, stagesPassed, lastActivityAt: now,
+      blockedMs: (entry.blockedMs ?? 0) + (wasHeld ? now - entry.blockedSince! : 0),
+      blockedSince: null, blockedReason: null,
+      lastReleasedAt: wasHeld ? now : entry.lastReleasedAt ?? null,
       stageName: finished ? null : DEMO_STAGE_NAMES[stagesPassed] ?? null,
       finishedAt: finished ? now : null,
       status: finished ? 'finished' as const : 'playing' as const,

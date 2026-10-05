@@ -886,7 +886,34 @@ a.terminal-link:visited {
 .agent-cluster { color: #b3c3cf; }
 .agent-stage { color: var(--fg); }
 .agent-card.agent-finished .agent-stage { color: var(--pass); }
-.agent-time, .agent-help { white-space: nowrap; flex: 0 0 auto; }
+.agent-time, .agent-flags, .agent-clock { white-space: nowrap; flex: 0 0 auto; }
+/* The clock group: the help badge on the left of the playing time, which stays
+   at the right end of its line. */
+.agent-clock { display: flex; align-items: baseline; gap: 0.7em; }
+/* What the card says about its player besides the clock: step-by-step help
+   (next to the clock), and why the clock is stopped (a gate or the lunch lock)
+   or that nothing was attempted for a while (on the stage line). Each has its
+   own colour, a faint background of the same hue, and an icon where there is one. */
+.agent-flags { display: flex; align-items: baseline; gap: 0.7em; }
+.agent-flags:empty { display: none; }
+.agent-chip, .agent-help-pill { padding: 0 0.45em; border-radius: 3px; white-space: nowrap; }
+.chip-pause { color: var(--prompt); background: rgba(255, 184, 107, 0.14); }
+.chip-lunch { color: var(--magenta); background: rgba(214, 132, 255, 0.14); }
+.chip-idle { color: var(--accent); background: rgba(124, 220, 254, 0.13); }
+.agent-help-pill { color: var(--red); background: rgba(255, 107, 107, 0.14); }
+.agent-ico {
+  width: 1em;
+  height: 1em;
+  margin-right: 0.3em;
+  vertical-align: -0.14em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.agent-card.is-blocked-pause { border-color: rgba(255, 184, 107, 0.6); }
+.agent-card.is-blocked-lunch { border-color: rgba(214, 132, 255, 0.6); }
 .scoreboard-grid.is-dense .agent-card { padding: 8px 12px; gap: 4px; }
 .scoreboard-grid.is-dense .agent-topline { gap: 10px; }
 .agent-card.agent-simple .agent-topline { font-size: clamp(20px, min(6.5cqw, 42cqh), 36px); }
@@ -3081,7 +3108,6 @@ a.terminal-link:visited {
 }
 
 /* Scoreboard badge and /admin controls. */
-.agent-help { color: var(--yellow); }
 .admin-help-btn-on { border-color: var(--green); color: var(--green); }
 .admin-penalties { white-space: nowrap; }
 
