@@ -304,7 +304,7 @@ export class SessionQueries {
     }));
   }
 
-  listScoreboard(packId: string): ScoreboardRow[] {
+  listScoreboard(packId: string): Array<ScoreboardRow & WaitSummary> {
     // We read the real trigram/username from `session_variables` — the
     // `sessions.trigram` column is a UUID placeholder (identification happens
     // in-game via <input/>), so joining on it would surface UUIDs, not the
@@ -332,16 +332,30 @@ export class SessionQueries {
               WHERE session_id = s.id) AS help_uses,
            (SELECT COALESCE(SUM(penalty_sec), 0) FROM help_usage
               WHERE session_id = s.id) AS help_penalty_sec,
-           -- Finish time + the help penalties: what finished players are
-           -- ranked on. NULL while unfinished (those tie here, as before).
-           (s.finished_at + 1000 * (SELECT COALESCE(SUM(penalty_sec), 0) FROM help_usage
-              WHERE session_id = s.id)) AS finish_effective_at
+           -- Time the operator held the session (admin gates, pack-wide pause):
+           -- the waits that are over, the one still running, and the latest end.
+           (SELECT COALESCE(SUM(released_at - blocked_at), 0) FROM session_waits
+              WHERE session_id = s.id AND released_at IS NOT NULL) AS blocked_ms,
+           (SELECT blocked_at FROM session_waits
+              WHERE session_id = s.id AND released_at IS NULL) AS blocked_since,
+           (SELECT reason FROM session_waits
+              WHERE session_id = s.id AND released_at IS NULL) AS blocked_reason,
+           (SELECT MAX(released_at) FROM session_waits
+              WHERE session_id = s.id) AS last_released_at,
+           -- Playing time (finish - start - held time) plus the help penalties:
+           -- what finished players are ranked on. NULL while unfinished (those
+           -- tie here, as before).
+           (MAX(0, s.finished_at - s.started_at - (SELECT COALESCE(SUM(released_at - blocked_at), 0)
+              FROM session_waits WHERE session_id = s.id AND released_at IS NOT NULL))
+            + 1000 * (SELECT COALESCE(SUM(penalty_sec), 0) FROM help_usage
+              WHERE session_id = s.id)) AS net_effective_ms
          FROM sessions s
          WHERE s.pack_id = $packId
          ORDER BY
            CASE WHEN s.finished_at IS NOT NULL THEN 0 ELSE 1 END ASC,
            stages_passed DESC,
-           finish_effective_at ASC,
+           net_effective_ms ASC,
+           s.finished_at ASC,
            last_activity_at DESC,
            s.started_at ASC`,
       )
@@ -357,6 +371,10 @@ export class SessionQueries {
         last_activity_at: number | null;
         help_uses: number;
         help_penalty_sec: number;
+        blocked_ms: number;
+        blocked_since: number | null;
+        blocked_reason: SessionWaitReason | null;
+        last_released_at: number | null;
       }>;
     return rows.map((r) => ({
       sessionId: r.session_id,
@@ -370,8 +388,24 @@ export class SessionQueries {
       lastActivityAt: r.last_activity_at,
       helpUses: r.help_uses,
       helpPenaltySec: r.help_penalty_sec,
+      blockedMs: r.blocked_ms,
+      blockedSince: r.blocked_since,
+      blockedReason: r.blocked_reason,
+      lastReleasedAt: r.last_released_at,
     }));
   }
+}
+
+/** What a session's waits add to a scoreboard row (see `SessionWaitQueries`). */
+export interface WaitSummary {
+  /** Time held by the operator in waits that are over, in ms. */
+  blockedMs: number;
+  /** Start of the wait still running, `null` when the session is not held. */
+  blockedSince: number | null;
+  /** Why the session is held right now: an admin gate or the pack-wide pause. */
+  blockedReason: SessionWaitReason | null;
+  /** End of the latest wait, `null` if the session was never held. */
+  lastReleasedAt: number | null;
 }
 
 export interface ScoreboardRow {

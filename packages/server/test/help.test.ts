@@ -18,7 +18,7 @@ import { HelpUsageQueries, HistoryQueries, VariableQueries } from '../src/db/que
 import { buildApp } from '../src/app';
 import {
   buildScoreboardRoutes,
-  effectiveFinish,
+  effectiveDuration,
   mergeScoreboards,
   type ScoreboardEntry,
 } from '../src/routes/scoreboard';
@@ -406,13 +406,15 @@ describe('mergeScoreboards with help penalties', () => {
     };
   }
 
-  test('effectiveFinish adds the penalty to the finish time', () => {
-    expect(effectiveFinish({ finishedAt: 4000, helpPenaltySec: 2 })).toBe(6000);
-    expect(effectiveFinish({ finishedAt: 4000 })).toBe(4000);
-    expect(effectiveFinish({ finishedAt: null, helpPenaltySec: 9 })).toBe(Number.POSITIVE_INFINITY);
+  test('effectiveDuration adds the penalty to the playing time', () => {
+    expect(effectiveDuration({ startedAt: 1000, finishedAt: 4000, helpPenaltySec: 2 })).toBe(5000);
+    expect(effectiveDuration({ startedAt: 1000, finishedAt: 4000 })).toBe(3000);
+    expect(
+      effectiveDuration({ startedAt: 1000, finishedAt: null, helpPenaltySec: 9 }),
+    ).toBe(Number.POSITIVE_INFINITY);
   });
 
-  test('ranks on finish time plus penalties; a peer without the field counts as 0', () => {
+  test('ranks on playing time plus penalties; a peer without the field counts as 0', () => {
     const merged = mergeScoreboards([
       entry({ sessionId: 'local-helped', finishedAt: 3000, helpPenaltySec: 2 }),
       entry({ sessionId: 'old-peer', finishedAt: 4000, peerLabel: 'old' }),

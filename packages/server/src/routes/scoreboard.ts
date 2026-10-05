@@ -72,9 +72,19 @@ export interface ScoreboardEntry {
   /** Stages whose step-by-step help the player displayed. Optional: peers
    *  on an older version don't send it (read as 0). */
   helpUses?: number;
-  /** Total help penalty in seconds, added to the finish time in the
+  /** Total help penalty in seconds, added to the playing time in the
    *  ranking. Optional for the same reason as `helpUses`. */
   helpPenaltySec?: number;
+  /** Time the operator held the player (admin gates, pack-wide pause) in waits
+   *  that are over, in ms. Taken off the playing time. Optional: peers on an
+   *  older version don't send it (read as 0). */
+  blockedMs?: number;
+  /** Start of the wait still running, `null` when the player is not held. */
+  blockedSince?: number | null;
+  /** Why the player is held right now. */
+  blockedReason?: 'gate' | 'pause' | null;
+  /** End of the player's latest wait; the idle clock restarts there. */
+  lastReleasedAt?: number | null;
   status: 'playing' | 'finished';
 }
 
@@ -130,6 +140,10 @@ export function buildScoreboardRoutes(deps: ScoreboardRoutesDeps): Hono {
         lastActivityAt: row.lastActivityAt,
         helpUses: row.helpUses,
         helpPenaltySec: row.helpPenaltySec,
+        blockedMs: row.blockedMs,
+        blockedSince: row.blockedSince,
+        blockedReason: row.blockedReason,
+        lastReleasedAt: row.lastReleasedAt,
         status: finished ? 'finished' : 'playing',
       };
     });
@@ -180,9 +194,10 @@ export function buildScoreboardRoutes(deps: ScoreboardRoutesDeps): Hono {
  * Re-rank a list of mixed (local + peer) entries into a single board.
  *
  * Ordering matches the AgentCard render (progress-first): more
- * stagesPassed wins, then earliest finish wins (the finish time plus the
- * step-by-step help penalties, see {@link effectiveFinish}), then earliest
- * start (= "got there first"). `rank` is rewritten gap-free; `sessionId` is
+ * stagesPassed wins, then the shortest playing time (finish - start, minus the
+ * time the operator held the player, plus the step-by-step help penalties, see
+ * {@link effectiveDuration}), then earliest finish, then earliest start
+ * (= "got there first"). `rank` is rewritten gap-free; `sessionId` is
  * namespaced with `peerLabel:` when the entry came from a peer so the
  * frontend `key` doesn't collide between instances that happen to have
  * matching session UUIDs (unlikely but cheap to defend against).
@@ -192,9 +207,12 @@ export function mergeScoreboards(
 ): Array<ScoreboardEntry & { peerLabel: string | null }> {
   const sorted = [...rows].sort((a, b) => {
     if (b.stagesPassed !== a.stagesPassed) return b.stagesPassed - a.stagesPassed;
-    const aFin = effectiveFinish(a);
-    const bFin = effectiveFinish(b);
-    if (aFin !== bFin) return aFin - bFin;
+    const aDur = effectiveDuration(a);
+    const bDur = effectiveDuration(b);
+    if (aDur !== bDur) return aDur - bDur;
+    if (a.finishedAt !== null && b.finishedAt !== null && a.finishedAt !== b.finishedAt) {
+      return a.finishedAt - b.finishedAt;
+    }
     return a.startedAt - b.startedAt;
   });
   return sorted.map((e, idx) => ({
@@ -205,13 +223,18 @@ export function mergeScoreboards(
 }
 
 /**
- * Finish time as the ranking sees it: the real finish plus the step-by-step
- * help penalties. `Infinity` while unfinished, so those entries tie on this
- * key exactly as before. A peer on an older version sends no penalty (0).
+ * Playing time as the ranking sees it, in ms: finish minus start, minus the
+ * time the operator held the player in a gate or the pause (waits are not the
+ * player's time), plus the step-by-step help penalties. `Infinity` while
+ * unfinished, so those entries tie on this key exactly as before. A peer on an
+ * older version sends no waits and no penalty (both 0).
  */
-export function effectiveFinish(e: Pick<ScoreboardEntry, 'finishedAt' | 'helpPenaltySec'>): number {
+export function effectiveDuration(
+  e: Pick<ScoreboardEntry, 'startedAt' | 'finishedAt' | 'blockedMs' | 'helpPenaltySec'>,
+): number {
   if (e.finishedAt === null) return Number.POSITIVE_INFINITY;
-  return e.finishedAt + (e.helpPenaltySec ?? 0) * 1000;
+  const playing = Math.max(0, e.finishedAt - e.startedAt - (e.blockedMs ?? 0));
+  return playing + (e.helpPenaltySec ?? 0) * 1000;
 }
 
 interface PeerFetchResult {

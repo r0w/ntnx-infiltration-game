@@ -39,7 +39,7 @@ bun test -t "lunch lock"                           # by name
 | `pack-config.test.ts` | The portable stage-config string: encode/decode, compression, stage drift both ways, pack mismatch, help-cost overrides (round trip, range, no-help stages, default-equal values dropped) |
 | `check-trigram.test.ts` | Trigram shape + collision (returning-agent re-auth) |
 | `dep-analysis.test.ts` | Cascade-disable preview: which downstream stages break when an upstream producer is off |
-| `scoreboard.test.ts` | Sort, anonymous filtering, UUID anti-leak, packId scoping |
+| `scoreboard.test.ts` | Sort, anonymous filtering, UUID anti-leak, packId scoping; ranking on playing time (late start, time held at gates, help penalties, tie-breaks, players still playing); waits exposed in the payload; combined board |
 | `help.test.ts` | Step-by-step help: off by default, player override beats the global switch, confirmation before a costly first display, billed once and frozen, ranking with penalties (local + combined), player and admin routes |
 | `help-pack.test.ts` | Loader rejects malformed `help` / `helpPenaltySec`; shipped help blocks keep their keys, images and variables consistent |
 | `help-cost.test.ts` | Operator help-cost override: admin route (set, reset, validation, stages without help), effect on the next display only, confirmed-amount guard, `/api/pack` exposure, overlay storage and cleanup |

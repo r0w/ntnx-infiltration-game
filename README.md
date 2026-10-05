@@ -103,7 +103,7 @@ docs/
 4. Export the check function from `packs/<pack>/checks/index.ts`.
 5. (For mock mode) Add a fixture to `packs/<pack>/fixtures.json` keyed by `"METHOD path"`.
 6. Tag with `"impact": "destructive"` if the stage mutates cluster-wide state - it then only runs when the cluster profile is `hpoc`. Tag `"requires": ["NCM"]` (or `IO`, `CalmDSL`, `NodeRemove`) if the stage depends on an optional feature.
-7. (Optional) Add a step-by-step help block shown on demand: `"help": ["my-stage.help-01", ...]` lists locale keys written in the same grammar as `messages` (`<code>` for copyable values, `<image src='my-stage-step-01.png' alt='Caption'/>` for screenshots kept in `packs/<pack>/assets/`). `"helpPenaltySec": 120` is the time added to the finish time the first time a player displays it; leave it out for a free help. The operator switches the help on in `/admin` (off by default).
+7. (Optional) Add a step-by-step help block shown on demand: `"help": ["my-stage.help-01", ...]` lists locale keys written in the same grammar as `messages` (`<code>` for copyable values, `<image src='my-stage-step-01.png' alt='Caption'/>` for screenshots kept in `packs/<pack>/assets/`). `"helpPenaltySec": 120` is the time added to the player's playing time the first time they display it; leave it out for a free help. The operator switches the help on in `/admin` (off by default).
 
 The frontend `DevPanel` lets you jump to any stage without replaying the whole game. Captured variables and the cluster cache are preserved across jumps. Restart the backend after editing pack JSON - Bun caches the pack at boot.
 
