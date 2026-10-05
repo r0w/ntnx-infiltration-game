@@ -101,18 +101,3 @@ export const HELP_LABELS: Record<string, HelpLabels> = {
 export function helpLabels(locale: string): HelpLabels {
   return HELP_LABELS[locale] ?? HELP_LABELS.en!;
 }
-
-/**
- * Human-readable help penalty: `+2 min`, `+1 min 30 s`, `+45 s`. Empty for 0
- * (or less): a free help never shows a cost, so callers can test the result.
- */
-export function formatPenalty(seconds: number): string {
-  const total = Math.floor(seconds);
-  if (!Number.isFinite(total) || total <= 0) return '';
-  const min = Math.floor(total / 60);
-  const sec = total % 60;
-  const parts: string[] = [];
-  if (min > 0) parts.push(`${min} min`);
-  if (sec > 0) parts.push(`${sec} s`);
-  return `+${parts.join(' ')}`;
-}

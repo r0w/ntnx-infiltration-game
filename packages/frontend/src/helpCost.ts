@@ -1,5 +1,5 @@
 import { HELP_PENALTY_MAX_SEC } from '@ntnx-game/shared';
-import { formatPenalty } from './helpLabels';
+import { fmtDuration } from './duration';
 
 /** One-click values offered by the Pack tab's help-cost editor, in seconds. */
 export const HELP_COST_PRESETS = [0, 60, 120, 180, 300] as const;
@@ -36,8 +36,7 @@ export function validateCost(
   return { seconds };
 }
 
-/** A cost as the Pack tab shows it: `2 min`, `2 min 30 s`, `45 s`, or `free`. */
+/** A cost as the Pack tab shows it, like the clocks: `2m00`, `2m30`, `45s`, or `free`. */
 export function formatCost(seconds: number): string {
-  const text = formatPenalty(seconds);
-  return text === '' ? 'free' : text.slice(1);
+  return seconds > 0 ? fmtDuration(seconds * 1000) : 'free';
 }

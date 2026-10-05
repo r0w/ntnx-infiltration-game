@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { MessageUnit } from '@ntnx-game/shared';
 import { CodeBlock } from './CodeBlock';
-import { formatPenalty, helpLabels, type HelpLabels } from './helpLabels';
+import { fmtPenaltyShort } from './duration';
+import { helpLabels, type HelpLabels } from './helpLabels';
 import { Modal } from './Modal';
 import { textClasses } from './textClasses';
 
@@ -34,7 +35,7 @@ function assetUrl(src: string): string {
  */
 export function HelpBlock({ id, units, penaltySec, locale, isActive, onDone }: HelpBlockProps) {
   const labels = helpLabels(locale);
-  const cost = formatPenalty(penaltySec);
+  const cost = fmtPenaltyShort(penaltySec);
   const [open, setOpen] = useState(true);
   const [zoomed, setZoomed] = useState<Zoomed | null>(null);
   const onDoneRef = useRef(onDone);

@@ -2983,6 +2983,7 @@ a.terminal-link:visited {
   cursor: pointer;
   white-space: nowrap;
 }
+.terminal-help-btn .help-cost { color: var(--red); }
 .terminal-help-btn:hover:not(:disabled) { color: var(--accent); }
 .terminal-help-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 .terminal-help-btn:disabled { opacity: 0.5; cursor: wait; }
@@ -3034,8 +3035,8 @@ a.terminal-link:visited {
   margin-left: auto;
   padding: 1px 8px;
   border-radius: 4px;
-  background: rgba(224, 192, 104, 0.14);
-  color: var(--yellow);
+  background: rgba(255, 107, 107, 0.14);
+  color: var(--red);
   font-size: 12px;
 }
 .help-pill + .help-fold { margin-left: 0; }
@@ -3185,7 +3186,7 @@ a.terminal-link:visited {
 .admin-help-check { width: 12px; flex: none; color: var(--accent); }
 
 /* Help-cost editor (Pack tab). */
-.pack-toggle-help { color: var(--accent); border-color: rgba(124, 220, 254, 0.35); }
+.pack-toggle-help { color: var(--accent); border-color: rgba(124, 220, 254, 0.35); text-transform: none; }
 .pack-toggle-help.is-open { border-color: var(--accent); }
 .admin-help-editor { display: flex; flex-direction: column; }
 .admin-help-fields { display: flex; align-items: center; gap: 6px; }

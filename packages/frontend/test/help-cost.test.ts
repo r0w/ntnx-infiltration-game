@@ -59,9 +59,10 @@ describe('formatCost', () => {
     expect(formatCost(0)).toBe('free');
   });
 
-  test('minutes, seconds, or both, without the leading plus', () => {
-    expect(formatCost(120)).toBe('2 min');
-    expect(formatCost(150)).toBe('2 min 30 s');
-    expect(formatCost(45)).toBe('45 s');
+  test('in the same format as the clocks, without the leading plus', () => {
+    expect(formatCost(120)).toBe('2m00');
+    expect(formatCost(150)).toBe('2m30');
+    expect(formatCost(45)).toBe('45s');
+    expect(formatCost(3600)).toBe('1h00');
   });
 });

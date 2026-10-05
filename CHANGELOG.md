@@ -28,6 +28,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 - Scoreboard layout adapts to the screen and participant count, including 50 players at 1920×1080. Progress fills each card's background, and display controls live in Admin to keep the projected view clean.
 - The ranking now compares playing time instead of the absolute finish time: finish minus start, minus the time held at gates and by the lunch lock, plus help penalties. A late start or a long wait at a gate no longer costs a place, and players still playing are ordered as before.
+- Help penalties are shown in the same compact format as the clocks (`+4m30`, `+45s`) everywhere they appear instead of `+4 min 30 s`: on the scoreboard cards, in the Agents table, in the HELP COST column and in what the player sees (the help button, the confirmation and the help block). The penalty is red in the player's help block, like the scoreboard badge.
 - The report stage accepts a 03:00 schedule regardless of the report timezone.
 - In `test` and `mock` modes, text now appears instantly and `<pause>` beats are skipped by default. The dev panel's speed slider and "no pauses" box still override this, and `live` keeps the pack's pacing.
 

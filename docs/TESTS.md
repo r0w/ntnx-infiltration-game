@@ -66,10 +66,10 @@ bun test -t "lunch lock"                           # by name
 |---|---|
 | `ssh-console.test.ts` | Tab-completion + `classifyPingLine` (timeout → fail, 0% loss → pass) |
 | `pack-state.test.ts` | What the Pack tab shows per stage: the five states, their precedence, and the reason line |
-| `help-labels.test.ts` | Penalty formatting (`+2 min`, `+1 min 30 s`, none at 0 s) and the help UI strings of every locale |
-| `duration.test.ts` | The compact time format of the scoreboard (`45s`, `12m05`, `1h12`, and penalties as `+4m30`) |
+| `help-labels.test.ts` | The help UI strings of every locale |
+| `duration.test.ts` | The compact time format shared by the scoreboard, the Agents table, the HELP COST column and the player's help UI (`45s`, `12m05`, `1h12`, and penalties as `+4m30`, none at 0 s) |
 | `scoreboard-time.test.ts` | The scoreboard card clock: playing time without the waits, the clock stopped while a player is held, idle time that restarts at the unlock |
-| `help-cost.test.ts` | The help-cost editor's pure helpers: minutes / seconds split, validation (whole numbers, 59 s, one hour cap), `free` / `2 min 30 s` display |
+| `help-cost.test.ts` | The help-cost editor's pure helpers: minutes / seconds split, validation (whole numbers, 59 s, one hour cap), `free` / `2m30` display (the same format as the clocks) |
 
 The React components, typewriter, and polling loop aren't unit-tested; they're thin views over state whose HTTP contract is covered by the route + e2e tests.
 

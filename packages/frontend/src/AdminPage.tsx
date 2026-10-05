@@ -23,7 +23,7 @@ import { EMAIL_RE } from '@ntnx-game/shared';
 import { HelpCostCell } from './HelpCostCell';
 import { HelpMenu } from './HelpMenu';
 import { ScoreboardDisplayOptions } from './ScoreboardDisplayOptions';
-import { formatPenalty } from './helpLabels';
+import { fmtPenaltyShort } from './duration';
 import { ConfirmModal, Modal } from './Modal';
 import { stageState, stateNote, STATE_ORDER, type StageState } from './pack-state';
 
@@ -925,14 +925,14 @@ function AdminDashboard({
                       <span
                         className="admin-penalties c-yellow"
                         title={e.helpStages
-                          .map((h) => `${h.stage}${h.penaltySec > 0 ? ` (${formatPenalty(h.penaltySec)})` : ''}`)
+                          .map((h) => `${h.stage}${h.penaltySec > 0 ? ` (${fmtPenaltyShort(h.penaltySec)})` : ''}`)
                           .join(', ')}
                       >
                         {e.helpUses}
                         {e.helpPenaltySec > 0 && (
                           <>
                             <span className="c-dim"> | </span>
-                            {formatPenalty(e.helpPenaltySec)}
+                            {fmtPenaltyShort(e.helpPenaltySec)}
                           </>
                         )}
                       </span>

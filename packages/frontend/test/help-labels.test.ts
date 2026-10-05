@@ -1,33 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { formatPenalty, helpLabels, HELP_LABELS } from '../src/helpLabels';
-
-describe('formatPenalty', () => {
-  test('whole minutes', () => {
-    expect(formatPenalty(120)).toBe('+2 min');
-    expect(formatPenalty(180)).toBe('+3 min');
-    expect(formatPenalty(60)).toBe('+1 min');
-  });
-
-  test('minutes and seconds', () => {
-    expect(formatPenalty(150)).toBe('+2 min 30 s');
-    expect(formatPenalty(90)).toBe('+1 min 30 s');
-  });
-
-  test('seconds only', () => {
-    expect(formatPenalty(45)).toBe('+45 s');
-    expect(formatPenalty(1)).toBe('+1 s');
-  });
-
-  test('a free help shows no cost at all', () => {
-    expect(formatPenalty(0)).toBe('');
-    expect(formatPenalty(-5)).toBe('');
-    expect(formatPenalty(Number.NaN)).toBe('');
-  });
-
-  test('fractions are floored', () => {
-    expect(formatPenalty(119.9)).toBe('+1 min 59 s');
-  });
-});
+import { helpLabels, HELP_LABELS } from '../src/helpLabels';
 
 describe('helpLabels', () => {
   test('falls back to English for an unknown locale', () => {

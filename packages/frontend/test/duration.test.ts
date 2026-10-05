@@ -30,6 +30,10 @@ describe('fmtPenaltyShort', () => {
     expect(fmtPenaltyShort(3600)).toBe('+1h00');
   });
 
+  test('a fraction of a second is dropped', () => {
+    expect(fmtPenaltyShort(119.9)).toBe('+1m59');
+  });
+
   test('a free help shows nothing', () => {
     expect(fmtPenaltyShort(0)).toBe('');
     expect(fmtPenaltyShort(-5)).toBe('');

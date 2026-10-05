@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { formatPenalty, helpLabels } from './helpLabels';
+import { fmtPenaltyShort } from './duration';
+import { helpLabels } from './helpLabels';
 import { BrailleSpinner, TerminalItem, VERIFYING_LABELS } from './renderer';
 import { usePageBreakScrollPin } from './usePageBreakScrollPin';
 import {
@@ -376,7 +377,7 @@ export function FauxTerminal({
             {helpConfirm !== null && (
               <div className="terminal-help-confirm" role="alert">
                 <span className="c-yellow" aria-hidden="true">⚠</span>{' '}
-                {labels.confirm(formatPenalty(helpConfirm))}{' '}
+                {labels.confirm(fmtPenaltyShort(helpConfirm))}{' '}
                 <button type="button" className="terminal-help-choice" onClick={() => void showHelp(true, helpConfirm)}>
                   [{labels.yes}]
                 </button>
@@ -465,7 +466,12 @@ export function FauxTerminal({
                   }}
                 >
                   [? {help.used ? labels.review : labels.button}
-                  {!help.used && help.penaltySec > 0 ? ` · ${formatPenalty(help.penaltySec)}` : ''}]
+                  {!help.used && help.penaltySec > 0 && (
+                    <>
+                      {' · '}
+                      <span className="help-cost">{fmtPenaltyShort(help.penaltySec)}</span>
+                    </>
+                  )}]
                 </button>
               )}
             </form>
