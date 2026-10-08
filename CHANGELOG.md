@@ -91,6 +91,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Monitor the selected application’s latest action, including Refresh Kubeconfig and Switch Mode.
+
 - Resolve the game URL from the service variable populated during installation on both supported Calm profiles.
 
 - Restart the game when refreshing its kubeconfig or updating a pinned image, while preserving sessions.

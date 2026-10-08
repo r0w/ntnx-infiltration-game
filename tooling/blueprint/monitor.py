@@ -63,10 +63,9 @@ def find_root(rls: list[dict]) -> dict | None:
         s = e.get("status", {})
         if s.get("type") != "action_runlog":
             continue
-        action = (s.get("action_reference") or {}).get("name", "")
-        # action_create is the install runbook; named actions are day-2
-        if action == "action_create" or action.startswith("Update") or action == "VerifyState":
-            return e
+        # Results are already scoped to this application and sorted newest-first.
+        # Include every day-2 action, notably Refresh Kubeconfig and Switch Mode.
+        return e
     return None
 
 

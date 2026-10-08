@@ -2,8 +2,11 @@
 import importlib.util
 from pathlib import Path
 
+import pytest
 
-def test_monitor_reads_only_selected_application_and_action(monkeypatch):
+
+@pytest.mark.parametrize("action_name", ["action_create", "Refresh Kubeconfig", "Switch Mode"])
+def test_monitor_reads_only_selected_application_and_action(monkeypatch, action_name):
     monkeypatch.setenv("PC_ENDPOINT", "https://pc.invalid:9440")
     monkeypatch.setenv("PC_PASSWORD", "test")
     path = Path(__file__).parents[1] / "monitor.py"
@@ -11,7 +14,7 @@ def test_monitor_reads_only_selected_application_and_action(monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     root = {"metadata": {"uuid": "current", "creation_time": "20"},
-            "status": {"type": "action_runlog", "action_reference": {"name": "action_create"}}}
+            "status": {"type": "action_runlog", "action_reference": {"name": action_name}}}
     older = {"metadata": {"uuid": "older", "creation_time": "10"},
              "status": {"type": "action_runlog", "action_reference": {"name": "action_create"}}}
     child = {"metadata": {"uuid": "child"}, "status": {"state": "SUCCESS"}}
