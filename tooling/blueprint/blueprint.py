@@ -65,7 +65,8 @@ from calm.dsl.builtins.models.runbook import branch  # noqa
 
 # AD endpoint — created by runbook_prerequisites.json. Verified to
 # exist on PC at step 7.
-AD = CalmEndpoint.use_existing("AD")
+DEPLOYMENT_ONLY = os.environ.get("NIG_DEPLOYMENT_ONLY") == "1"
+AD = None if DEPLOYMENT_ONLY else CalmEndpoint.use_existing("AD")
 
 
 # ── Secrets ────────────────────────────────────────────────────────────
@@ -457,6 +458,21 @@ class GameContent(Package):
                 )
 
 
+    # Calm parses action bodies as AST; select the action at class definition
+    # time so omitted cluster tasks cannot leak into the compiled runbook.
+    if DEPLOYMENT_ONLY:
+        @action
+        def __install__(type="system"):
+            CalmTask.Exec.ssh(
+                name="Install Docker", script=ssh_script("install_docker.sh"),
+                cred=ref(BP_CRED_NUTANIX), target=ref(Game),
+            )
+            CalmTask.Exec.ssh(
+                name="Run game container", script=ssh_script("run_container.sh"),
+                cred=ref(BP_CRED_NUTANIX), target=ref(Game),
+            )
+
+
 # ── Deployment ─────────────────────────────────────────────────────────
 
 class GameDeployment(Deployment):
@@ -592,9 +608,10 @@ class NCP(Profile):
         default="live", is_mandatory=True, runtime=True,
     )
     CLUSTER_PROFILE = CalmVariable.WithOptions(
-        ["hpoc", "other"], label="Cluster profile",
-        description="hpoc = remove 1 node if applicable; enable policy engine",
-        default="hpoc", is_mandatory=True, runtime=True,
+        ["other"] if DEPLOYMENT_ONLY else ["hpoc", "other"], label="Cluster profile",
+        description=("Existing shared cluster; game prerequisites must already be present"
+                     if DEPLOYMENT_ONLY else "hpoc = remove 1 node if applicable; enable policy engine"),
+        default="other" if DEPLOYMENT_ONLY else "hpoc", is_mandatory=True, runtime=True,
     )
     IMAGE_TAG = CalmVariable.Simple(
         "latest", label="Image tag",

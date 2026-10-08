@@ -15,6 +15,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- Add a deployment-only blueprint for installing NCP or NKP on shared clusters without preparing or replacing shared infrastructure.
 - A second game: the NKP Fundamentals bootcamp, 26 stages from multi-tenancy
   through persistent storage, observability and GitOps.
 - Click any screenshot in the terminal to open it full size.

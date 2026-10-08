@@ -15,6 +15,8 @@ To develop the game itself, see [`../README.md`](../README.md). For the blueprin
 
 ## Quickstart
 
+For an existing or shared cluster, use the [deployment-only blueprint](#shared-clusters-and-existing-installations).
+
 Before importing the runbook or blueprint, create a project named "lab" if it does not already exist.
 
 You need an HPoC and two files. About five minutes of clicks, then the install runs on its own.
@@ -33,6 +35,35 @@ Then share three links:
 - **You:** `http://<vm>:3000/admin` (the console below)
 
 Players also need the Prism Central URL and credentials you deployed with, and a browser with internet access.
+
+## Shared clusters and existing installations
+
+Compile `blueprint.shared.patched.json` from the branch being deployed, using
+the command below. This blueprint keeps both game profiles and installs only
+a new game VM. Use a unique application/blueprint name, an existing Self-Service project,
+and a subnet with available addresses. Pin the image tag to the tested build.
+
+**Do not run the prerequisites runbook for this variant.** It has no AD endpoint
+dependency. NCP installs Docker and starts the game; NKP also retrieves the
+management kubeconfig. Neither install changes cluster networking, storage,
+users, existing VMs, projects, endpoints or prerequisite blueprints. VM/image
+provisioning and creation of the new Self-Service application still occur.
+NCP is restricted to the `other` cluster profile.
+
+NCP's game prerequisites must already exist. This installs the server, not a
+fresh training world. Gameplay and operator auto-play can still mutate cluster
+resources; deployment-only does not make those actions read-only. See the
+[complete mutation review](BLUEPRINT_CLUSTER_CHANGES.md).
+
+To compile locally without replacing the full-install artifact:
+
+```bash
+cd tooling/blueprint
+NIG_DEPLOYMENT_ONLY=1 PATCH=1 ./compile.sh blueprint.py
+```
+
+The full blueprint with NCP `other` is **not** equivalent: it still prepares
+networks, users, production VMs and shared Self-Service resources.
 
 ## The operator console
 
@@ -153,7 +184,8 @@ Prerequisites differ too:
   `workload02`, both labelled `infraId: pc`, with the `nutanix-files`
   StorageClass and a MetalLB pool. That is what the bootcamp's own staging
   automation builds; the game does not build it.
-- **Run the prerequisites runbook anyway.** Calm validates the whole blueprint
+- **For the full blueprint, run the prerequisites runbook.** The shared variant
+  needs no AD endpoint or prerequisites runbook. Calm validates the whole full blueprint
   and it carries both games, so without the AD endpoint the NCP profile's
   `Add AD users` task is invalid and *neither* profile can launch. The blueprint
   stays in DRAFT and the launch fails with an empty error list.
