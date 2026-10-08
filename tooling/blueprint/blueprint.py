@@ -119,7 +119,9 @@ Ubuntu2204 = vm_disk_package(
 # ── Service ────────────────────────────────────────────────────────────
 
 class Game(Service):
-    pass
+    GAME_VM_ADDRESS = CalmVariable.Simple(
+        "", is_mandatory=False, runtime=False, is_hidden=True,
+    )
 
 
 # ── Substrate ──────────────────────────────────────────────────────────
@@ -426,7 +428,7 @@ class GameContent(Package):
                 # http://<vm>:3000/ to players.
                 CalmTask.SetVariable.ssh(
                     name="Run game container",
-            variables=["GAME_VM_ADDRESS"],
+                    variables=["GAME_VM_ADDRESS"],
                     script=ssh_script("run_container.sh"),
                     cred=ref(BP_CRED_NUTANIX),
                     target=ref(Game),
@@ -669,9 +671,6 @@ class NCP(Profile):
     # run_container.sh is shared with the NKP profile, so both variables it
     # reads must exist here too. This profile is the NCP game and never talks
     # to Kubernetes, so the dashboard URL stays blank.
-    GAME_VM_ADDRESS = CalmVariable.Simple(
-        "", is_mandatory=False, runtime=False, is_hidden=True,
-    )
     GAME_PACK = CalmVariable.Simple(
         "ntnx-infiltration", is_mandatory=False, runtime=False, is_hidden=True,
     )
@@ -808,9 +807,6 @@ class NKPFundamentals(Profile):
     )
 
     # Hidden — the pack selector is what makes this profile a different game.
-    GAME_VM_ADDRESS = CalmVariable.Simple(
-        "", is_mandatory=False, runtime=False, is_hidden=True,
-    )
     GAME_PACK = CalmVariable.Simple(
         "nkp-bootcamp", is_mandatory=False, runtime=False, is_hidden=True,
     )
@@ -894,9 +890,9 @@ class NKPFundamentals(Profile):
 class NtnxInfiltrationGame(Blueprint):
     """Nutanix Infiltration Game :
 
- - Game:       http://@@{GAME_VM_ADDRESS}@@:3000/
- - Scoreboard: http://@@{GAME_VM_ADDRESS}@@:3000/scoreboard
- - Admin:      http://@@{GAME_VM_ADDRESS}@@:3000/admin
+ - Game:       http://@@{Game.GAME_VM_ADDRESS}@@:3000/
+ - Scoreboard: http://@@{Game.GAME_VM_ADDRESS}@@:3000/scoreboard
+ - Admin:      http://@@{Game.GAME_VM_ADDRESS}@@:3000/admin
 """
     services = [Game]
     packages = [Ubuntu2204, GameContent, NkpContent]

@@ -104,9 +104,12 @@ def test_update_and_refresh_recreate_even_a_pinned_image(shared_bp):
 
 
 def test_application_links_use_the_address_captured_by_install(shared_bp):
-    assert "@@{GAME_VM_ADDRESS}@@" in shared_bp["spec"]["description"]
+    assert "@@{Game.GAME_VM_ADDRESS}@@" in shared_bp["spec"]["description"]
     assert "@@{VM.address}@@" not in shared_bp["spec"]["description"]
-    for package in shared_bp["spec"]["resources"]["package_definition_list"]:
+    resources = shared_bp["spec"]["resources"]
+    assert any(v["name"] == "GAME_VM_ADDRESS" for v in resources["service_definition_list"][0]["variable_list"])
+    assert all(v["name"] != "GAME_VM_ADDRESS" for p in resources["app_profile_list"] for v in p["variable_list"])
+    for package in resources["package_definition_list"]:
         tasks = package.get("options", {}).get("install_runbook", {}).get("task_definition_list", [])
         for task in tasks:
             if task["name"] == "Run game container":

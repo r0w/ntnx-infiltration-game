@@ -91,6 +91,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Resolve the game URL from the service variable populated during installation on both supported Calm profiles.
+
 - Restart the game when refreshing its kubeconfig or updating a pinned image, while preserving sessions.
 
 - Capture the deployed VM address for application links on both NCP and NKP, including older Prism Central versions.
