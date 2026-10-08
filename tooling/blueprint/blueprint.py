@@ -424,8 +424,9 @@ class GameContent(Package):
                 # done" signal: once this returns SUCCESS, the BP app
                 # state flips to `running` and the operator hands out
                 # http://<vm>:3000/ to players.
-                CalmTask.Exec.ssh(
+                CalmTask.SetVariable.ssh(
                     name="Run game container",
+                    variables=["GAME_VM_ADDRESS"],
                     script=ssh_script("run_container.sh"),
                     cred=ref(BP_CRED_NUTANIX),
                     target=ref(Game),
@@ -467,8 +468,9 @@ class GameContent(Package):
                 name="Install Docker", script=ssh_script("install_docker.sh"),
                 cred=ref(BP_CRED_NUTANIX), target=ref(Game),
             )
-            CalmTask.Exec.ssh(
-                name="Run game container", script=ssh_script("run_container.sh"),
+            CalmTask.SetVariable.ssh(
+                name="Run game container",
+                    variables=["GAME_VM_ADDRESS"], script=ssh_script("run_container.sh"),
                 cred=ref(BP_CRED_NUTANIX), target=ref(Game),
             )
 
@@ -518,8 +520,9 @@ class NkpContent(Package):
             cred=ref(BP_CRED_NUTANIX),
             target=ref(Game),
         )
-        CalmTask.Exec.ssh(
+        CalmTask.SetVariable.ssh(
             name="Run game container",
+                    variables=["GAME_VM_ADDRESS"],
             script=ssh_script("run_container.sh", substrate="NkpVM"),
             cred=ref(BP_CRED_NUTANIX),
             target=ref(Game),
@@ -666,6 +669,9 @@ class NCP(Profile):
     # run_container.sh is shared with the NKP profile, so both variables it
     # reads must exist here too. This profile is the NCP game and never talks
     # to Kubernetes, so the dashboard URL stays blank.
+    GAME_VM_ADDRESS = CalmVariable.Simple(
+        "", is_mandatory=False, runtime=False, is_hidden=True,
+    )
     GAME_PACK = CalmVariable.Simple(
         "ntnx-infiltration", is_mandatory=False, runtime=False, is_hidden=True,
     )
@@ -802,6 +808,9 @@ class NKPFundamentals(Profile):
     )
 
     # Hidden — the pack selector is what makes this profile a different game.
+    GAME_VM_ADDRESS = CalmVariable.Simple(
+        "", is_mandatory=False, runtime=False, is_hidden=True,
+    )
     GAME_PACK = CalmVariable.Simple(
         "nkp-bootcamp", is_mandatory=False, runtime=False, is_hidden=True,
     )
@@ -880,14 +889,14 @@ class NKPFundamentals(Profile):
         )
 
 
-# Only the selected profile has a VM address; Calm resolves the inactive
-# substrate's address to empty, so the description works for either profile.
+# The install captures the active substrate address after the VM exists.
+# Referencing inactive substrates in the description is not portable across PC versions.
 class NtnxInfiltrationGame(Blueprint):
     """Nutanix Infiltration Game :
 
- - Game:       http://@@{VM.address}@@@@{NkpVM.address}@@:3000/
- - Scoreboard: http://@@{VM.address}@@@@{NkpVM.address}@@:3000/scoreboard
- - Admin:      http://@@{VM.address}@@@@{NkpVM.address}@@:3000/admin
+ - Game:       http://@@{GAME_VM_ADDRESS}@@:3000/
+ - Scoreboard: http://@@{GAME_VM_ADDRESS}@@:3000/scoreboard
+ - Admin:      http://@@{GAME_VM_ADDRESS}@@:3000/admin
 """
     services = [Game]
     packages = [Ubuntu2204, GameContent, NkpContent]

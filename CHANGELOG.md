@@ -93,7 +93,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 - Restart the game when refreshing its kubeconfig or updating a pinned image, while preserving sessions.
 
-- Show the selected game VM address in application links for both NCP and NKP.
+- Capture the deployed VM address for application links on both NCP and NKP, including older Prism Central versions.
 - Keep shared deployments free of cluster discovery actions and scope deployment monitoring to the selected application.
 
 - The NKP blueprint selects the `nkp` image and uses its own VM address for telemetry, with the same SSH user validation as NCP.

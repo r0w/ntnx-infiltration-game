@@ -84,3 +84,6 @@ sleep 5
 sudo docker compose ps
 echo "--- boot log ---"
 sudo docker compose logs --tail 30
+
+# Captured by Calm for the application links after the selected VM is ready.
+echo "GAME_VM_ADDRESS=@@{VM.address}@@"

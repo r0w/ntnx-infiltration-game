@@ -47,7 +47,7 @@ def test_shared_install_only_runs_tasks_on_its_new_vm(shared_bp):
         rb = package["options"]["install_runbook"]
         tasks = [t for t in rb["task_definition_list"] if t["type"] != "DAG"]
         assert [t["name"] for t in tasks] == expected[package["name"]]
-        assert all(t["type"] == "EXEC" and t["attrs"]["script_type"] == "sh" for t in tasks)
+        assert all(t["type"] in ("EXEC", "SET_VARIABLE") and t["attrs"]["script_type"] == "sh" for t in tasks)
         for task in tasks:
             assert "endpoint_reference" not in json.dumps(task)
         dag = next(t for t in rb["task_definition_list"] if t["type"] == "DAG")
@@ -101,3 +101,14 @@ def test_update_and_refresh_recreate_even_a_pinned_image(shared_bp):
             tasks = [t for t in action["runbook"]["task_definition_list"] if t["type"] == "EXEC"]
             script = tasks[-1]["attrs"]["script"]
             assert "docker compose up -d --remove-orphans --force-recreate" in script
+
+
+def test_application_links_use_the_address_captured_by_install(shared_bp):
+    assert "@@{GAME_VM_ADDRESS}@@" in shared_bp["spec"]["description"]
+    assert "@@{VM.address}@@" not in shared_bp["spec"]["description"]
+    for package in shared_bp["spec"]["resources"]["package_definition_list"]:
+        tasks = package.get("options", {}).get("install_runbook", {}).get("task_definition_list", [])
+        for task in tasks:
+            if task["name"] == "Run game container":
+                assert task["type"] == "SET_VARIABLE"
+                assert 'echo "GAME_VM_ADDRESS=@@{' in task["attrs"]["script"]
