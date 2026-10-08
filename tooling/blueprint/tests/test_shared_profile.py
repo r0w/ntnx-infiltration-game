@@ -90,3 +90,14 @@ def test_shared_day_two_actions_only_operate_on_game_vm(shared_bp):
         for action in profile["action_list"]:
             tasks = action["runbook"]["task_definition_list"]
             assert all(t["type"] == "DAG" or t["attrs"]["script_type"] == "sh" for t in tasks)
+
+
+def test_update_and_refresh_recreate_even_a_pinned_image(shared_bp):
+    profiles = shared_bp["spec"]["resources"]["app_profile_list"]
+    for profile in profiles:
+        for action in profile["action_list"]:
+            if action["name"] not in ("Update Game", "Refresh Kubeconfig"):
+                continue
+            tasks = [t for t in action["runbook"]["task_definition_list"] if t["type"] == "EXEC"]
+            script = tasks[-1]["attrs"]["script"]
+            assert "docker compose up -d --remove-orphans --force-recreate" in script

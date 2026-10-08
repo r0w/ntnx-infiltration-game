@@ -91,6 +91,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Restart the game when refreshing its kubeconfig or updating a pinned image, while preserving sessions.
+
 - Show the selected game VM address in application links for both NCP and NKP.
 - Keep shared deployments free of cluster discovery actions and scope deployment monitoring to the selected application.
 
