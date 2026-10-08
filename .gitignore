@@ -24,6 +24,7 @@ packages/server/.ci-data/
 .idea/
 .vscode/
 .next/
+.playwright-mcp/
 
 # Python
 *.pyc
