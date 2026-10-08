@@ -49,7 +49,7 @@ def test_compiled_ssh_uses_one_credential():
     tasks = []
     def walk(value):
         if isinstance(value, dict):
-            if value.get('type') == 'EXEC':
+            if value.get('type') in ('EXEC', 'SET_VARIABLE'):
                 tasks.append(value)
             for v in value.values():
                 walk(v)

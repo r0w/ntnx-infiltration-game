@@ -426,7 +426,7 @@ class GameContent(Package):
                 # http://<vm>:3000/ to players.
                 CalmTask.SetVariable.ssh(
                     name="Run game container",
-                    variables=["GAME_VM_ADDRESS"],
+            variables=["GAME_VM_ADDRESS"],
                     script=ssh_script("run_container.sh"),
                     cred=ref(BP_CRED_NUTANIX),
                     target=ref(Game),
@@ -470,7 +470,7 @@ class GameContent(Package):
             )
             CalmTask.SetVariable.ssh(
                 name="Run game container",
-                    variables=["GAME_VM_ADDRESS"], script=ssh_script("run_container.sh"),
+                variables=["GAME_VM_ADDRESS"], script=ssh_script("run_container.sh"),
                 cred=ref(BP_CRED_NUTANIX), target=ref(Game),
             )
 
@@ -522,7 +522,7 @@ class NkpContent(Package):
         )
         CalmTask.SetVariable.ssh(
             name="Run game container",
-                    variables=["GAME_VM_ADDRESS"],
+            variables=["GAME_VM_ADDRESS"],
             script=ssh_script("run_container.sh", substrate="NkpVM"),
             cred=ref(BP_CRED_NUTANIX),
             target=ref(Game),
