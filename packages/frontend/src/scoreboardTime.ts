@@ -9,6 +9,8 @@ export interface CardClock {
   blockedSince?: number | null;
   /** End of the player's latest wait. */
   lastReleasedAt?: number | null;
+  /** Total help penalty, in seconds. */
+  helpPenaltySec?: number;
 }
 
 /** A card shows "idle" once nothing was attempted for this long. */
@@ -23,6 +25,16 @@ export const IDLE_AFTER_MS = 60_000;
 export function netElapsedMs(e: CardClock, now: number): number {
   const end = e.finishedAt ?? e.blockedSince ?? now;
   return Math.max(0, end - e.startedAt - (e.blockedMs ?? 0));
+}
+
+/**
+ * The time a card shows, and the time finished players are ranked on: the
+ * playing time plus the help penalties. A penalty counts as soon as the help is
+ * used, and a held player's clock stays stopped with it.
+ */
+export function scoreTimeMs(e: CardClock, now: number): number {
+  const penaltySec = e.helpPenaltySec ?? 0;
+  return netElapsedMs(e, now) + (penaltySec > 0 ? penaltySec * 1000 : 0);
 }
 
 /** How long the player has been held by the wait still running, or `null`. */

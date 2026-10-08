@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { heldMs, idleMs, netElapsedMs, type CardClock } from '../src/scoreboardTime';
+import { heldMs, idleMs, netElapsedMs, scoreTimeMs, type CardClock } from '../src/scoreboardTime';
 
 const MIN = 60_000;
 
@@ -33,6 +33,34 @@ describe('netElapsedMs', () => {
 
   test('never negative', () => {
     expect(netElapsedMs(clock({ blockedMs: 90 * MIN }), 40 * MIN)).toBe(0);
+  });
+});
+
+describe('scoreTimeMs', () => {
+  test('is the playing time when no help was used', () => {
+    expect(scoreTimeMs(clock(), 40 * MIN)).toBe(40 * MIN);
+    expect(scoreTimeMs(clock({ helpPenaltySec: 0 }), 40 * MIN)).toBe(40 * MIN);
+  });
+
+  test('adds the help penalties to the playing time', () => {
+    expect(scoreTimeMs(clock({ helpPenaltySec: 270 }), 40 * MIN)).toBe(40 * MIN + 270_000);
+    expect(scoreTimeMs(clock({ blockedMs: 10 * MIN, helpPenaltySec: 120 }), 40 * MIN)).toBe(32 * MIN);
+  });
+
+  test('is the time a finished player is ranked on', () => {
+    const done = clock({ startedAt: 5 * MIN, finishedAt: 50 * MIN, blockedMs: 20 * MIN, helpPenaltySec: 270 });
+    expect(scoreTimeMs(done, 500 * MIN)).toBe(25 * MIN + 270_000);
+  });
+
+  test('a held player keeps a stopped clock, penalty included', () => {
+    const held = clock({ blockedSince: 20 * MIN, helpPenaltySec: 120 });
+    expect(scoreTimeMs(held, 25 * MIN)).toBe(22 * MIN);
+    expect(scoreTimeMs(held, 90 * MIN)).toBe(22 * MIN);
+  });
+
+  test('a negative or missing penalty adds nothing', () => {
+    expect(scoreTimeMs(clock({ helpPenaltySec: -30 }), 10 * MIN)).toBe(10 * MIN);
+    expect(scoreTimeMs(clock({ helpPenaltySec: undefined }), 10 * MIN)).toBe(10 * MIN);
   });
 });
 

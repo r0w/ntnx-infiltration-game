@@ -8,7 +8,7 @@ import { HelpIcon, LunchIcon, PauseIcon } from './AgentIcons';
 import { fmtDuration, fmtPenaltyShort } from './duration';
 import { scoreboardLayout } from './scoreboardDisplay';
 import { advanceDemo, makeDemoPayload, MAX_DEMO_AGENTS, type DisplayPayload } from './scoreboardDemo';
-import { heldMs, idleMs, IDLE_AFTER_MS, netElapsedMs } from './scoreboardTime';
+import { heldMs, idleMs, IDLE_AFTER_MS, netElapsedMs, scoreTimeMs } from './scoreboardTime';
 import { useScoreboardDisplaySettings } from './useScoreboardDisplaySettings';
 import { useScoreboardScroll } from './useScoreboardScroll';
 
@@ -184,26 +184,28 @@ function AgentCard({
   const trigramLabel = entry.trigram ?? '—';
   const stageLabel = entry.stageName ?? 'mission complete';
   // Clock: the playing time, i.e. without the time the operator held the player
-  // at a gate or under the lunch lock. A held player's clock stops, and says why
-  // in a chip. Otherwise an "idle" chip appears once nothing was attempted for
+  // at a gate or under the lunch lock, plus the help penalties: the time finished
+  // players are ranked on. A held player's clock stops, and says why in a chip. Otherwise an "idle" chip appears once nothing was attempted for
   // a minute, which reveals stuck / AFK players without the noise of "updated
   // 2s ago" ticking constantly: we only surface inactivity.
   const now = Date.now();
   const net = netElapsedMs(entry, now);
+  const total = scoreTimeMs(entry, now);
   const held = heldMs(entry, now);
   const idle = idleMs(entry, now);
-  const timeLabel = entry.finishedAt !== null ? `finished · ${fmtDuration(net)}` : fmtDuration(net);
+  const timeLabel = entry.finishedAt !== null ? `finished · ${fmtDuration(total)}` : fmtDuration(total);
   // Step-by-step help is part of the score: each stage whose help the player
-  // displayed is counted, and its penalty (if any) is added to the playing time
-  // in the ranking. The badge keeps the cost visible next to the clock.
+  // displayed is counted, and its penalty (if any) is added to the clock. The
+  // badge says where that part of the time comes from.
   const helpUses = entry.helpUses ?? 0;
   const helpCost = fmtPenaltyShort(entry.helpPenaltySec ?? 0);
   const blocked = held !== null ? (entry.blockedReason === 'pause' ? 'lunch' : 'pause') : null;
   const waited = entry.blockedMs ?? 0;
+  const penaltyMs = Math.max(0, (entry.helpPenaltySec ?? 0) * 1000);
   const timeTitle =
     `playing time ${fmtDuration(net)}` +
-    (waited > 0 ? `, ${fmtDuration(waited)} held at gates and pauses not counted` : '') +
-    (helpCost ? `, ${helpCost} of help added in the ranking` : '');
+    (penaltyMs > 0 ? ` + ${fmtDuration(penaltyMs)} of help` : '') +
+    (waited > 0 ? `, ${fmtDuration(waited)} held at gates and pauses not counted` : '');
   return (
     <div
       ref={cardRef}
