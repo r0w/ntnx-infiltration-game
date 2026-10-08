@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createMockAdapter } from '@ntnx-game/nutanix';
+import type { NutanixClient } from '@ntnx-game/engine';
 import { buildApp } from '../src/app';
 import { loadPack } from '../src/pack-loader';
 
@@ -24,9 +25,9 @@ const SCHEMA = readFileSync(resolve(HERE, '../src/db/schema.sql'), 'utf8');
 const PACKS_DIR = resolve(HERE, '../../../packs');
 const ADMIN_PW = 'test-pw';
 
-async function bootApp(serverMode: 'mock' | 'test' | 'live') {
+async function bootApp(serverMode: 'mock' | 'test' | 'live', client?: NutanixClient) {
   const pack = await loadPack(PACKS_DIR, 'ntnx-infiltration');
-  const nutanix = createMockAdapter(
+  const nutanix = client ?? createMockAdapter(
     resolve(PACKS_DIR, 'ntnx-infiltration', 'fixtures.json'),
   );
   const db = new Database(':memory:');
@@ -135,5 +136,72 @@ describe('POST /auto-fill-current (live gate)', () => {
     // No need to reach a prompt — the mode gate is checked before awaiting.
     const r = await app.request(`/api/session/${sid}/auto-fill-current`, { method: 'POST' });
     expect(r.status).toBe(403);
+  });
+});
+
+
+describe('LCM auto-fill after an unavailable boot reading', () => {
+  function lcmClient() {
+    const state = { busy: true, unavailable: false, calls: 0, updates: 1 };
+    const client = {
+      mode: 'live', sdk: {}, rest: { request: async () => ({}) },
+      async request<T>(method: string, path: string): Promise<T> {
+        expect(method).toBe('GET'); // Never start an inventory or update.
+        state.calls++;
+        if (state.unavailable) throw new Error('LCM unavailable');
+        if (path.includes('lcm-summaries')) return { data: [
+          { clusterExtId: 'pe', clusterType: 'AOS', hasAvailableUpgrades: state.updates > 0 },
+        ] } as T;
+        if (path.includes('resources/entities')) return { data: [
+          { clusterExtId: 'pe', entityType: 'SOFTWARE', entityModel: 'AOS', availableVersions: state.updates ? ['7.6'] : [] },
+        ] } as T;
+        if (path.includes('resources/status')) return { data: {
+          inProgressOperation: state.busy ? { operationType: 'INVENTORY' } : {},
+        } } as T;
+        throw new Error(`unexpected path ${path}`);
+      },
+    } as unknown as NutanixClient;
+    return { client, state };
+  }
+
+  test('does not cache a busy reading; retries when settled and reuses the count', async () => {
+    const { client, state } = lcmClient();
+    const app = await bootApp('test', client);
+    const sid = await newSession(app);
+    await reachPrompt(app, sid, 'lcm-check-updates', 'NumberUpdates');
+    expect((await autoFill(app, sid)).status).toBe(503);
+    state.busy = false;
+    expect((await autoFill(app, sid)).body.value).toBe('1');
+    const calls = state.calls;
+    state.unavailable = true;
+    expect((await autoFill(app, sid)).body.value).toBe('1');
+    expect(state.calls).toBe(calls);
+  });
+
+  test('does not turn an unavailable LCM into zero; accepts a settled zero', async () => {
+    const { client, state } = lcmClient();
+    state.unavailable = true;
+    const app = await bootApp('test', client);
+    const sid = await newSession(app);
+    await reachPrompt(app, sid, 'lcm-check-updates', 'NumberUpdates');
+    expect((await autoFill(app, sid)).status).toBe(503);
+    state.unavailable = false;
+    state.busy = false;
+    state.updates = 0;
+    expect((await autoFill(app, sid)).body.value).toBe('0');
+  });
+
+  test('keeps an operator-provided count without querying LCM', async () => {
+    const { client, state } = lcmClient();
+    const app = await bootApp('test', client);
+    await app.request('/api/admin/cluster-config', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Admin-Password': ADMIN_PW },
+      body: JSON.stringify({ lcmAvailableUpdates: 7 }),
+    });
+    const calls = state.calls;
+    const sid = await newSession(app);
+    await reachPrompt(app, sid, 'lcm-check-updates', 'NumberUpdates');
+    expect((await autoFill(app, sid)).body.value).toBe('7');
+    expect(state.calls).toBe(calls);
   });
 });

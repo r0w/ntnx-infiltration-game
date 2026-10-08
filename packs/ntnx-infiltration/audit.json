@@ -6,6 +6,7 @@
     "PCPassword",
     "Vlanid",
     "ImageURL",
+    "SecondaryNetwork",
     "EmailReport",
     "ProdUsername",
     "ProdPassword",

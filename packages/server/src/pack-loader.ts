@@ -2,7 +2,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import type {
   ActFunction,
-  CheckContext,
+  AutoFillContext,
   ActionFunction,
   CheckFunction,
   CleanupFunction,
@@ -166,12 +166,12 @@ export interface LoadedPack {
   /** The pack's boot hooks, `{}` when it declares none. */
   boot: PackBoot;
   /** Variable name → the resolver that reads its answer off the cluster. */
-  autoFill: Record<string, AutoFillResolver>;
+  autoFill: Partial<Record<string, AutoFillResolver>>;
   bundle: LocaleBundle;
 }
 
 /** Reads one stage's expected answer off the cluster. `null` = cannot tell. */
-export type AutoFillResolver = (ctx: CheckContext) => Promise<string | number | null>;
+export type AutoFillResolver = (ctx: AutoFillContext) => Promise<string | number | null>;
 
 export async function loadPack(packsDir: string, packId: string): Promise<LoadedPack> {
   const dir = resolve(packsDir, packId);
@@ -216,8 +216,8 @@ async function loadBoot(modulePath: string): Promise<PackBoot> {
 
 /** Same contract as the registries: a module that exports nothing usable is
  *  an empty map, because auto-fill is a convenience and never load-bearing. */
-async function loadAutoFill(modulePath: string): Promise<Record<string, AutoFillResolver>> {
-  const out: Record<string, AutoFillResolver> = {};
+async function loadAutoFill(modulePath: string): Promise<Partial<Record<string, AutoFillResolver>>> {
+  const out: Partial<Record<string, AutoFillResolver>> = {};
   try {
     const mod = (await import(modulePath)) as Record<string, unknown>;
     const exported = (mod.autoFill ?? {}) as Record<string, unknown>;
@@ -252,6 +252,40 @@ async function loadStages(dir: string, order: string[]): Promise<StageDefinition
     seenIds.add(parsed.id);
     parsed.index = i;
     stages.push(parsed as StageDefinition);
+  }
+  for (const stage of stages) {
+    if (stage.help !== undefined) {
+      if (
+        !Array.isArray(stage.help) ||
+        stage.help.length === 0 ||
+        stage.help.some((key) => typeof key !== 'string' || key.length === 0)
+      ) {
+        throw new Error(`stage "${stage.name}" help must be a non-empty array of locale keys`);
+      }
+    }
+    if (stage.helpPenaltySec !== undefined) {
+      if (!Number.isInteger(stage.helpPenaltySec) || stage.helpPenaltySec < 0) {
+        throw new Error(`stage "${stage.name}" helpPenaltySec must be a non-negative integer (seconds)`);
+      }
+      if (stage.help === undefined) {
+        throw new Error(`stage "${stage.name}" sets helpPenaltySec but has no help`);
+      }
+    }
+  }
+  for (const stage of stages) {
+    if (stage.dependsOn === undefined) continue;
+    if (!Array.isArray(stage.dependsOn) || stage.dependsOn.some((name) => typeof name !== 'string')) {
+      throw new Error(`stage "${stage.name}" dependsOn must be an array of stage names`);
+    }
+    if (new Set(stage.dependsOn).size !== stage.dependsOn.length) {
+      throw new Error(`stage "${stage.name}" has duplicate dependencies`);
+    }
+    for (const name of stage.dependsOn) {
+      const upstream = stages.find((s) => s.name === name);
+      if (!upstream || upstream.index >= stage.index) {
+        throw new Error(`stage "${stage.name}" dependency "${name}" must name an earlier stage`);
+      }
+    }
   }
   return stages;
 }

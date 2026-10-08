@@ -53,7 +53,7 @@ describe('packs never value-import a workspace package', () => {
     const offenders: string[] = [];
     for (const file of files) {
       const src = readFileSync(file, 'utf8');
-      for (const m of src.matchAll(/^import[\s\S]*?from\s*'(@ntnx-game\/[^']+)';/gm)) {
+      for (const m of src.matchAll(/^import\s+(?:type\s+)?(?:\{[^}]*\}|[^;\n]+?)\s+from\s*'(@ntnx-game\/[^']+)';/gm)) {
         if (!isTypeOnly(m[0]!)) {
           offenders.push(`${relative(ROOT, file)} → ${m[1]}`);
         }

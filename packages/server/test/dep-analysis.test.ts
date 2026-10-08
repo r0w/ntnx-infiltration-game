@@ -102,3 +102,30 @@ describe('cascadeDisable', () => {
     expect([...r.disabled].sort()).toEqual(['s1']);
   });
 });
+
+describe('resource dependencies', () => {
+  test('propagates mixed resource and variable dependencies without affecting independent stages', () => {
+    const stages = [
+      stage({ index: 0, name: 'vm' }),
+      stage({ index: 1, name: 'snapshot', dependsOn: ['vm'], captures: ['SnapshotUUID'] }),
+      stage({ index: 2, name: 'restore', needs: ['SnapshotUUID'] }),
+      stage({ index: 3, name: 'report' }),
+    ];
+    const r = analyzeDeps({ stages, disabledNames: new Set(['vm']) });
+    expect(r.broken).toEqual([
+      { stageName: 'snapshot', missingVars: [], missingStages: ['vm'] },
+      { stageName: 'restore', missingVars: ['SnapshotUUID'] },
+    ]);
+    expect([...cascadeDisable(stages, new Set(['vm'])).disabled]).toEqual(['vm', 'snapshot', 'restore']);
+  });
+
+  test('handles unavailable resource producers and missing stage references', () => {
+    const stages = [
+      stage({ index: 0, name: 'vm' }),
+      stage({ index: 1, name: 'tag', dependsOn: ['vm'] }),
+      stage({ index: 2, name: 'missing', dependsOn: ['deleted-stage'] }),
+    ];
+    const result = analyzeDeps({ stages, unreachableNames: new Set(['vm']) });
+    expect(result.broken.map((b) => b.missingStages)).toEqual([['vm'], ['deleted-stage']]);
+  });
+});

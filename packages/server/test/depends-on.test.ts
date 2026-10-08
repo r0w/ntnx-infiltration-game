@@ -27,7 +27,7 @@ describe('stage prerequisites', () => {
 
   test('disabling a prerequisite breaks the stage that needs its state', () => {
     const r = analyzeDeps({ stages: PACK, disabledNames: new Set(['create-project']) });
-    expect(r.broken.map((b) => b.stageName)).toEqual(['block-storage']);
+    expect(r.broken.map((b) => b.stageName)).toEqual(['block-storage', 'file-storage']);
     expect(r.broken[0]!.missingStages).toEqual(['create-project']);
     expect(r.broken[0]!.missingVars).toEqual([]);
   });
@@ -43,9 +43,11 @@ describe('stage prerequisites', () => {
     expect(disabled.has('quick-tour')).toBe(false);
   });
 
-  test('a prerequisite the pack does not ship is ignored, not fatal', () => {
+  test('a missing prerequisite is reported as broken', () => {
     const odd = [stage('a', { dependsOn: ['ghost'] })];
-    expect(analyzeDeps({ stages: odd }).broken).toEqual([]);
+    expect(analyzeDeps({ stages: odd }).broken).toEqual([
+      { stageName: 'a', missingVars: [], missingStages: ['ghost'] },
+    ]);
   });
 
   test('a variable seeded before the run does not count as missing', () => {
@@ -75,6 +77,11 @@ describe('the shipped packs declare their prerequisites', () => {
       'verify-prod-user-isolation',
       'live-migrate-vm',
       'apply-category-to-vm',
+      'create-microseg-policy',
+      'allow-ssh-in-microseg',
+      'create-protection-policy',
+      'create-approval-policy',
+      'verify-protection-secure',
       'incident-freeze',
       'restore-vm-from-recovery',
       'test-ncm-playbook',
@@ -90,6 +97,7 @@ describe('the shipped packs declare their prerequisites', () => {
       'create-approval-policy',
       'create-microseg-policy',
       'create-protection-policy',
+      'create-storage-policy',
       'verify-protection-secure',
     ]);
   });

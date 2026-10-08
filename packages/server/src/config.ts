@@ -68,6 +68,8 @@ export interface ServerConfig {
   nigCentralUrl: string;
   /** Optional bearer token for the Central ingest endpoint. */
   nigCentralToken: string;
+  /** Game VM IP used by Central instead of the container's bridge address. */
+  nigDeploymentIp: string;
 }
 
 const asInt = (v: string | undefined, d: number) => {
@@ -128,5 +130,6 @@ export function loadConfig(env = process.env): ServerConfig {
     adminPassword: env.ADMIN_PASSWORD || 'nutanix/4u',
     nigCentralUrl: env.NIG_CENTRAL_URL ?? '',
     nigCentralToken: env.NIG_CENTRAL_TOKEN ?? '',
+    nigDeploymentIp: env.NIG_DEPLOYMENT_IP ?? '',
   };
 }

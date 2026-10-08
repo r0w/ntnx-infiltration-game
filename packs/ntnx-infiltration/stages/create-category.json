@@ -19,5 +19,8 @@
   },
   "needs": [
     "Trigram"
+  ],
+  "dependsOn": [
+    "create-project"
   ]
 }

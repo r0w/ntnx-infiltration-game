@@ -200,6 +200,71 @@ describe('StageRunner', () => {
     expect(rendered.units[0]).toEqual({ kind: 'text', text: 's2.greet', color: 'default' });
   });
 
+  describe('renderHelp', () => {
+    const helpBundle = makeBundle('en', {
+      en: {
+        'h.one': "1. Name it <code>{Trigram}-policy</code>",
+        'h.two': "2. See the capture<image src='stage-001-step-01.png' alt='Step 1'/>",
+        'h.flow': "<pause sec='2'/>3. Done<clear/><pagebreak/><input/><action name='x'/>",
+      },
+      fr: { 'h.one': "1. Nommez-la <code>{Trigram}-policy</code>" },
+    });
+    const withHelp: StageDefinition = {
+      index: 1,
+      active: true,
+      prompt: 'tank',
+      defaultColor: 'magenta',
+      messages: ['s1.prompt'],
+      help: ['h.one', 'h.two', 'h.flow'],
+    };
+
+    test('renders keys with variable substitution, code blocks and images', () => {
+      const runner = new StageRunner([withHelp], new CheckRegistry());
+      const units = runner.renderHelp(withHelp, new VariableStore({ Trigram: 'ZZZ' }), 'en', helpBundle);
+      expect(units.find((u) => u.kind === 'code')).toEqual({ kind: 'code', text: 'ZZZ-policy' });
+      expect(units.find((u) => u.kind === 'image')).toEqual({
+        kind: 'image',
+        src: 'stage-001-step-01.png',
+        alt: 'Step 1',
+      });
+    });
+
+    test('drops flow units and skips the speaker tag and stage colour', () => {
+      const runner = new StageRunner([withHelp], new CheckRegistry());
+      const units = runner.renderHelp(withHelp, new VariableStore(), 'en', helpBundle);
+      const kinds = new Set(units.map((u) => u.kind));
+      expect(kinds.has('pause')).toBe(false);
+      expect(kinds.has('clear')).toBe(false);
+      expect(kinds.has('page-break')).toBe(false);
+      expect(kinds.has('await-input')).toBe(false);
+      const texts = units.filter((u) => u.kind === 'text').map((u) => (u as { text: string }).text);
+      expect(texts.some((t) => t.includes('<tank>'))).toBe(false);
+      expect(units.some((u) => u.kind === 'text' && u.color === 'magenta')).toBe(false);
+      expect(texts.some((t) => t.includes('3. Done'))).toBe(true);
+    });
+
+    test('separates messages with a newline', () => {
+      const runner = new StageRunner([withHelp], new CheckRegistry());
+      const units = runner.renderHelp(withHelp, new VariableStore(), 'en', helpBundle);
+      const joined = units.map((u) => (u.kind === 'text' ? u.text : '')).join('');
+      expect(joined).toContain('\n');
+      expect(joined.endsWith('\n')).toBe(true);
+    });
+
+    test('falls back to the default locale per key', () => {
+      const runner = new StageRunner([withHelp], new CheckRegistry());
+      const units = runner.renderHelp(withHelp, new VariableStore({ Trigram: 'ZZZ' }), 'fr', helpBundle);
+      const joined = units.map((u) => (u.kind === 'text' ? u.text : '')).join('');
+      expect(joined).toContain('Nommez-la');
+      expect(joined).toContain('See the capture');
+    });
+
+    test('a stage without help renders to an empty list', () => {
+      const runner = new StageRunner(stages, new CheckRegistry());
+      expect(runner.renderHelp(stages[0], new VariableStore(), 'en', helpBundle)).toEqual([]);
+    });
+  });
+
   test('runCheck dispatches through registry', async () => {
     const registry = new CheckRegistry();
     registry.register('noop', async () => ({ pass: true, detail: 'ok' }));

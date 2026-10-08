@@ -25,6 +25,6 @@
     "Trigram"
   ],
   "dependsOn": [
-    "create-category"
+    "apply-category-to-vm"
   ]
 }

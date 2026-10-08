@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Database } from 'bun:sqlite';
-import type { CapabilityFlag, KubeClient, NutanixClient } from '@ntnx-game/engine';
+import type { CapabilityFlag, KubeClient, NutanixClient, StageDefinition } from '@ntnx-game/engine';
 import { readLcmUpdates } from '@ntnx-game/engine';
 import type { CapabilityProbeDetail } from '@ntnx-game/nutanix';
 import { HttpError, type SessionService } from '../session-service';
@@ -10,6 +10,7 @@ import { analyzeDeps, cascadeDisable, type BrokenStage } from '../dep-analysis';
 import { storeClusterFacts } from '../cluster-facts';
 import { makePackProbes } from '../pack-probes';
 import { readEnabledWipLocales, writeEnabledWipLocales } from '../effective-locales';
+import { resolveHelpEnabled } from '../help';
 import {
   decodePackConfig,
   encodePackConfig,
@@ -32,7 +33,8 @@ import {
   sendMailtrapEmail,
 } from '../email';
 import { EmailRosterQueries, type ClusterConfigQueries, type EmailRosterRow } from '../db/queries';
-import { EMAIL_RE, substituteSeat, substituteVars } from '@ntnx-game/shared';
+import { EMAIL_RE, HELP_PENALTY_MAX_SEC, substituteSeat, substituteVars, isScoreboardDisplaySettings } from '@ntnx-game/shared';
+import { SCOREBOARD_DISPLAY_KEY } from '../scoreboard-display';
 
 export interface AdminRoutesDeps {
   db: Database;
@@ -165,6 +167,23 @@ export interface AdminUserEntry
    *  as the denominator in the "Progress" cell so a player who legitimately
    *  passed everything reachable shows N/N instead of N/39. */
   effectiveTotalStages: number;
+  /** Effective help flag: the player's override (`helpEnabled`) if set,
+   *  else the global flag. */
+  helpEffective: boolean;
+  /** Stages whose help the player displayed, with the penalty frozen at
+   *  the first display. `helpUses` / `helpPenaltySec` hold the totals. */
+  helpStages: Array<{ stage: string; penaltySec: number }>;
+}
+
+/** The penalty (seconds) a stage's pack file declares for its help, or `null`
+ *  when the stage ships no help at all. */
+function helpDefaultSec(s: StageDefinition): number | null {
+  return (s.help?.length ?? 0) > 0 ? Math.max(0, Math.floor(s.helpPenaltySec ?? 0)) : null;
+}
+
+export interface AdminHelpStatus {
+  /** Global switch. Off until the operator turns it on. */
+  enabled: boolean;
 }
 
 export interface AdminGateEntry {
@@ -209,6 +228,8 @@ export interface AdminPackStageEntry {
   captures: string[];
   /** Vars in `needs` that have no surviving producer in the effective pack. */
   brokenMissingVars: string[];
+  brokenMissingStages?: string[];
+  dependsOn?: string[];
   /** Always-enforced capability requirements. */
   requires: string[];
   /** Capability requirements only enforced when `clusterProfile === 'other'`. */
@@ -219,6 +240,14 @@ export interface AdminPackStageEntry {
    *  with `reason: 'missing-capability'`. The admin UI uses this to render
    *  a `skipped (needs …)` status badge. */
   missingCapabilities: string[];
+  /** The stage ships a step-by-step help block. */
+  hasHelp: boolean;
+  /** Effective help penalty in seconds after overlay (0 when there is no help). */
+  helpPenaltySec: number;
+  /** The penalty its pack file declares, in seconds. */
+  helpPenaltyDefaultSec: number;
+  /** True iff the operator changed the penalty (vs the pack file). */
+  helpPenaltyOverridden: boolean;
 }
 
 export interface AdminPackPayload {
@@ -390,6 +419,8 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       deps.capabilities ?? [],
       deps.clusterProfile,
     );
+    const helpGlobal = deps.service.isHelpEnabledGlobally();
+    const helpByPlayer = deps.service.helpUsage.listByPack(deps.pack.manifest.id);
     const entries: AdminUserEntry[] = rows.map((row) => {
       const { lastFailStage, lastFailDetail, lastFailAt, ...rest } = row;
       let nextStageName: string | null = null;
@@ -415,6 +446,11 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
         lastFail,
         totalStages,
         effectiveTotalStages,
+        helpEffective: resolveHelpEnabled(row.helpEnabled, helpGlobal),
+        helpStages: (helpByPlayer.get(row.sessionId) ?? []).map((u) => ({
+          stage: u.stageName,
+          penaltySec: u.penaltySec,
+        })),
       };
     });
     return c.json({
@@ -596,10 +632,20 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
         adminGateOverridden: !!o && o.adminGate !== null && o.adminGate !== (base?.adminGate ?? false),
         needs: s.needs ?? [],
         captures: s.captures ?? [],
+        dependsOn: s.dependsOn ?? [],
         brokenMissingVars: brokenByName.get(s.name)?.missingVars ?? [],
+        brokenMissingStages: brokenByName.get(s.name)?.missingStages ?? [],
         requires,
         requiresOnOther,
         missingCapabilities,
+        hasHelp: helpDefaultSec(s) !== null,
+        helpPenaltySec: helpDefaultSec(s) === null ? 0 : Math.max(0, Math.floor(s.helpPenaltySec ?? 0)),
+        helpPenaltyDefaultSec: base ? (helpDefaultSec(base) ?? 0) : 0,
+        helpPenaltyOverridden:
+          !!o &&
+          o.helpPenaltySec !== null &&
+          helpDefaultSec(s) !== null &&
+          o.helpPenaltySec !== (base ? (helpDefaultSec(base) ?? 0) : 0),
       };
     });
 
@@ -614,6 +660,35 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     return c.json(payload);
   });
 
+  // PUT /pack/stages/:name/help-penalty
+  // Body: { seconds: number | null }  (null = clear override → JSON default)
+  // What showing the stage's step-by-step help for the first time adds to a
+  // player's finish time. Only the next first displays use the new value:
+  // a player who already used the help keeps the penalty frozen then.
+  router.put('/pack/stages/:name/help-penalty', async (c) => {
+    const stageName = c.req.param('name');
+    const baseStage = deps.pack.stages.find((s) => s.name === stageName);
+    if (!baseStage) throw new HttpError(404, 'stage not found');
+    const defaultSec = helpDefaultSec(baseStage);
+    if (defaultSec === null) throw new HttpError(400, 'stage has no help');
+    const body = (await c.req.json().catch(() => ({}))) as { seconds?: unknown };
+    const seconds = body.seconds;
+    if (
+      seconds !== null &&
+      (typeof seconds !== 'number' ||
+        !Number.isInteger(seconds) ||
+        seconds < 0 ||
+        seconds > HELP_PENALTY_MAX_SEC)
+    ) {
+      throw new HttpError(400, `seconds must be a whole number from 0 to ${HELP_PENALTY_MAX_SEC}, or null`);
+    }
+    // Storing the pack's own value would only leave a row saying nothing.
+    const stored = seconds === defaultSec ? null : seconds;
+    deps.service.packOverlay.setHelpPenalty(deps.pack.manifest.id, stageName, stored);
+    deps.service.applyEffectiveStages();
+    return c.json({ ok: true, stageName, seconds: seconds ?? defaultSec, overridden: stored !== null });
+  });
+
   // POST /pack/stages/:name/toggle?field=active|adminGate
   // Body: { value: boolean | null }   (null = clear override → JSON default)
   router.post('/pack/stages/:name/toggle', async (c) => {
@@ -624,11 +699,24 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     }
     const baseStage = deps.pack.stages.find((s) => s.name === stageName);
     if (!baseStage) throw new HttpError(404, 'stage not found');
-    const body = (await c.req.json().catch(() => ({}))) as { value?: unknown };
+    const body = (await c.req.json().catch(() => ({}))) as { value?: unknown; cascade?: boolean };
     if (body.value !== null && typeof body.value !== 'boolean') {
       throw new HttpError(400, 'value must be boolean or null');
     }
-    deps.service.packOverlay.setField(deps.pack.manifest.id, stageName, field, body.value);
+    if (body.cascade !== undefined && typeof body.cascade !== 'boolean') {
+      throw new HttpError(400, 'cascade must be boolean');
+    }
+    if (body.cascade && (field !== 'active' || body.value !== false)) {
+      throw new HttpError(400, 'cascade is only supported when disabling a stage');
+    }
+    const targets = body.cascade
+      ? [...cascadeDisable(deps.service.listEffectiveStages(), new Set([stageName])).disabled]
+      : [stageName];
+    deps.db.transaction(() => {
+      for (const name of targets) {
+        deps.service.packOverlay.setField(deps.pack.manifest.id, name, field, body.value as boolean | null);
+      }
+    })();
     deps.service.applyEffectiveStages();
     return c.json({ ok: true, stageName, field, value: body.value });
   });
@@ -660,6 +748,33 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     return c.json({ ok: true, paused: false });
   });
 
+  // ─── step-by-step help ─────────────────────────────────────────────
+  // Global switch (off until the operator turns it on) and a per-player
+  // override: `true` forces the help on, `false` off, `null` follows the
+  // global switch. The player-level value wins in both directions, and the
+  // server refuses help requests accordingly (the UI only mirrors it).
+  router.get('/help', (c) => {
+    const status: AdminHelpStatus = { enabled: deps.service.isHelpEnabledGlobally() };
+    return c.json(status);
+  });
+
+  router.put('/help', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { enabled?: unknown };
+    if (typeof body.enabled !== 'boolean') throw new HttpError(400, 'enabled must be a boolean');
+    deps.service.setHelpEnabledGlobally(body.enabled);
+    return c.json({ ok: true, enabled: body.enabled });
+  });
+
+  router.put('/users/:id/help', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { enabled?: unknown };
+    if (body.enabled !== null && typeof body.enabled !== 'boolean') {
+      throw new HttpError(400, 'enabled must be true, false or null');
+    }
+    const id = c.req.param('id');
+    deps.service.setSessionHelp(id, body.enabled);
+    return c.json({ ok: true, sessionId: id, enabled: body.enabled });
+  });
+
   // GET /pack/preview-disable/:name — returns the cascade closure of also
   // disabling this stage. Lets the UI show the operator a confirmation
   // modal listing what else would break before they commit.
@@ -686,6 +801,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       name: s.name,
       active: s.active ?? true,
       adminGate: s.adminGate ?? false,
+      helpPenaltySec: helpDefaultSec(s),
     }));
 
   router.get('/pack/config', (c) => {
@@ -909,6 +1025,13 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   });
 
   // ─── scoreboard peers ───────────────────────────────────────────────
+  router.put('/scoreboard-display', async (c) => {
+    const body: unknown = await c.req.json().catch(() => null);
+    if (!isScoreboardDisplaySettings(body)) throw new HttpError(400, 'invalid scoreboard display settings');
+    deps.service.clusterConfig.set(SCOREBOARD_DISPLAY_KEY, body, 'admin');
+    return c.json(body);
+  });
+
   // Admin-curated list of peer instances whose `/api/scoreboard` is
   // merged into this server's `/api/scoreboard/combined`. baseUrl is the
   // peer game's HTTP base (e.g. `http://10.55.89.44:3000`); the combined

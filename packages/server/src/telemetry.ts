@@ -20,6 +20,8 @@ export interface TelemetryDeps {
   url?: string;
   /** Optional bearer token sent as Authorization header. */
   token?: string;
+  /** VM address supplied by the deployment; container interfaces are only a fallback. */
+  deploymentIp?: string;
   packId: string;
   packVersion: string;
   /** Operator-facing name of the game, so Central can label it without
@@ -107,8 +109,20 @@ export class Telemetry {
     this.url = (deps.url ?? '').trim().replace(/\/+$/, '');
     this.token = deps.token || undefined;
     this.enabled = this.url.length > 0;
-    const ip = hostIp(deps.hostIp);
-    const firstBootDate = this.enabled ? this.firstBootDate() : '';
+    let ip = 'unknown';
+    let firstBootDate = '';
+    if (this.enabled) {
+      try {
+        ip = deps.deploymentIp?.trim() || hostIp(deps.hostIp);
+        firstBootDate = this.firstBootDate();
+      } catch (err) {
+        // Optional statistics must never prevent the game from starting.
+        this.enabled = false;
+        this.log('warn', 'telemetry initialization failed; disabled for this process', {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     this.deploymentId = `${ip}-${firstBootDate}`;
     const version = getVersionInfo();
     this.deployment = {
@@ -132,7 +146,7 @@ export class Telemetry {
         .prepare('INSERT INTO telemetry_outbox (created_at, event_json) VALUES ($ts, $json)')
         .run({ $ts: Date.now(), $json: JSON.stringify({ ...event, ts: Date.now() }) });
     } catch (err) {
-      this.logger.debug('telemetry record failed', {
+      this.log('debug', 'telemetry record failed', {
         err: err instanceof Error ? err.message : String(err),
       });
     }
@@ -145,7 +159,7 @@ export class Telemetry {
     this.timer = setInterval(() => void this.flush(), FLUSH_INTERVAL_MS);
     // Don't hold the process open for telemetry.
     this.timer.unref?.();
-    this.logger.info('telemetry enabled', { central: this.url, deploymentId: this.deploymentId });
+    this.log('info', 'telemetry enabled', { central: this.url, deploymentId: this.deploymentId });
   }
 
   stop(): void {
@@ -192,13 +206,22 @@ export class Telemetry {
       // Warn once per outage, then stay quiet — an unreachable Central is a
       // normal condition (offline lab), not something to spam logs with.
       if (!this.warnedSendFailure) {
-        this.logger.warn('telemetry flush failed (will keep retrying quietly)', { err: msg });
+        this.log('warn', 'telemetry flush failed (will keep retrying quietly)', { err: msg });
         this.warnedSendFailure = true;
       } else {
-        this.logger.debug('telemetry flush failed', { err: msg });
+        this.log('debug', 'telemetry flush failed', { err: msg });
       }
     } finally {
       this.flushing = false;
+    }
+  }
+
+  /** A logging failure must not escape a telemetry error handler. */
+  private log(level: 'debug' | 'info' | 'warn', message: string, data?: Record<string, unknown>): void {
+    try {
+      this.logger[level](message, data);
+    } catch {
+      // Logging is optional too; keep the game running.
     }
   }
 

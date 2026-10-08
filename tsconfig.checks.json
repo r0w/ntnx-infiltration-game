@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@ntnx-game/engine": [
+        "packages/engine/src/index.ts"
+      ],
+      "@ntnx-game/nutanix": [
+        "packages/nutanix/src/index.ts"
+      ]
+    },
+    "lib": [
+      "ES2022"
+    ]
+  },
+  "include": [
+    "packs/ntnx-infiltration/checks/**/*.ts"
+  ]
+}

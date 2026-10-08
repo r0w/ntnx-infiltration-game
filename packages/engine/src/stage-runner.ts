@@ -151,6 +151,41 @@ export class StageRunner {
   }
 
   /**
+   * Render a stage's help block (`stage.help` keys) into units. Same pipeline
+   * as {@link render} (locale fallback, `{Var}` substitution, tags), but the
+   * help is reference material shown on demand: flow units (`<input/>`,
+   * `<pause/>`, `<clear/>`, `<pagebreak/>`) are dropped, and neither the
+   * speaker tag nor the stage's colour is applied. A stage without help
+   * renders to an empty list.
+   */
+  renderHelp(
+    stage: StageDefinition,
+    vars: Variables,
+    locale: Locale,
+    bundle: LocaleBundle,
+  ): MessageUnit[] {
+    const units: MessageUnit[] = [];
+    const resolveOpts: ResolveOptions = {
+      onMissing: (key, loc) =>
+        this.logger?.warn('missing translation key', { key, locale: loc, stage: stage.name }),
+    };
+    for (const key of stage.help ?? []) {
+      const parsed = parseMessage(resolveKey(key, locale, bundle, resolveOpts), vars);
+      for (const u of parsed.units) {
+        if (u.kind === 'await-input' || u.kind === 'pause' || u.kind === 'clear' || u.kind === 'page-break') {
+          continue;
+        }
+        units.push(u);
+      }
+      const last = units[units.length - 1];
+      if (!(last && last.kind === 'text' && last.text.endsWith('\n'))) {
+        units.push({ kind: 'text', text: '\n', color: 'default' });
+      }
+    }
+    return units;
+  }
+
+  /**
    * Find the index of the first await-input unit at or after {@link fromIdx}.
    * Returns -1 if none.
    */
@@ -190,13 +225,6 @@ export class StageRunner {
 }
 
 /**
- * Inject a `<speaker> ` label at the start of every "chat beat" in the
- * rendered unit stream. A beat starts at stage entry, after a `<clear/>`,
- * and after any `\n\n` gap inside a text unit — matching the cadence of the
- * legacy Python per-beat `<speaker> ` prefix without relying on per-line
- * emission (which would clutter list items and slow typing).
- */
-/**
  * Insert a "press Enter" after every image that is not already followed by
  * one, so a screenshot stays on screen until the player says they are done
  * with it. Trailing whitespace between the image and an existing prompt does
@@ -220,6 +248,13 @@ function pauseAfterEachImage(units: MessageUnit[]): MessageUnit[] {
   return out;
 }
 
+/**
+ * Inject a `<speaker> ` label at the start of every "chat beat" in the
+ * rendered unit stream. A beat starts at stage entry, after a `<clear/>`,
+ * and after any `\n\n` gap inside a text unit — matching the cadence of the
+ * legacy Python per-beat `<speaker> ` prefix without relying on per-line
+ * emission (which would clutter list items and slow typing).
+ */
 function injectSpeakerTag(units: readonly MessageUnit[], speaker: string): MessageUnit[] {
   const tag: MessageUnit = { kind: 'text', text: `<${speaker}> `, color: 'dim' };
   const out: MessageUnit[] = [];

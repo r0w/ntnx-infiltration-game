@@ -7,6 +7,7 @@ services:
     environment:
       GAME_PACK: ${GAME_PACK:-ntnx-infiltration}
       MODE: ${MODE:-mock}
+      GAME_SECONDARY_NETWORK: ${GAME_SECONDARY_NETWORK:-secondary}
       PC_ENDPOINT: ${PC_ENDPOINT}
       PC_USER: ${PC_USER}
       PC_PASSWORD: ${PC_PASSWORD}

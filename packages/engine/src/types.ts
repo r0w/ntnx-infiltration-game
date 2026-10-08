@@ -188,6 +188,20 @@ export interface StageDefinition {
    * (admin can flip the gate on/off for any stage at runtime).
    */
   adminGate?: boolean;
+  /**
+   * Locale keys of the optional step-by-step help block. It is shown only when
+   * the player asks for it, never during normal play. Same message grammar as
+   * `messages`, except the flow tags (`<input/>`, `<pause/>`, `<clear/>`,
+   * `<pagebreak/>`, `<action/>`), which are dropped. Missing or empty = the
+   * stage has no help.
+   */
+  help?: string[];
+  /**
+   * Time penalty, in seconds, charged once per session the first time the
+   * player displays this stage's help. It is added to the finish time in the
+   * ranking. Missing = 0 (free help, only the usage is tracked).
+   */
+  helpPenaltySec?: number;
 }
 
 export interface GameSession {
@@ -497,6 +511,13 @@ export interface CheckContext {
    * without requiring a real probe.
    */
   clusterConfig?: ClusterConfig;
+}
+
+/** Services for a pack's auto-fill resolver; checks keep their read-only context. */
+export interface AutoFillContext extends CheckContext {
+  probes: PackProbes;
+  /** Cache a settled probe result, preserving any operator override, and return the stored value. */
+  storeClusterFact(fact: PackClusterFact): Promise<unknown>;
 }
 
 export interface ClusterConfig {

@@ -12,7 +12,6 @@
     "Trigram"
   ],
   "dependsOn": [
-    "create-admin-user",
     "create-auth-policy"
   ]
 }

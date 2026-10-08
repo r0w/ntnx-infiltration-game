@@ -173,19 +173,17 @@ cascades a disable through it. A bootcamp lab does not consume a *variable*
 from the stage before it, it consumes the *namespace* that stage created, so a
 disabled create-project left the storage labs looking fine and failing on the
 cluster. `dependsOn` names the stage instead, and the same fixed-point cascade
-covers it. A prerequisite the pack does not ship is ignored, not fatal: a typo
-in a manifest should not disable a working stage — but it is not silent either,
-because the stage audit fails on a `dependsOn` naming a stage the pack does not
-have, or one played later.
+covers it. The loader rejects prerequisites that are missing, repeated, or
+played later. Dependency analysis also reports unavailable prerequisites and
+propagates the failure to their downstream stages.
 
 Both games declare them now. The infiltration game had lost its edges to a
 refactor rather than to a missing feature: since checks began resolving entities
 by name (`{Trigram}-vm`) instead of consuming captured UUIDs, most stages'
 `needs` shrank to `Trigram` and the graph went flat, so `/admin` would happily
-let an operator disable `create-vm` and still call the six stages that act on
-that VM healthy. Fifteen `dependsOn` declarations, read off the checks and the
-stage prompts, put those edges back: disabling `create-vm` now takes six stages
-with it, `create-category` six, `create-project` seven.
+let an operator disable `create-vm` while leaving dependent stages enabled.
+The `dependsOn` declarations restore those edges, including the policies
+that depend on assigning the category to the VM.
 
 The other half of that graph, the variables, is no longer hardcoded either. The
 analysis used to carry a fixed list of "seeded" names — including two that only
@@ -280,6 +278,25 @@ Units play one at a time, not in parallel. `FauxTerminal` tracks an `activeIdx`:
 Creation is anonymous: `POST /api/session { locale? }` returns a `sessionId` kept in `localStorage`. Trigram, PIN and username are captured in-game as normal variables.
 
 On reload, `GET /api/session/:id` returns a `replay: MessageUnit[]` re-rendered up to the awaiting input (from the current variables + cache). The frontend prepends a `[resumed at …]` line and streams the replay, then the input field appears. A `409` on advance re-hydrates the client; a `404` (DB reset) drops the stale session back to the login screen.
+
+## Step-by-step help
+
+A stage can ship an optional help block (`help`: locale keys, `helpPenaltySec`: seconds), shown only when the player asks. `POST /api/session/:id/help` renders it through the same pipeline as the stage text (`StageRunner.renderHelp`: locale fallback, `{Var}` substitution, flow tags dropped) and returns plain `MessageUnit[]`; the frontend wraps them in a framed, foldable block with zoomable screenshots. The call never touches the awaiting / pending-check state.
+
+- **On/off**: the global flag lives in `cluster_config.help_enabled` (off by default, toggled in `/admin`); `sessions.help_enabled` is a per-session override (`NULL` follows the global flag, `1` / `0` force it). The player-level value wins in both directions, and the server enforces it, so the UI only mirrors it. The client learns the effective flag from the session snapshot, which the heartbeat polls every 5 s.
+- **Cost**: the first display of a stage records a `help_usage` row whose `penalty_sec` is frozen at that moment; showing it again is free. A first display that costs time answers `confirm-required` until the client re-posts with `confirm: true` and the amount it showed (`penaltySec`); a confirmation naming another amount than the current cost is refused with a new `confirm-required`, so a cost the operator changed in between is never billed unseen.
+- **Cost override**: the operator can change a stage's cost from the Pack tab (`PUT /api/admin/pack/stages/:name/help-penalty`). It is stored in `pack_overlay.help_penalty_sec` (`NULL` = the pack's `helpPenaltySec`, and a value equal to the pack default is stored as `NULL`), applied on top of the stage by `applyOverlay` like the active / gate overrides, range 0-3600 s. It is part of the portable `NIG1.` config and counts as drift. `/api/pack` and `/api/admin/pack` expose the effective cost; `help_usage.penalty_sec` is never rewritten.
+- **Ranking**: the penalties are added to the playing time, see [Playing time and ranking](#playing-time-and-ranking).
+
+## Playing time and ranking
+
+Finished players are ranked on their **playing time**: `finished_at - started_at`, minus the time the operator held them, plus the sum of their help penalties (in ms). Comparing absolute finish times would punish a late starter and ignore that two players reached a gate at different moments.
+
+- **Waits**: `session_waits` records each period a session was held by an admin gate (`reason = 'gate'`, with the gated stage) or by the pack-wide pause (`'pause'`). `advance()` opens one at the first `gated` answer; the operator's unlock (`setGateUnlock`), resume (`setGlobalPause(false)`) or a stage-config change (`applyEffectiveStages`) closes it at that instant, through `releaseWaits()`, so a player who closed the tab is not credited. A partial unique index allows one open wait per session: a player held by a gate and then a pause has a single wait, which ends when neither holds them, and the durations simply add up. A session that gets past the gates while a wait is still open closes it (safety net, also before the finish).
+- **Order** (`listScoreboard`): finished first, more stages passed, shortest playing time, earliest finish, most recent activity, earliest start. Players still playing have no playing time yet and are ordered as before.
+- **Combined board**: `mergeScoreboards` sorts on stages passed, `effectiveDuration` (the same time), earliest finish, earliest start. Entries also carry `blockedMs` (waits that are over), `blockedSince` and `blockedReason` (the running wait) and `lastReleasedAt`; a peer on an older version sends none of them and its waits count as 0, as its penalties do.
+- **Cards**: the card clock (`scoreboardTime.ts`) runs to `blockedSince`, `finishedAt` or now, minus the start and `blockedMs`, plus `helpPenaltySec` (so it is the time finished players are ranked on), and a held player's clock stops; the idle hint counts from the later of `lastActivityAt` and `lastReleasedAt`, and gives way to a `paused` (gate) or `lunch` (pause) chip while the player is held. The help badge sits to the left of the clock on its line, and the chips on the stage line.
+- **Limits**: only waits recorded since the version was deployed are known, so roll it out before an event. Time lost to a problem inside the game is not a wait.
 
 ## Dev iteration
 

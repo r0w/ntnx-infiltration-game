@@ -17,7 +17,7 @@
     "Trigram"
   ],
   "dependsOn": [
-    "create-category",
-    "create-vm"
+    "create-vm",
+    "create-category"
   ]
 }

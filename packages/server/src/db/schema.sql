@@ -37,7 +37,11 @@ CREATE TABLE IF NOT EXISTS sessions (
   -- When the session entered its current stage segment (ms epoch). Reset on
   -- every current_stage transition; wall-clock per-stage time = the delta
   -- between transitions (stage_history.duration_ms only times the check).
-  stage_entered_at INTEGER
+  stage_entered_at INTEGER,
+  -- Per-session override of the step-by-step help: NULL = follow the global
+  -- flag (cluster_config.help_enabled), 1 = forced on, 0 = forced off. The
+  -- player-level value always wins, even when the global flag says otherwise.
+  help_enabled INTEGER
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_trigram_pack ON sessions(trigram, pack_id);
@@ -82,6 +86,38 @@ CREATE INDEX IF NOT EXISTS idx_check_attempts_at ON check_attempts(checked_at DE
 -- every session delete.
 CREATE INDEX IF NOT EXISTS idx_check_attempts_session ON check_attempts(session_id);
 
+-- One row per (session, stage) whose step-by-step help the player displayed.
+-- `penalty_sec` is frozen at the first display, so changing a stage's penalty
+-- later never rewrites a score already earned. The ranking adds the SUM of a
+-- session's penalties to its finish time. A 0 s penalty is still recorded (the
+-- usage is tracked), it just costs nothing.
+CREATE TABLE IF NOT EXISTS help_usage (
+  session_id TEXT NOT NULL,
+  stage_name TEXT NOT NULL,
+  penalty_sec INTEGER NOT NULL DEFAULT 0,
+  used_at INTEGER NOT NULL,
+  PRIMARY KEY (session_id, stage_name),
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
+-- Periods during which the operator, not the player, was holding a session:
+-- parked at an admin gate ('gate', with the gated stage) or under the pack-wide
+-- pause ('pause'). `blocked_at` is the first "gated" answer the player got;
+-- `released_at` is the operator's unlock / resume, NULL while still held. The
+-- partial unique index allows one open period per session, so a player held by
+-- a gate AND a pause has a single period and the durations can simply be summed.
+CREATE TABLE IF NOT EXISTS session_waits (
+  id INTEGER PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  stage_name TEXT,
+  blocked_at INTEGER NOT NULL,
+  released_at INTEGER,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_session_waits_session ON session_waits(session_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_session_waits_open ON session_waits(session_id) WHERE released_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS cluster_cache (
   session_id TEXT NOT NULL,
   entity_kind TEXT NOT NULL,
@@ -125,6 +161,7 @@ CREATE TABLE IF NOT EXISTS pack_overlay (
   stage_name TEXT NOT NULL,
   active INTEGER,            -- 0/1 override, NULL = use stage.active from JSON
   admin_gate INTEGER,        -- 0/1 override, NULL = use stage.adminGate from JSON
+  help_penalty_sec INTEGER,  -- seconds, NULL = use stage.helpPenaltySec from JSON
   PRIMARY KEY (pack_id, stage_name)
 );
 

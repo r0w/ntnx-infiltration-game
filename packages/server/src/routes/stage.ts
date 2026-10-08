@@ -4,6 +4,8 @@ import { HttpError } from '../session-service';
 import type { LoadedPack } from '../pack-loader';
 import { resolvePackNav } from '../pack-nav';
 import { consoleLogger } from '../logger';
+import { makePackProbes } from '../pack-probes';
+import { storeClusterFacts } from '../cluster-facts';
 import { NutanixTransportError } from '@ntnx-game/nutanix';
 import type { SubmitInputRequest } from '@ntnx-game/shared';
 
@@ -40,6 +42,18 @@ export function buildStageRoutes(deps: StageRoutesDeps): Hono {
   // Phase 2 of the two-phase check: run the check deferred by /input.
   router.post('/:id/resolve-check', async (c) => {
     const r = await service.resolvePendingCheck(c.req.param('id'));
+    return c.json(r);
+  });
+
+  // Step-by-step help for the stage the player is awaiting input in. A first
+  // display that costs time answers `confirm-required` until the client
+  // re-posts with `confirm: true`; see SessionService.requestHelp.
+  router.post('/:id/help', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { confirm?: unknown; penaltySec?: unknown };
+    const r = service.requestHelp(c.req.param('id'), {
+      confirm: body.confirm === true,
+      confirmedPenaltySec: typeof body.penaltySec === 'number' ? body.penaltySec : undefined,
+    });
     return c.json(r);
   });
 
@@ -188,10 +202,19 @@ export function buildStageRoutes(deps: StageRoutesDeps): Hono {
       // three the infiltration game answers name its own stages 28, 29 and 31.
       const resolve = pack.autoFill[variable];
       const value = resolve
-        ? await service.queryWithSessionContext(sessionId, (ctx) => resolve(ctx))
+        ? await service.queryWithSessionContext(sessionId, (ctx) => resolve({
+          ...ctx,
+          probes: makePackProbes(ctx.nutanix, ctx.logger),
+          async storeClusterFact(fact) {
+            await storeClusterFacts({ facts: [fact], cfg: service.clusterConfig, logger: ctx.logger });
+            return service.clusterConfig.get(fact.key);
+          },
+        }))
         : null;
       if (value === null || value === undefined || value === '') {
-        throw new HttpError(404, `no auto-fill for variable "${variable}"`);
+        throw new HttpError(resolve ? 503 : 404, resolve
+          ? `Auto-fill for "${variable}" is not available yet. Wait for the cluster to settle, then retry.`
+          : `no auto-fill for variable "${variable}"`);
       }
       return c.json({ ok: true, variable, value: String(value) });
     } catch (err) {

@@ -20,6 +20,10 @@ import {
   type AdminUserEntry,
 } from './api';
 import { EMAIL_RE } from '@ntnx-game/shared';
+import { HelpCostCell } from './HelpCostCell';
+import { HelpMenu } from './HelpMenu';
+import { ScoreboardDisplayOptions } from './ScoreboardDisplayOptions';
+import { fmtPenaltyShort } from './duration';
 import { ConfirmModal, Modal } from './Modal';
 import { stageState, stateNote, STATE_ORDER, type StageState } from './pack-state';
 
@@ -195,6 +199,10 @@ function AdminDashboard({
   const [gates, setGates] = useState<AdminGateEntry[] | null>(null);
   const [lunch, setLunch] = useState<AdminLunchStatus | null>(null);
   const [lunchBusy, setLunchBusy] = useState(false);
+  // Global switch of the step-by-step help (off until the operator turns it
+  // on). A player's own override, set from the table, wins over it.
+  const [helpGlobal, setHelpGlobal] = useState<boolean | null>(null);
+  const [helpBusy, setHelpBusy] = useState(false);
   // Intelligent Ops state, page-wide: create-report hard-depends on it and
   // enabling is a manual Prism step, so the operator must see the warning
   // from any tab (same idea as the lunch strip), not just Cluster.
@@ -266,13 +274,14 @@ function AdminDashboard({
 
   const refresh = useCallback(async () => {
     try {
-      const [usersPayload, gatesPayload, packPayload, lunchPayload, selfPayload, peersPayload] = await Promise.all([
+      const [usersPayload, gatesPayload, packPayload, lunchPayload, selfPayload, peersPayload, helpPayload] = await Promise.all([
         api.adminUsers(password),
         api.adminGates(password),
         api.adminPack(password),
         api.adminLunchStatus(password),
         api.adminSelfLabel(password),
         api.adminPeers(password),
+        api.adminHelpStatus(password),
       ]);
       setEntries(usersPayload.entries);
       setIdentityLabel(usersPayload.identityLabel ?? 'trigram');
@@ -281,6 +290,7 @@ function AdminDashboard({
       setPackBrokenCount(packPayload.brokenCount);
       setPackMeta({ clusterProfile: packPayload.clusterProfile, mode: packPayload.mode });
       setLunch(lunchPayload);
+      setHelpGlobal(helpPayload.enabled);
       setSelfLabel(selfPayload.label);
       setHasPeers(peersPayload.entries.length > 0);
       setError(null);
@@ -365,13 +375,64 @@ function AdminDashboard({
     }
   };
 
+  const toggleHelp = async () => {
+    if (helpGlobal === null) return;
+    setHelpBusy(true);
+    try {
+      const next = !helpGlobal;
+      await api.adminHelpSet(password, next);
+      setHelpGlobal(next);
+      void refresh();
+    } catch (err) {
+      setError(`help toggle failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setHelpBusy(false);
+    }
+  };
+
+  // `null` clears the player's override: they follow the global switch again.
+  const setUserHelp = async (entry: AdminUserEntry, value: boolean | null) => {
+    try {
+      await api.adminUserHelpSet(password, entry.sessionId, value);
+      setEntries((prev) =>
+        (prev ?? []).map((e) =>
+          e.sessionId === entry.sessionId
+            ? { ...e, helpEnabled: value, helpEffective: value ?? helpGlobal ?? false }
+            : e,
+        ),
+      );
+      void refresh();
+    } catch (err) {
+      setError(`help override failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
   // Stages whose live value differs from what their pack file declares.
   // Counts real drift, not overlay rows: an override that happens to match
   // the default is invisible to the operator, so it must not raise a flag.
   const packDriftCount =
     packStages === null
       ? null
-      : packStages.filter((s) => s.activeOverridden || s.adminGateOverridden).length;
+      : packStages.filter(
+          (s) => s.activeOverridden || s.adminGateOverridden || s.helpPenaltyOverridden,
+        ).length;
+
+  // Resolves true once the server took the new cost, so the editor can close.
+  // `null` goes back to the cost declared in the pack files.
+  const setHelpPenalty = async (stage: AdminPackStageEntry, seconds: number | null) => {
+    setPackBusyId(stage.stageName);
+    try {
+      await api.adminHelpPenaltySet(password, stage.stageName, seconds);
+      void refresh();
+      return true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`pack help cost failed: ${msg}`);
+      return false;
+    } finally {
+      setPackBusyId(null);
+    }
+  };
 
   const togglePackField = async (
     stage: AdminPackStageEntry,
@@ -413,19 +474,10 @@ function AdminDashboard({
 
   const confirmDisable = async (cascade: boolean) => {
     if (!packDisableTarget) return;
-    const { stage, preview } = packDisableTarget;
+    const { stage } = packDisableTarget;
     setPackBusyId(stage.stageName);
     try {
-      await api.adminPackToggle(password, stage.stageName, 'active', false);
-      if (cascade) {
-        // Best-effort cascade — fire toggles in parallel; failures bubble
-        // into a single error banner but don't try to roll back.
-        await Promise.all(
-          preview.cascade.map((b) =>
-            api.adminPackToggle(password, b.stageName, 'active', false),
-          ),
-        );
-      }
+      await api.adminPackToggle(password, stage.stageName, 'active', false, cascade);
       setPackDisableTarget(null);
       void refresh();
     } catch (err) {
@@ -613,6 +665,25 @@ function AdminDashboard({
                 : lunch.paused
                   ? `resume (${lunch.affectedCount} paused)`
                   : 'lunch lock'}
+            </button>
+          </div>
+        )}
+
+        {helpGlobal !== null && (
+          <div className="admin-header-group admin-header-group-actions">
+            <button
+              type="button"
+              className={`admin-lunch-btn ${helpGlobal ? 'admin-help-btn-on' : ''}`}
+              disabled={helpBusy}
+              onClick={() => void toggleHelp()}
+              title={
+                helpGlobal
+                  ? 'step-by-step help is ON for every player not forced off — click to switch it off'
+                  : 'step-by-step help is OFF for every player not forced on — click to switch it on'
+              }
+            >
+              <span className="admin-lunch-icon" aria-hidden="true">💡</span>
+              {helpBusy ? '…' : helpGlobal ? 'help: on' : 'help: off'}
             </button>
           </div>
         )}
@@ -821,6 +892,8 @@ function AdminDashboard({
                 {hasAgentCols && <th>PIN</th>}
                 <th>Stage</th>
                 <th>Progress</th>
+                <th>Help</th>
+                <th>Penalties</th>
                 <th>Started</th>
                 <th>Session</th>
                 <th aria-label="actions" />
@@ -879,6 +952,34 @@ function AdminDashboard({
                       : `${e.stagesPassed} passed / ${e.totalStages} total`
                   }>
                     {e.stagesPassed} / {e.effectiveTotalStages}
+                  </td>
+                  <td>
+                    <HelpMenu
+                      value={e.helpEnabled}
+                      globalOn={helpGlobal ?? false}
+                      label={`help for ${e.trigram ?? e.sessionId.slice(0, 8)}`}
+                      onChange={(value) => void setUserHelp(e, value)}
+                    />
+                  </td>
+                  <td>
+                    {e.helpUses > 0 ? (
+                      <span
+                        className="admin-penalties c-yellow"
+                        title={e.helpStages
+                          .map((h) => `${h.stage}${h.penaltySec > 0 ? ` (${fmtPenaltyShort(h.penaltySec)})` : ''}`)
+                          .join(', ')}
+                      >
+                        {e.helpUses}
+                        {e.helpPenaltySec > 0 && (
+                          <>
+                            <span className="c-dim"> | </span>
+                            {fmtPenaltyShort(e.helpPenaltySec)}
+                          </>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="c-dim">—</span>
+                    )}
                   </td>
                   <td className="c-dim">{fmtAge(e.startedAt)}</td>
                   <td className="admin-td-sid c-dim" title={e.sessionId}>
@@ -964,6 +1065,7 @@ function AdminDashboard({
             busyId={packBusyId}
             onTogglePackField={togglePackField}
             onRequestDisable={requestDisable}
+            onSetHelpPenalty={setHelpPenalty}
           />
         </section>
       )}
@@ -977,7 +1079,12 @@ function AdminDashboard({
         />
       )}
       {tab === 'emails' && <EmailsTab password={password} />}
-      {tab === 'scoreboard' && <PeersEditor password={password} />}
+      {tab === 'scoreboard' && (
+        <>
+          <ScoreboardDisplayOptions password={password} />
+          <PeersEditor password={password} />
+        </>
+      )}
       {packDisableTarget && (
         <ConfirmModal
           title={<><span className="c-yellow">!</span> disable stage?</>}
@@ -994,7 +1101,7 @@ function AdminDashboard({
           </p>
           <p className="modal-warn">
             <span className="c-yellow">disabling this</span> would leave the
-            stages below without something they need:
+            stages below without their required resources or inputs:
           </p>
           <ul className="modal-cascade-list">
             {packDisableTarget.preview.cascade.map((b) => (
@@ -1006,7 +1113,7 @@ function AdminDashboard({
           </ul>
           <p className="c-dim modal-cascade-hint">
             <strong>just this one</strong> = disable only this stage (downstream
-            stages stay on but will surface "missing-upstream" at runtime).{' '}
+            stages stay on and may fail because a required resource is missing).{' '}
             <strong>disable + cascade</strong> = also disable the{' '}
             {packDisableTarget.preview.cascade.length} cascade stage(s).{' '}
             <strong>cancel</strong> = close without changing anything.
@@ -1252,6 +1359,7 @@ function PackConfigBar({
 
   const copy = async () => {
     if (!exported) return;
+    setBusy(true);
     try {
       await navigator.clipboard.writeText(exported.config);
       setCopied(true);
@@ -1259,6 +1367,8 @@ function PackConfigBar({
       // Clipboard is blocked over plain http on some browsers, and the game
       // is served over http. The box is selectable, so say that instead.
       setError('clipboard blocked by the browser, select the text and copy manually');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -1308,10 +1418,10 @@ function PackConfigBar({
             : 'pack default'}
         </span>
         <span className="admin-pack-config-sep" aria-hidden="true" />
-        <button type="button" className="app-reset" onClick={() => void openExport()}>
+        <button type="button" className="app-reset" disabled={busy} onClick={() => void openExport()}>
           export
         </button>
-        <button type="button" className="app-reset" onClick={() => setDialog('import')}>
+        <button type="button" className="app-reset" disabled={busy} onClick={() => { close(); setDialog('import'); }}>
           import
         </button>
         {/* Never disabled on driftCount alone: an override that matches the
@@ -1320,14 +1430,15 @@ function PackConfigBar({
           type="button"
           className="app-reset"
           title="drop every override and go back to the pack defaults"
-          onClick={() => setDialog('reset')}
+          disabled={busy}
+          onClick={() => { close(); setDialog('reset'); }}
         >
           reset
         </button>
       </div>
 
       {dialog === 'export' && (
-        <Modal title="export stage config" onClose={close} wide>
+        <Modal title="export stage config" onClose={close} busy={busy} wide>
           <div className="modal-body">
             <p className="admin-pack-config-lede">
               Paste this into another instance to give it the same setup.
@@ -1356,13 +1467,13 @@ function PackConfigBar({
             {error && <p className="c-red admin-pack-config-error">{error}</p>}
           </div>
           <div className="modal-actions">
-            <button type="button" className="modal-btn" onClick={close}>
+            <button type="button" className="modal-btn" disabled={busy} onClick={close}>
               close
             </button>
             <button
               type="button"
               className="modal-btn"
-              disabled={!exported}
+              disabled={busy || !exported}
               onClick={() => void copy()}
             >
               {copied ? 'copied' : 'copy'}
@@ -1509,6 +1620,7 @@ function PackEditor({
   busyId,
   onTogglePackField,
   onRequestDisable,
+  onSetHelpPenalty,
 }: {
   stages: AdminPackStageEntry[] | null;
   meta: { clusterProfile: 'hpoc' | 'other'; mode: 'mock' | 'test' | 'live' } | null;
@@ -1519,6 +1631,7 @@ function PackEditor({
     value: boolean,
   ) => void;
   onRequestDisable: (s: AdminPackStageEntry) => void;
+  onSetHelpPenalty: (s: AdminPackStageEntry, seconds: number | null) => Promise<boolean>;
 }) {
   const [filter, setFilter] = useState<StageState | 'all'>('all');
   const [query, setQuery] = useState('');
@@ -1647,7 +1760,9 @@ function PackEditor({
               <th>stage</th>
               <th>active</th>
               <th>gate</th>
+              <th>help cost</th>
               <th>vars</th>
+              <th>requires stages</th>
             </tr>
           </thead>
           <tbody>
@@ -1716,6 +1831,13 @@ function PackEditor({
                       {s.adminGateOverridden && <span className="pack-toggle-mark">·</span>}
                     </button>
                   </td>
+                  <td>
+                    <HelpCostCell
+                      stage={s}
+                      busy={busy}
+                      onSave={(seconds) => onSetHelpPenalty(s, seconds)}
+                    />
+                  </td>
                   <td className="pack-vars c-dim">
                     {s.needs.length === 0 && s.captures.length === 0 ? (
                       <span className="pack-vars-none">—</span>
@@ -1732,12 +1854,32 @@ function PackEditor({
                       </>
                     )}
                   </td>
+                  <td className="pack-dependencies">
+                    {(s.dependsOn ?? []).length === 0 ? (
+                      <span className="c-dim pack-vars-none">—</span>
+                    ) : (
+                      <ul>
+                        {s.dependsOn!.map((name) => (
+                          <li key={name}>
+                            <button
+                              type="button"
+                              className={`pack-dependency${s.brokenMissingStages?.includes(name) ? ' pack-dependency-missing' : ''}`}
+                              title={`Go to ${name}${s.brokenMissingStages?.includes(name) ? ' (unavailable)' : ''}`}
+                              onClick={() => jumpTo(name)}
+                            >
+                              {name}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </td>
                 </tr>
               );
             })}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={5} className="pack-empty">
+                <td colSpan={7} className="pack-empty">
                   no stage matches. <button type="button" className="app-reset" onClick={() => { setFilter('all'); setQuery(''); }}>show all {rows.length}</button>
                 </td>
               </tr>

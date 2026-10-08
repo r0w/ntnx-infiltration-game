@@ -38,6 +38,16 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
   instance, and reset every stage back to the pack defaults.
 - The Pack tab says at a glance how many stages differ from the pack defaults.
 
+- Scoreboard display settings in Admin: fit everyone or scroll smoothly in both directions, with speed, pause, simplified projection and progress highlights. Settings persist on the game server and update its scoreboards automatically.
+- Mock scoreboard previews for 1–200 participants, with presets, cluster labels and optional random progress every five seconds.
+- Step-by-step help on demand: a `[? help]` button, or typing `?`, shows an illustrated walkthrough of the stage with copyable values. Available on the Security Policy, SSH rule and NCM playbook stages, in English, French and German.
+- Help counts in the score: each stage can set a time penalty, in seconds, added to the playing time in the ranking. The scoreboard shows a badge, the Agents table has a Penalties column, and the player confirms before a costly first display.
+- Switch the help on or off for everyone, or for one player, from `/admin`. It is off by default, and the player's setting wins over the global one. The per-player setting is a small menu in the Agents table.
+- Change a stage's help cost without redeploying: the Pack tab has a new HELP COST column with a quick editor and a reset to the pack value. The cost is part of the exported and imported config, and players who already used a help keep what they were charged.
+- Auto-scroll has a fourth speed, **Turbo** (96 px/s), after Slow, Normal and Fast. The speed is now picked from a small menu like the help setting of the Agents table, which also shows each speed in pixels per second.
+- Time spent held by the operator no longer counts against a player: how long each player waited at an admin gate or under the lunch lock is recorded from the moment the game stops them to the moment you unlock or resume.
+- Scoreboard cards show the playing time plus the help penalties, which is the time players are ranked on, not the raw elapsed time: the clock stops while a player is held. An orange `paused` chip means a gate, a violet `lunch` chip the lunch lock, and a cyan `idle` chip means nothing was attempted for over a minute (it restarts at the unlock). The help badge is now red, with an icon, and sits to the left of the playing time. The mock previews show these states too, with presets for 5, 12, 21, 32, 40 and 50 agents.
+
 ### Changed
 
 - The bootcamp now prints the real ingress addresses of the cluster you are on,
@@ -71,7 +81,16 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 - The prerequisites runbook now asks which project to use instead of assuming
   one named `lab`, and says so plainly when that project does not exist.
 
+- Scoreboard layout adapts to the screen and participant count, including 50 players at 1920×1080. Progress fills each card's background, and display controls live in Admin to keep the projected view clean.
+- The scoreboard display settings in Admin use the same text sizes as the rest of the console: the option titles were larger than the panel title.
+- The ranking now compares playing time instead of the absolute finish time: finish minus start, minus the time held at gates and by the lunch lock, plus help penalties. A late start or a long wait at a gate no longer costs a place, and players still playing are ordered as before.
+- Help penalties are shown in the same compact format as the clocks (`+4m30`, `+45s`) everywhere they appear instead of `+4 min 30 s`: on the scoreboard cards, in the Agents table, in the HELP COST column and in what the player sees (the help button, the confirmation and the help block). The penalty is red in the player's help block, like the scoreboard badge.
+- The report stage accepts a 03:00 schedule regardless of the report timezone.
+- In `test` and `mock` modes, text now appears instantly and `<pause>` beats are skipped by default. The dev panel's speed slider and "no pauses" box still override this, and `live` keeps the pack's pacing.
+
 ### Fixed
+
+- The NKP blueprint selects the `nkp` image and uses its own VM address for telemetry, with the same SSH user validation as NCP.
 
 - Turning off a stage in the Pack tab now also turns off the stages whose
   cluster resources it creates, in the infiltration game too: disabling the VM
@@ -113,6 +132,46 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
   expected, or when erasure coding has to be turned off on an Objects container.
 - The install no longer stops on clusters running NCM Self-Service 4.4.0, which
   rejected one of the two blueprints the game uploads for later stages.
+
+- Central telemetry uses the game VM address supplied by the blueprint instead of the Docker bridge IP, distinguishing VMs first started on the same day. Update Game also sets this address for existing installations.
+- If telemetry initialization fails, statistics are disabled for that process so the game can still start.
+
+## [1.1.0] - 2026-09-13
+
+### Added
+
+- See required stages in the Pack table and click to jump to them.
+- Choose the game network and game VM SSH user at deployment.
+- Export, import and reset stage configurations from the Pack tab.
+
+### Changed
+
+- Updated deployment and auto-play for Prism Central 7.6 and Self-Service 4.4.0.
+- Search and filter stages in the Pack tab.
+- Clearer instructions for project identity sources and category ownership.
+- Deployment guide explains how to create a project if none exists.
+- Choose the target project when launching the prerequisites runbook.
+
+### Fixed
+
+- Auto-play retrieves the LCM update count if it was unavailable at startup.
+- Storage policy updates preserve existing performance settings.
+- Pack dialogs clear messages from previous operations.
+
+- Auto-play matches the instructions for VM recovery, policies, network ranges, disk size and schedules, including existing reports.
+- Disabling a stage can also disable all dependent stages; imported configurations report broken dependencies.
+
+- CloneProd shares the required network with the source VM's project and reports clone failures.
+- Project setup reports incomplete membership; auto-play fixes VM ownership and category assignment.
+- Installation waits for Policy Engine and reports missing status or failed downloads.
+- Installation retries temporary VM creation failures and correctly recognizes existing VMs on resume.
+- Fixed installation failures with older cluster APIs and erasure coding settings.
+
+## [1.0.4] - 2026-09-11
+
+### Fixed
+
+- Improve prerequisite blueprint compatibility with NCM Self-Service 4.4.
 
 ## [1.0.3] - 2026-09-07
 
@@ -281,7 +340,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 Baseline release. See the git history for changes up to this point.
 
-[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.4...v1.1.0
+[1.0.4]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.0...v1.0.1

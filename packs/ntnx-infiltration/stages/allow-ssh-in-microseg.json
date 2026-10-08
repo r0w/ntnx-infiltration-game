@@ -25,5 +25,24 @@
   ],
   "dependsOn": [
     "create-microseg-policy"
-  ]
+  ],
+  "help": [
+    "stage-019.help-01",
+    "stage-019.help-02",
+    "stage-019.help-03",
+    "stage-019.help-04",
+    "stage-019.help-05",
+    "stage-019.help-06",
+    "stage-019.help-07",
+    "stage-019.help-08",
+    "stage-019.help-09",
+    "stage-019.help-10",
+    "stage-019.help-11",
+    "stage-019.help-12",
+    "stage-019.help-13",
+    "stage-019.help-14",
+    "stage-019.help-15",
+    "stage-019.help-16"
+  ],
+  "helpPenaltySec": 180
 }

@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import type { MessageUnit } from '@ntnx-game/shared';
 import { useLightbox } from './Lightbox';
-import { assetUrl, textClasses } from './renderer';
+import { assetUrl } from './renderer';
+import { textClasses } from './textClasses';
 
 /**
  * A step of the bootcamp, re-read.

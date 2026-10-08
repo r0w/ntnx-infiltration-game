@@ -54,9 +54,11 @@ export interface NutanixSdk {
   };
   networking: {
     subnets: any;
+    vpcs: any;
   };
   microseg: {
     policies: any;
+    serviceGroups: any;
   };
   datapolicies: {
     storage: any;
@@ -190,9 +192,11 @@ export async function createSdkAdapter(
     },
     networking: {
       subnets: new networking.SubnetsApi(networkingClient),
+      vpcs: new networking.VpcsApi(networkingClient),
     },
     microseg: {
       policies: new microseg.NetworkSecurityPoliciesApi(microsegClient),
+      serviceGroups: new microseg.ServiceGroupsApi(microsegClient),
     },
     datapolicies: {
       storage: new datapolicies.StoragePoliciesApi(datapoliciesClient),

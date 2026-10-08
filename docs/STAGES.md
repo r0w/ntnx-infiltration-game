@@ -12,6 +12,7 @@ screen). This page maps both, in play order.
 - `name` is the canonical identifier (kebab-case). It is the field used everywhere: filename `<name>.json`, SQLite columns (`stage_name`), API payload, `pack.json.stages[]`, logs, DevPanel.
 - `check.fn` is the check function registered in the pack's `checks/index.ts`. A dash means the stage is narrative or input-only (no validation against the cluster).
 - `dependsOn` names the earlier stages whose *cluster state* this one consumes (not its variables - that is `needs`). Turning one of them off in `/admin` cascades the disable down to here.
+- Stages **18** (`create-microseg-policy`, +2 min), **19** (`allow-ssh-in-microseg`, +3 min) and **33** (`create-ncm-playbook`, +2 min 30 s) carry a step-by-step help block (`help` + `helpPenaltySec` in their JSON). The penalty is what the first display adds to the finish time.
 
 ## `ntnx-infiltration` - 39 stages
 

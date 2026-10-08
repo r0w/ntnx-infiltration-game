@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -31,6 +32,8 @@ import {
 } from '../src/routes/admin';
 import { SessionService } from '../src/session-service';
 import { EMAIL_TEMPLATES } from '../src/email';
+import { DEFAULT_SCOREBOARD_DISPLAY } from '@ntnx-game/shared';
+import { buildScoreboardRoutes } from '../src/routes/scoreboard';
 import type { LoadedPack } from '../src/pack-loader';
 
 const SCHEMA = readFileSync(
@@ -131,6 +134,87 @@ function router(db: Database, pack: LoadedPack = fakePack()) {
   const service = makeService(db, pack);
   return buildAdminRoutes({ db, pack, adminPassword: ADMIN_PW, service, nutanix: noopNutanix, clusterProfile: 'hpoc', pcEndpoint: '' });
 }
+
+describe('scoreboard display settings', () => {
+  const headers = { 'X-Admin-Password': ADMIN_PW, 'Content-Type': 'application/json' };
+  const saved = { mode: 'scroll', speed: 48, paused: true, view: 'simple', highlightProgress: false };
+  const publicRouter = (db: Database) => {
+    const pack = fakePack();
+    return buildScoreboardRoutes({ db, pack, mode: 'mock', service: makeService(db, pack), capabilities: [], clusterProfile: 'other' });
+  };
+
+  test('public readers get defaults, then the persisted settings after route reconstruction', async () => {
+    const db = freshDb();
+    const initial = await publicRouter(db).request('/display');
+    expect(initial.headers.get('Cache-Control')).toBe('no-store');
+    expect(await initial.json()).toEqual(DEFAULT_SCOREBOARD_DISPLAY);
+    const response = await router(db).request('/scoreboard-display', { method: 'PUT', headers, body: JSON.stringify(saved) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(saved);
+    expect(await (await publicRouter(db).request('/display')).json()).toEqual(saved);
+    expect((db.query('SELECT count(*) AS n FROM sessions').get() as { n: number }).n).toBe(0);
+    db.close();
+  });
+
+  test('every scroll speed is accepted, the fastest included, and nothing in between', async () => {
+    const db = freshDb();
+    const admin = router(db);
+    for (const speed of [12, 24, 48, 96]) {
+      const response = await admin.request('/scoreboard-display', { method: 'PUT', headers, body: JSON.stringify({ ...saved, speed }) });
+      expect(response.status).toBe(200);
+      expect(((await (await publicRouter(db).request('/display')).json()) as { speed: number }).speed).toBe(speed);
+    }
+    for (const speed of [0, 6, 72, 100, 192]) {
+      const response = await admin.request('/scoreboard-display', { method: 'PUT', headers, body: JSON.stringify({ ...saved, speed }) });
+      expect(response.status).toBe(400);
+    }
+    db.close();
+  });
+
+  test('only an authenticated admin can change the shared display', async () => {
+    const db = freshDb();
+    for (const password of ['', 'wrong']) {
+      const response = await router(db).request('/scoreboard-display', {
+        method: 'PUT', headers: { ...headers, 'X-Admin-Password': password }, body: JSON.stringify(saved),
+      });
+      expect(response.status).toBe(401);
+    }
+    expect(await (await publicRouter(db).request('/display')).json()).toEqual(DEFAULT_SCOREBOARD_DISPLAY);
+    expect((await publicRouter(db).request('/display', { method: 'PUT', body: JSON.stringify(saved) })).status).toBe(404);
+    db.close();
+  });
+
+  test('display settings survive closing and reopening the database', async () => {
+    const directory = mkdtempSync(resolve(tmpdir(), 'nig-scoreboard-display-'));
+    const path = resolve(directory, 'game.db');
+    let db = new Database(path);
+    try {
+      db.exec(SCHEMA);
+      expect((await router(db).request('/scoreboard-display', { method: 'PUT', headers, body: JSON.stringify(saved) })).status).toBe(200);
+      db.close();
+      db = new Database(path);
+      expect(await (await publicRouter(db).request('/display')).json()).toEqual(saved);
+    } finally {
+      db.close();
+      rmSync(directory, { recursive: true });
+    }
+  });
+
+  test('malformed settings never replace the last valid configuration', async () => {
+    const db = freshDb();
+    const admin = router(db);
+    await admin.request('/scoreboard-display', { method: 'PUT', headers, body: JSON.stringify(saved) });
+    for (const body of [null, {}, [], { ...saved, mode: 'other' }, { ...saved, speed: '48' },
+      { ...saved, speed: 999 }, { ...saved, paused: 'true' }, { ...saved, view: 'other' },
+      { ...saved, highlightProgress: 1 }, { ...saved, unknown: true }]) {
+      const response = await admin.request('/scoreboard-display', { method: 'PUT', headers, body: JSON.stringify(body) });
+      expect(response.status).toBe(400);
+      expect(await (await publicRouter(db).request('/display')).json()).toEqual(saved);
+    }
+    expect((await admin.request('/scoreboard-display', { method: 'PUT', headers, body: '{' })).status).toBe(400);
+    db.close();
+  });
+});
 
 describe('POST /api/admin/login', () => {
   test('wrong password → 401', async () => {
@@ -989,6 +1073,83 @@ describe('pack config export / import / reset', () => {
     expect(service.listEffectiveStages().every((s) => s.active)).toBe(true);
     const view = (await (await r.request('/pack', { headers: AUTH })).json()) as AdminPackPayload;
     expect(view.stages.every((s) => !s.activeOverridden && !s.adminGateOverridden)).toBe(true);
+  });
+
+  test('real pack previews and applies the full VM cascade while preserving other settings', async () => {
+    const packDir = resolve(import.meta.dir, '../../../packs/ntnx-infiltration');
+    const names = JSON.parse(readFileSync(resolve(packDir, 'pack.json'), 'utf8')).stages as string[];
+    const stages = names.map((name, index) => ({
+      ...JSON.parse(readFileSync(resolve(packDir, 'stages', `${name}.json`), 'utf8')), index,
+    })) as StageDefinition[];
+    const { r, service } = instance(freshDb(), stages);
+    await toggle(r, 'create-report', 'adminGate', true);
+    const preview = await (await r.request('/pack/preview-disable/create-vm', { headers: AUTH })).json();
+    const affected = preview.cascade.map((s: { stageName: string }) => s.stageName);
+    expect(affected).toContain('live-migrate-vm');
+    expect(affected).toContain('apply-category-to-vm');
+    expect(affected).toContain('allow-ssh-in-microseg');
+    expect(affected).toContain('restore-vm-from-recovery');
+    expect(affected).not.toContain('create-report');
+    expect(affected).not.toContain('clone-app-blueprint');
+    expect(affected).not.toContain('create-category');
+    expect(preview.cascade.find((s: { stageName: string }) => s.stageName === 'apply-category-to-vm').missingStages).toContain('create-vm');
+    const response = await r.request('/pack/stages/create-vm/toggle?field=active', {
+      method: 'POST', headers: AUTH_JSON, body: JSON.stringify({ value: false, cascade: true }),
+    });
+    expect(response.status).toBe(200);
+    expect(service.listEffectiveStages().filter((s) => !s.active).map((s) => s.name).sort())
+      .toEqual(['create-vm', ...affected].sort());
+    expect(service.listEffectiveStages().find((s) => s.name === 'create-report')?.adminGate).toBe(true);
+    const exported = (await exportConfig(r)).config;
+    const target = instance(freshDb(), stages);
+    expect((await (await importConfig(target.r, exported)).json()).brokenStages).toEqual([]);
+    expect(target.service.listEffectiveStages().filter((s) => !s.active).map((s) => s.name).sort())
+      .toEqual(['create-vm', ...affected].sort());
+    await target.r.request('/pack/config/reset', { method: 'POST', headers: AUTH });
+    expect(target.service.listEffectiveStages().map((s) => s.active)).toEqual(stages.map((s) => s.active));
+  });
+
+  test('import and Pack view report indirect resource dependencies left enabled', async () => {
+    const stages: StageDefinition[] = [
+      { index: 0, id: 'vm', name: 'vm', active: true, messages: [] },
+      { index: 1, id: 'tag', name: 'tag', active: true, messages: [], dependsOn: ['vm'] },
+      { index: 2, id: 'policy', name: 'policy', active: true, messages: [], dependsOn: ['tag'] },
+    ];
+    const source = instance(freshDb(), stages);
+    await toggle(source.r, 'vm', 'active', false);
+    const target = instance(freshDb(), stages);
+    const result = await (await importConfig(target.r, (await exportConfig(source.r)).config)).json();
+    expect(result.brokenStages).toEqual(['policy', 'tag']);
+    const pack = await (await target.r.request('/pack', { headers: AUTH })).json();
+    expect(pack.brokenCount).toBe(2);
+    expect(pack.stages.find((s: { stageName: string }) => s.stageName === 'tag').dependsOn).toEqual(['vm']);
+    expect(pack.stages.find((s: { stageName: string }) => s.stageName === 'vm').dependsOn).toEqual([]);
+    expect(pack.stages.find((s: { stageName: string }) => s.stageName === 'tag').brokenMissingStages).toEqual(['vm']);
+    // Enabling a prerequisite clears warnings; it does not rewrite other stages.
+    await toggle(target.r, 'vm', 'active', true);
+    expect((await (await target.r.request('/pack', { headers: AUTH })).json()).brokenCount).toBe(0);
+  });
+
+  test('a failed cascade write rolls back every stage', async () => {
+    const db = freshDb();
+    const { r, service } = instance(db);
+    db.exec(`CREATE TRIGGER fail_cascade BEFORE INSERT ON pack_overlay
+      WHEN NEW.stage_name = 'use-project'
+      BEGIN SELECT RAISE(ABORT, 'test write failure'); END`);
+    await expect(r.request('/pack/stages/mk-project/toggle?field=active', {
+      method: 'POST', headers: AUTH_JSON, body: JSON.stringify({ value: false, cascade: true }),
+    })).rejects.toThrow('test write failure');
+    expect(service.packOverlay.list(PACK_ID)).toEqual([]);
+    expect(service.listEffectiveStages().every((s) => s.active)).toBe(true);
+  });
+
+  test('rejects a cascade on enable without changing the configuration', async () => {
+    const { r, service } = instance(freshDb());
+    const res = await r.request('/pack/stages/mk-project/toggle?field=active', {
+      method: 'POST', headers: AUTH_JSON, body: JSON.stringify({ value: true, cascade: true }),
+    });
+    expect(res.status).toBe(400);
+    expect(service.packOverlay.list(PACK_ID)).toEqual([]);
   });
 
   test('reset on an untouched pack is a no-op', async () => {

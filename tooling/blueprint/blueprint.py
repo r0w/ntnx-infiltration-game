@@ -77,19 +77,24 @@ Profile_GAME_PROD_PASSWORD = read_local_file("Profile_Default_variable_GAME_PROD
 Profile_GAME_OLD_PC_PASSWORD = read_local_file("Profile_Default_variable_GAME_OLD_PC_PASSWORD")
 
 
-# ── Cred (nutanix user, created by cloud_init_data.yaml) ──────────────
-# Matches legacy ntnx-escape-game shape — Calm's `python_remote` venv
-# path is `/home/<cred_user>/.calm/venv/`, dynamic on cred user, so
-# `nutanix` works fine. The `bash: /home/ubuntu/...not found` we saw
-# earlier was stale state from a deploy that briefly had cred=ubuntu.
-
+# The credential username is the single launch setting for guest creation and SSH.
 BP_CRED_NUTANIX = basic_cred(
     "nutanix",
     BP_CRED_NUTANIX_PASSWORD,
     name="NUTANIX",
     type="PASSWORD",
     default=True,
+    editables={"username": True},
 )
+
+
+def ssh_script(filename, substrate="VM"):
+    """Check the effective login before install or day-2 commands run."""
+    scripts = os.path.join(os.path.dirname(__file__), "scripts")
+    with open(os.path.join(scripts, "check_ssh_user.sh")) as f:
+        guard = f.read()
+    with open(os.path.join(scripts, filename)) as f:
+        return (guard + "\n" + f.read()).replace("@@{VM.address}@@", "@@{" + substrate + ".address}@@")
 
 
 # ── Image package ──────────────────────────────────────────────────────
@@ -159,6 +164,14 @@ class VM(Substrate):
     )
 
 
+    @action
+    def __pre_create__():
+        CalmTask.Exec.escript.py3(
+            name="Validate VM SSH user",
+            filename=os.path.join("scripts", "validate_ssh_user.py"),
+        )
+
+
 class NkpGameVM(AhvVm):
     name = "nkp-bootcamp-@@{calm_time}@@"
     resources = GameVMResources
@@ -187,6 +200,13 @@ class NkpVM(Substrate):
         delay_secs="60",
         credential=ref(BP_CRED_NUTANIX),
     )
+
+    @action
+    def __pre_create__():
+        CalmTask.Exec.escript.py3(
+            name="Validate VM SSH user",
+            filename=os.path.join("scripts", "validate_ssh_user.py"),
+        )
 
 
 # ── Package — single placeholder install task ──────────────────────────
@@ -350,7 +370,7 @@ class GameContent(Package):
                 # idempotent (skip-if-installed).
                 CalmTask.Exec.ssh(
                     name="Install Docker",
-                    filename=os.path.join("scripts", "install_docker.sh"),
+                    script=ssh_script("install_docker.sh"),
                     cred=ref(BP_CRED_NUTANIX),
                     target=ref(Game),
                 )
@@ -371,7 +391,7 @@ class GameContent(Package):
                 # itself doesn't probe approval_policy.
                 CalmTask.Exec.ssh(
                     name="Push prereq BPs",
-                    filename=os.path.join("scripts", "push_prereq_bps.sh"),
+                    script=ssh_script("push_prereq_bps.sh"),
                     cred=ref(BP_CRED_NUTANIX),
                     target=ref(Game),
                 )
@@ -405,32 +425,15 @@ class GameContent(Package):
                 # http://<vm>:3000/ to players.
                 CalmTask.Exec.ssh(
                     name="Run game container",
-                    filename=os.path.join("scripts", "run_container.sh"),
+                    script=ssh_script("run_container.sh"),
                     cred=ref(BP_CRED_NUTANIX),
                     target=ref(Game),
                 )
 
-            # Branch 2 — Activate policy engine (~30s if already on,
-            # up to ~10 min if MSP boot retries — see memory
-            # project_calm_policy_vm_unstable). Best-effort: the
-            # script exits 0 with a loud `[best-effort WARN]` if both
-            # retries time out, so the install runbook keeps going.
-            # Runs parallel-with-Branch-1 so the MSP has the full
-            # ~16-40 min cluster-shrink window to come up; by the time
-            # Branch 1 reaches `Run game container`, the policy engine
-            # is up and stage 21 (create-approval-policy) is playable
-            # without operator intervention.
-            #
-            # BUT: enabling the policy engine deploys a Calm Policy VM
-            # whose host is chosen by AHV/ADS, not us. If it lands on
-            # host-4 while Branch 1 is removing that node, the two
-            # contend. So we gate activation on `Wait for node draining`
-            # first: it blocks until host-4 has left the scheduling pool
-            # (in_maintenance / TO_BE_REMOVED / gone), after which ADS
-            # can only place the Policy VM on the surviving 3 nodes. The
-            # gate returns immediately on non-hpoc / no-4th-host, so the
-            # activation still kicks off promptly there and keeps
-            # overlapping the (much longer) rebalance on hpoc.
+            # Monitor Policy Engine download/startup without restarting it.
+            # Best-effort warnings mean approval-policy stages are not ready.
+            # Wait until host 4 stops accepting VMs before activation so ADS
+            # cannot place the Policy VM on the node being removed.
             with branch(p0):
                 CalmTask.Exec.escript.py3(
                     name="Wait for node draining",
@@ -485,7 +488,7 @@ class NkpContent(Package):
     def __install__(type="system"):
         CalmTask.Exec.ssh(
             name="Install Docker",
-            filename=os.path.join("scripts", "install_docker.sh"),
+            script=ssh_script("install_docker.sh", substrate="NkpVM"),
             cred=ref(BP_CRED_NUTANIX),
             target=ref(Game),
         )
@@ -495,13 +498,13 @@ class NkpContent(Package):
         # worse than a deploy that stops and says why.
         CalmTask.Exec.ssh(
             name="Fetch NKP kubeconfig",
-            filename=os.path.join("scripts", "fetch_kubeconfig.sh"),
+            script=ssh_script("fetch_kubeconfig.sh", substrate="NkpVM"),
             cred=ref(BP_CRED_NUTANIX),
             target=ref(Game),
         )
         CalmTask.Exec.ssh(
             name="Run game container",
-            filename=os.path.join("scripts", "run_container.sh"),
+            script=ssh_script("run_container.sh", substrate="NkpVM"),
             cred=ref(BP_CRED_NUTANIX),
             target=ref(Game),
         )
@@ -542,7 +545,16 @@ class NCP(Profile):
     # Desired on-screen order (top→bottom):
     #   Container image repository, Image tag, Cluster profile, Run mode,
     #   Prism Central IP, Prism Central username, Prism Central password,
-    #   Planner PC password, Time zone.
+    #   Planner PC password, Time zone, Secondary network name.
+    GAME_SECONDARY_NETWORK = CalmVariable.WithOptions.FromTask(
+        CalmTask.Exec.escript.py3(
+            name="List game networks",
+            filename=os.path.join("scripts", "list_game_networks.py"),
+        ),
+        value="secondary", label="Secondary network name",
+        description="Existing routable VLAN for the game. Migrated to Advanced if needed. Use \"secondary\" for HPOC",
+        is_mandatory=True,
+    )
     TIMEZONE = CalmVariable.WithOptions(
         [
             "UTC",
@@ -662,7 +674,7 @@ class NCP(Profile):
         """docker pull at IMAGE_TAG and restart the container."""
         CalmTask.Exec.ssh(
             name="docker pull and replace container",
-            filename=os.path.join("scripts", "update_game.sh"),
+            script=ssh_script("update_game.sh"),
             cred=ref(BP_CRED_NUTANIX),
             target=ref(Game),
         )
@@ -686,7 +698,7 @@ class NCP(Profile):
         )
         CalmTask.Exec.ssh(
             name="rewrite MODE and recreate container",
-            filename=os.path.join("scripts", "switch_mode.sh"),
+            script=ssh_script("switch_mode.sh"),
             cred=ref(BP_CRED_NUTANIX),
             target=ref(Game),
         )
@@ -763,7 +775,7 @@ class NKPFundamentals(Profile):
         default="live", is_mandatory=True, runtime=True,
     )
     IMAGE_TAG = CalmVariable.Simple(
-        "latest", label="Image tag", is_mandatory=True, runtime=True,
+        "nkp", label="Image tag", is_mandatory=True, runtime=True,
     )
     IMAGE_REPO = CalmVariable.Simple(
         "ghcr.io/r0w/ntnx-infiltration-game",
@@ -786,6 +798,9 @@ class NKPFundamentals(Profile):
     LOG_LEVEL = CalmVariable.WithOptions(
         ["debug", "info", "warn", "error"], label="Server log level",
         default="info", is_mandatory=False, runtime=False, is_hidden=True,
+    )
+    GAME_SECONDARY_NETWORK = CalmVariable.Simple(
+        "", is_mandatory=False, runtime=False, is_hidden=True,
     )
     GAME_PROD_USERNAME = CalmVariable.Simple(
         "", is_mandatory=False, runtime=False, is_hidden=True,
@@ -821,7 +836,7 @@ class NKPFundamentals(Profile):
         """docker pull at IMAGE_TAG and restart the container."""
         CalmTask.Exec.ssh(
             name="docker pull and replace container",
-            filename=os.path.join("scripts", "update_game.sh"),
+            script=ssh_script("update_game.sh", substrate="NkpVM"),
             cred=ref(BP_CRED_NUTANIX),
             target=ref(Game),
         )
@@ -835,13 +850,13 @@ class NKPFundamentals(Profile):
         a redeploy."""
         CalmTask.Exec.ssh(
             name="fetch kubeconfig",
-            filename=os.path.join("scripts", "fetch_kubeconfig.sh"),
+            script=ssh_script("fetch_kubeconfig.sh", substrate="NkpVM"),
             cred=ref(BP_CRED_NUTANIX),
             target=ref(Game),
         )
         CalmTask.Exec.ssh(
             name="restart container",
-            filename=os.path.join("scripts", "update_game.sh"),
+            script=ssh_script("update_game.sh", substrate="NkpVM"),
             cred=ref(BP_CRED_NUTANIX),
             target=ref(Game),
         )

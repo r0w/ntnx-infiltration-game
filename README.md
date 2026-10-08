@@ -12,6 +12,8 @@ Based on the original [`ntnx-escape-game`](https://github.com/Golgautier/ntnx-es
 
 ## Quickstart
 
+Before importing the runbook or blueprint, create a project named "lab" if it does not already exist.
+
 You need an HPoC and two files. That's it.
 
 1. Book an HPoC with the **AOS + PC Demo - Latest (7.5.x)** runbook.
@@ -105,6 +107,7 @@ docs/
 5. (For mock mode) Add a fixture to `packs/<pack>/fixtures.json` keyed by `"METHOD path"`.
 6. Tag with `"impact": "destructive"` if the stage mutates cluster-wide state - it then only runs when the cluster profile is `hpoc`. Tag `"requires": ["NCM"]` (or `IO`, `CalmDSL`, `NodeRemove`) if the stage depends on an optional feature.
 7. Declare `"dependsOn": ["create-vm"]` for each earlier stage whose *cluster state* this one consumes - `needs` only models variables, so without this the `/admin` cascade lets an operator disable a prerequisite and leave this stage looking fine. Then run `bun tooling/audit-stage-deps.ts <pack> --apply` to refresh the derived `needs` / `captures`.
+8. (Optional) Add a step-by-step help block shown on demand: `"help": ["my-stage.help-01", ...]` lists locale keys written in the same grammar as `messages` (`<code>` for copyable values, `<image src='my-stage-step-01.png' alt='Caption'/>` for screenshots kept in `packs/<pack>/assets/`). `"helpPenaltySec": 120` is the time added to the player's playing time the first time they display it; leave it out for a free help. The operator switches the help on in `/admin` (off by default).
 
 The frontend `DevPanel` lets you jump to any stage without replaying the whole game. Captured variables and the cluster cache are preserved across jumps. Restart the backend after editing pack JSON - Bun caches the pack at boot.
 
@@ -124,6 +127,8 @@ CI runs both on every push and PR. No live cluster needed - everything is mock-b
 ## Telemetry
 
 Blueprint deployments report anonymous usage stats (session counts, per-stage timings, game version) to the team's NIG Central dashboard - never trigrams, names or credentials. Controlled by `NIG_CENTRAL_URL`; unset = off (the local-dev default).
+
+`NIG_DEPLOYMENT_IP` identifies the game VM in Central; new blueprints supply the VM address at install and in Update Game. Existing apps retain their original Calm scripts: set this variable to the VM's IP in `/opt/ntnx-infiltration-game/.env` and recreate the container when upgrading them. Without it, telemetry falls back to the local network interface, which is usually a Docker bridge IP. Changing this address creates a new Central deployment entry; it does not repair historical entries or split merged data.
 
 ## Contributing
 

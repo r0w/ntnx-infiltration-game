@@ -117,3 +117,10 @@ describe('stateNote', () => {
       .toBe('players wait here until you unlock');
   });
 });
+
+test('resource dependencies show the required stages without pretending they are variables', () => {
+  const s = stage({ brokenMissingStages: ['create-vm'], brokenMissingVars: [] });
+  expect(stageState(s, false)).toBe('broken');
+  expect(stateNote(s, 'broken', 'hpoc')).toBe('requires create-vm');
+  expect(stageState({ ...s, active: false }, false)).toBe('off');
+});

@@ -1,6 +1,8 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { useLightbox } from './Lightbox';
 import { CodeBlock } from './CodeBlock';
+import { HelpBlock } from './HelpBlock';
+import { textClasses } from './textClasses';
 import type { RenderItem } from './useSession';
 
 export interface TerminalItemProps {
@@ -12,6 +14,8 @@ export interface TerminalItemProps {
   imageCaptions?: boolean;
   isActive: boolean;
   onDone: () => void;
+  /** Session locale, for the few client-side strings inside an item (help block). */
+  locale?: string;
 }
 
 /**
@@ -27,6 +31,7 @@ export const TerminalItem = memo(function TerminalItem({
   imageCaptions,
   isActive,
   onDone,
+  locale,
 }: TerminalItemProps) {
   if (item.kind === 'text') {
     return (
@@ -123,6 +128,23 @@ export const TerminalItem = memo(function TerminalItem({
         {prefix} {text}
         {hint && <div className="check-hint">↳ {hint}</div>}
       </DwellBlock>
+    );
+  }
+  if (item.kind === 'help') {
+    // A repeat request retires the earlier block in place (it stays in the
+    // list so the sequencer's indices don't shift) and appends a fresh one.
+    if (item.hidden) {
+      return <InstantBlock className="help-retired" isActive={isActive} onDone={onDone}>{null}</InstantBlock>;
+    }
+    return (
+      <HelpBlock
+        id={item.id}
+        units={item.units}
+        penaltySec={item.penaltySec}
+        locale={locale ?? 'en'}
+        isActive={isActive}
+        onDone={onDone}
+      />
     );
   }
   if (item.kind === 'await-input') {
@@ -369,12 +391,6 @@ function TypewriterText({ text, color, styles, href, speedMs, isActive, onDone }
 }
 
 /**
- * Compose class names for a text run. `color` is exclusive (whichever tag is
- * topmost in the parser's color stack); `styles` are cumulative modifiers
- * like `bold` or `dim`. Unknown values are dropped — they won't have a
- * matching `.c-*` rule anyway.
- */
-/**
  * 56k-style stepped reveal: the image arrives in discrete horizontal bands
  * (clip-path + steps() keyframes) with a cyan scanline trailing the edge.
  * Sequencer integration mirrors TypewriterText — waits for `<img>` onLoad,
@@ -493,21 +509,4 @@ function DemoTile({
       <span className="demo-tile-label">▶ {title}</span>
     </button>
   );
-}
-
-const KNOWN_COLORS = new Set([
-  'red', 'green', 'yellow', 'cyan', 'blue', 'magenta', 'white', 'dim', 'prompt',
-]);
-const KNOWN_STYLES = new Set(['bold', 'dim']);
-
-export function textClasses(color: string | undefined, styles: string[] | undefined): string {
-  const out: string[] = [];
-  if (color && KNOWN_COLORS.has(color)) out.push(`c-${color}`);
-  else out.push('c-default');
-  if (styles) {
-    for (const s of styles) {
-      if (KNOWN_STYLES.has(s)) out.push(`c-${s}`);
-    }
-  }
-  return out.join(' ');
 }

@@ -23,6 +23,7 @@ export function variables({ env }: PackBootContext): Record<string, unknown> {
     ImageURL:
       env.GAME_IMAGE_URL ||
       'https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img',
+    SecondaryNetwork: env.GAME_SECONDARY_NETWORK?.trim() || 'secondary',
     EmailReport: env.GAME_EMAIL_REPORT || '-secret-message@ntnxlab.com',
     ProdUsername: env.GAME_PROD_USERNAME ?? '',
     ProdPassword: env.GAME_PROD_PASSWORD ?? '',

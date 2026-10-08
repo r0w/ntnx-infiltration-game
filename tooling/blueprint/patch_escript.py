@@ -234,6 +234,7 @@ def walk_tasks(blueprint: dict, patcher) -> int:
         res.get("service_definition_list", [])
         + res.get("app_profile_list", [])
         + res.get("package_definition_list", [])
+        + res.get("substrate_definition_list", [])
     )
     for c in containers:
         for action in c.get("action_list", []):

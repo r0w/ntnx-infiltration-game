@@ -2,12 +2,13 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import type { MessageUnit } from '@ntnx-game/shared';
 import { api, ApiError, type PackInfo, type PackNavChapter } from './api';
 import { DevPanel } from './DevPanel';
-import { FauxTerminal } from './FauxTerminal';
+import { FauxTerminal, type FauxTerminalHelp } from './FauxTerminal';
 import { StageRail } from './StageRail';
 import { StageReader } from './StageReader';
 import { LightboxProvider } from './Lightbox';
 import { LoginForm } from './LoginForm';
 import { ConfirmModal } from './Modal';
+import { effectiveSkipPauses, effectiveTypingSpeed } from './replay-defaults';
 import { useSession, CONTINUE_VAR, AUTOFILLABLE_VARS } from './useSession';
 
 type MaxWidth = '80ch' | '100ch' | '120ch' | 'none';
@@ -22,8 +23,9 @@ function readStoredMaxWidth(): MaxWidth {
   return '120ch';
 }
 
-// Dev override for the typewriter speed (ms/char). null = use the server's
-// pack value. Lets the operator speed up / skip the effect on the 20th replay.
+// Dev override for the typewriter speed (ms/char). null = mode default
+// (instant in test/mock, the pack value in live). Lets the operator pick a
+// speed on the 20th replay.
 const TYPING_SPEED_KEY = 'terminal-typing-speed';
 
 function readStoredTypingSpeed(): number | null {
@@ -38,11 +40,18 @@ function readStoredTypingSpeed(): number | null {
 }
 
 // Dev toggle: skip <pause/> beats + check-result dwells (independent of
-// text speed) for fast replays.
-const SKIP_PAUSES_KEY = 'terminal-skip-pauses';
+// text speed) for fast replays. null = mode default (skipped in test/mock).
+// Only an explicit click is stored. The previous key was written on every
+// load, so a '0' there is no real choice: it is dropped, not migrated.
+const SKIP_PAUSES_KEY = 'terminal-skip-pauses-override';
+const LEGACY_SKIP_PAUSES_KEY = 'terminal-skip-pauses';
 
-function readStoredSkipPauses(): boolean {
-  try { return localStorage.getItem(SKIP_PAUSES_KEY) === '1'; } catch { return false; }
+function readStoredSkipPauses(): boolean | null {
+  try {
+    localStorage.removeItem(LEGACY_SKIP_PAUSES_KEY);
+    const v = localStorage.getItem(SKIP_PAUSES_KEY);
+    return v === '1' ? true : v === '0' ? false : null;
+  } catch { return null; }
 }
 
 /**
@@ -87,7 +96,9 @@ export function GameApp() {
   const [typingSpeedOverride, setTypingSpeedOverride] = useState<number | null>(
     readStoredTypingSpeed,
   );
-  const [skipPauses, setSkipPauses] = useState<boolean>(readStoredSkipPauses);
+  const [skipPausesOverride, setSkipPausesOverride] = useState<boolean | null>(
+    readStoredSkipPauses,
+  );
   const [autoPlay, setAutoPlay] = useState(false);
   const [autoPlayActing, setAutoPlayActing] = useState(false);
   const [autoPlayError, setAutoPlayError] = useState<string | null>(null);
@@ -111,11 +122,16 @@ export function GameApp() {
   }, [typingSpeedOverride]);
 
   useEffect(() => {
-    try { localStorage.setItem(SKIP_PAUSES_KEY, skipPauses ? '1' : '0'); } catch { /* ignore */ }
-  }, [skipPauses]);
+    try {
+      if (skipPausesOverride === null) localStorage.removeItem(SKIP_PAUSES_KEY);
+      else localStorage.setItem(SKIP_PAUSES_KEY, skipPausesOverride ? '1' : '0');
+    } catch { /* ignore */ }
+  }, [skipPausesOverride]);
 
-  // null override → follow the server's pack speed.
-  const typingSpeedMs = typingSpeedOverride ?? session.typingSpeedMs;
+  // null overrides → follow the mode default: instant text and no pauses in
+  // test/mock, the pack's pacing in live.
+  const typingSpeedMs = effectiveTypingSpeed(typingSpeedOverride, session.typingSpeedMs, pack?.mode);
+  const skipPauses = effectiveSkipPauses(skipPausesOverride, pack?.mode);
 
   // Re-read a step. The server re-renders it from the pack; nothing about the
   // run moves, so this is safe to fire mid-stage.
@@ -295,6 +311,19 @@ export function GameApp() {
     !['lore', 'login', 'recovery-gate'].includes(session.currentStage);
   const autoPlayVisible = devToolsAllowed && identityCaptured;
 
+  // Step-by-step help for the stage being played: usable when it is switched
+  // on for this player (global switch, or the operator's per-player override)
+  // and the stage ships a help block. The server enforces both anyway.
+  const helpStage = session.awaitingStageName
+    ? pack?.stages.find((s) => s.name === session.awaitingStageName)
+    : undefined;
+  const help: FauxTerminalHelp = {
+    available: session.helpEnabled && !!helpStage?.hasHelp,
+    penaltySec: helpStage?.helpPenaltySec ?? 0,
+    used: !!session.awaitingStageName && session.helpUsedStages.includes(session.awaitingStageName),
+    onRequest: session.askHelp,
+  };
+
   // Force autoplay off whenever the toggle isn't visible — mode flipped to
   // live, identity reset (logout / switch agent), etc. should never leave a
   // stale "armed" state behind.
@@ -374,6 +403,7 @@ export function GameApp() {
         onAdvance={handleAdvance}
         onSwitchIdentity={inIdentityCapture ? handleSwitchIdentity : undefined}
         identityLabel={pack?.identity?.label}
+        help={help}
       />
       </div>
       {session.error && <div className="app-error">{session.error}</div>}
@@ -394,7 +424,7 @@ export function GameApp() {
           onTypingSpeedChange={setTypingSpeedOverride}
           onTypingSpeedReset={() => setTypingSpeedOverride(null)}
           skipPauses={skipPauses}
-          onSkipPausesChange={setSkipPauses}
+          onSkipPausesChange={setSkipPausesOverride}
           mode={pack?.mode === 'live' ? undefined : pack?.mode}
           onGoto={handleGoto}
         />

@@ -1,4 +1,4 @@
-import type { CheckContext } from '@ntnx-game/engine';
+import type { AutoFillContext, CheckContext } from '@ntnx-game/engine';
 import { discoverableNodeSerials } from '../checks/helpers';
 
 /**
@@ -8,8 +8,7 @@ import { discoverableNodeSerials } from '../checks/helpers';
  * not skip a step. These live here rather than in the server because each one
  * names a variable and a stage of *this* game, and has to stay aligned with the
  * check that judges the same value: stage 28's serial comes from the same query
- * as CheckNewNode, and stage 29's count is the cached one CheckUpdates reads,
- * never a fresh LCM query the check would then disagree with.
+ * as CheckNewNode, and stage 29 stores any newly settled count before CheckUpdates reads it.
  */
 
 /** Live lookup for stage 28 — first DISCOVERABLE (unconfigured) node serial.
@@ -23,18 +22,17 @@ async function lookupNodeSerial(ctx: CheckContext): Promise<string | null> {
   }
 }
 
-/** Stage 29 auto-fill — the cached count, i.e. exactly what CheckUpdates
- *  validates against. No live LCM read: the check doesn't do one either. */
-async function lookupNumberUpdates(ctx: CheckContext): Promise<string | null> {
+/** Stage 29 reuses the cached count, retrying a missing boot reading without starting inventory. */
+async function lookupNumberUpdates(ctx: AutoFillContext): Promise<string | null> {
   const cached = ctx.clusterConfig?.lcmAvailableUpdates;
   if (typeof cached === 'number') return String(cached);
-  // Mock has no cluster-config probe seeding the count, and the LCM fixture
-  // shows 0 available updates — return that so mock auto-play can walk stage
-  // 29 (CheckUpdates does format-only validation in mock, accepting any
-  // non-negative integer). test/live without a cached count stay null so the
-  // operator types it.
   if (ctx.nutanix.mode === 'mock') return '0';
-  return null;
+  const count = await ctx.probes.lcmAvailableUpdates();
+  if (count === null) return null;
+  const stored = await ctx.storeClusterFact({
+    key: 'lcm_available_updates', value: count, write: 'refresh',
+  });
+  return typeof stored === 'number' ? String(stored) : null;
 }
 
 /** Live lookup for stage 31 — query OldPC's v3/groups runway endpoint. */

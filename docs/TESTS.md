@@ -1,6 +1,6 @@
 # Tests
 
-**531 tests across 49 files**, all unit + integration, no browser. `bun test` from the repo root runs the lot in ~9 s. CI-friendly: no network, in-memory SQLite, mock Nutanix adapter.
+Unit and integration tests use in-memory SQLite and the mock Nutanix adapter. Run `bun test` from the repo root; `bun run typecheck` also checks all six workspace packages and both content packs against the installed SDK types.
 
 ```bash
 bun test                                          # everything
@@ -16,7 +16,7 @@ bun test -t "lunch lock"                           # by name
 | File | What it pins |
 |---|---|
 | `message-parser.test.ts` | The JSX-like grammar: `{Var}` substitution, `<pause/>`, `<input/>`, links, color/style stacking, escaping |
-| `stage-runner.test.ts` | Stage rendering + ordering, gating, locale fallback, await-input index |
+| `stage-runner.test.ts` | Stage rendering + ordering, gating, locale fallback, await-input index, step-by-step help rendering (flow tags dropped, variables, fallback) |
 | `capability-gate.test.ts` | The gate verdicts: inactive, passed, missing capability, destructive-off-hpoc, missing upstream, admin gate |
 | `variables.test.ts` | The `Variables` store: get/set/delete, listeners, snapshot shape |
 | `lcm-updates.test.ts` | Stage-29 update counting (`dedupedUpdateCount`, `isReadingSettled`) |
@@ -26,6 +26,7 @@ bun test -t "lunch lock"                           # by name
 
 | File | What it pins |
 |---|---|
+| `check-sdk.test.ts` | SDK pagination, empty responses, error propagation, policy details and approval lookup |
 | `mock-adapter.test.ts` | Fixture matching, miss errors, SDK envelope shim, per-session overlay (`<action name='deleteVM'/>` hides the entity) |
 | `rest-adapter.test.ts` | Auth + headers, TLS toggle, non-2xx → typed error, GET 5xx retry |
 | `capability-probe.test.ts` | The four capability flags on healthy responses; degrades gracefully (never throws) |
@@ -42,10 +43,15 @@ bun test -t "lunch lock"                           # by name
 |---|---|
 | `session-service.test.ts` | The gameplay state machine: advance, input, capture + substitute, destructive gating, `skipTo`, cheers, `<action/>` dispatch, retry rewind, re-auth, admin gates, lunch lock |
 | `admin.test.ts` | `/api/admin/*`: login, users, delete cascade, gates, pack toggles, lunch status, stage-config export/import/reset |
-| `pack-config.test.ts` | The portable stage-config string: encode/decode, compression, stage drift both ways, pack mismatch |
+| `pack-config.test.ts` | The portable stage-config string: encode/decode, compression, stage drift both ways, pack mismatch, help-cost overrides (round trip, range, no-help stages, default-equal values dropped) |
 | `check-trigram.test.ts` | Trigram shape + collision (returning-agent re-auth) |
 | `dep-analysis.test.ts` | Cascade-disable preview: which downstream stages break when an upstream producer is off |
-| `scoreboard.test.ts` | Sort, anonymous filtering, UUID anti-leak, packId scoping |
+| `scoreboard.test.ts` | Sort, anonymous filtering, UUID anti-leak, packId scoping; ranking on playing time (late start, time held at gates, help penalties, tie-breaks, players still playing); waits exposed in the payload; combined board |
+| `help.test.ts` | Step-by-step help: off by default, player override beats the global switch, confirmation before a costly first display, billed once and frozen, ranking with penalties (local + combined), player and admin routes |
+| `help-pack.test.ts` | Loader rejects malformed `help` / `helpPenaltySec`; shipped help blocks keep their keys, images and variables consistent |
+| `help-cost.test.ts` | Operator help-cost override: admin route (set, reset, validation, stages without help), effect on the next display only, confirmed-amount guard, `/api/pack` exposure, overlay storage and cleanup |
+| `session-waits.test.ts` | Time a session is held by the operator: a wait starts at the first "gated" answer and ends at the unlock / resume (exact to the ms), one open wait per session, gate + pause overlap counted once, safety net, persistence across a restart |
+| `migrate.test.ts` | `sessions.help_enabled`, `pack_overlay.help_penalty_sec` and the `session_waits` table are added to an existing database (UpdateGame keeps the SQLite file) and the migrations are idempotent |
 | `cluster-profile.test.ts` | Explicit `hpoc`/`other`, fallback to `other` when unset |
 | `ssh.test.ts` | `/api/ssh/ping` argv validation + probe error remapping |
 | `auto-fill-current.test.ts` | Auto-fillable vars (NodeSerial, NumberUpdates, Runway…) resolve in mock |
@@ -79,6 +85,11 @@ bun test -t "lunch lock"                           # by name
 | `pack-state.test.ts` | What the Pack tab shows per stage: the five states, their precedence, and the reason line |
 | `append-units.test.ts` | Every protocol unit kind survives the conversion into render items — the whitelist that silently swallowed the `demo` unit — and `firstId`, the anchor the contents menu scrolls back to |
 | `reader-position.test.ts` | Where the contents menu thinks the player is, from the session's two different position reports |
+| `help-labels.test.ts` | The help UI strings of every locale |
+| `duration.test.ts` | The compact time format shared by the scoreboard, the Agents table, the HELP COST column and the player's help UI (`45s`, `12m05`, `1h12`, and penalties as `+4m30`, none at 0 s) |
+| `scroll-speeds.test.ts` | The auto-scroll speeds (12, 24, 48, 96 px/s): their order, their names, and that each one is a valid display setting |
+| `scoreboard-time.test.ts` | The scoreboard card clock: playing time without the waits, plus the help penalties (the ranking time), the clock stopped while a player is held, idle time that restarts at the unlock |
+| `help-cost.test.ts` | The help-cost editor's pure helpers: minutes / seconds split, validation (whole numbers, 59 s, one hour cap), `free` / `2m30` display (the same format as the clocks) |
 
 The React components, typewriter, and polling loop aren't unit-tested; they're thin views over state whose HTTP contract is covered by the route + e2e tests.
 
