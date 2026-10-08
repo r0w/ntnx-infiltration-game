@@ -696,14 +696,15 @@ class NCP(Profile):
             target=ref(Game),
         )
 
-    @action
-    def VerifyState(name="Verify State"):
-        """Full convergence check: PC reachable, hosts NORMAL, free chassis slot."""
-        CalmTask.Exec.escript.py3(
-            name="Verify final state",
-            filename=os.path.join("scripts", "verify_state.py"),
-            target=ref(Game),
-        )
+    if not DEPLOYMENT_ONLY:
+        @action
+        def VerifyState(name="Verify State"):
+            """Full convergence check: PC reachable, hosts NORMAL, free chassis slot."""
+            CalmTask.Exec.escript.py3(
+                name="Verify final state",
+                filename=os.path.join("scripts", "verify_state.py"),
+                target=ref(Game),
+            )
 
     @action
     def SwitchMode(name="Switch Mode"):
@@ -879,12 +880,14 @@ class NKPFundamentals(Profile):
         )
 
 
+# Only the selected profile has a VM address; Calm resolves the inactive
+# substrate's address to empty, so the description works for either profile.
 class NtnxInfiltrationGame(Blueprint):
     """Nutanix Infiltration Game :
 
- - Game:       http://@@{VM.address}@@:3000/
- - Scoreboard: http://@@{VM.address}@@:3000/scoreboard
- - Admin:      http://@@{VM.address}@@:3000/admin
+ - Game:       http://@@{VM.address}@@@@{NkpVM.address}@@:3000/
+ - Scoreboard: http://@@{VM.address}@@@@{NkpVM.address}@@:3000/scoreboard
+ - Admin:      http://@@{VM.address}@@@@{NkpVM.address}@@:3000/admin
 """
     services = [Game]
     packages = [Ubuntu2204, GameContent, NkpContent]

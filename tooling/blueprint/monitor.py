@@ -39,9 +39,21 @@ def list_runlogs(app_uuid: str) -> list[dict]:
     r = api(
         "POST",
         f"/api/nutanix/v3/apps/{app_uuid}/app_runlogs/list",
-        json={"length": 200, "offset": 0},
+        json={"length": 200, "offset": 0, "filter": "application_reference==" + app_uuid},
     )
-    return r.json().get("entities", []) if r.ok else []
+    if not r.ok:
+        r.raise_for_status()
+    roots = r.json().get("entities", [])
+    roots.sort(key=lambda e: int(e.get("metadata", {}).get("creation_time", 0)), reverse=True)
+    root = find_root(roots)
+    if not root:
+        return []
+    r = api(
+        "POST", f"/api/nutanix/v3/apps/{app_uuid}/app_runlogs/list",
+        json={"length": 200, "filter": "root_reference==" + root["metadata"]["uuid"]},
+    )
+    r.raise_for_status()
+    return [root] + r.json().get("entities", [])
 
 
 def find_root(rls: list[dict]) -> dict | None:

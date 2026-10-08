@@ -48,7 +48,8 @@ dependency. NCP installs Docker and starts the game; NKP also retrieves the
 management kubeconfig. Neither install changes cluster networking, storage,
 users, existing VMs, projects, endpoints or prerequisite blueprints. VM/image
 provisioning and creation of the new Self-Service application still occur.
-NCP is restricted to the `other` cluster profile.
+NCP is restricted to the `other` cluster profile; its cluster-oriented
+`Verify State` action is omitted. `Update Game` and `Switch Mode` remain available.
 
 NCP's game prerequisites must already exist. This installs the server, not a
 fresh training world. Gameplay and operator auto-play can still mutate cluster

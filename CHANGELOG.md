@@ -91,6 +91,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Show the selected game VM address in application links for both NCP and NKP.
+- Keep shared deployments free of cluster discovery actions and scope deployment monitoring to the selected application.
+
 - The NKP blueprint selects the `nkp` image and uses its own VM address for telemetry, with the same SSH user validation as NCP.
 
 - Turning off a stage in the Pack tab now also turns off the stages whose

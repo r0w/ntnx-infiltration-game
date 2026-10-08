@@ -24,7 +24,7 @@ deployment-only artifact described in [OPERATOR.md](OPERATOR.md#shared-clusters-
 | Install Docker | Installs on the new game VM | Same | Same |
 | Push prerequisite blueprints | Force-imports `CloneProd` and `BlankVM-source`, updates CloneProd credentials | Same | Absent |
 | Clone fake blueprints | Creates missing demonstration blueprints | Skipped | Absent |
-| Verify final state | Reads cluster state | Same | Absent during install |
+| Verify final state | Reads health, starts unconfigured-node discovery | Same | Absent |
 | Run game container | Writes game VM configuration, pulls image, starts container | Same | Same |
 | Wait for node draining | Reads node state | Skipped | Absent |
 | Activate policy engine | Enables/waits for the engine if needed | Skipped | Absent |
@@ -54,6 +54,7 @@ and MetalLB) must already exist and are not created by the game installer.
 `Update Game` pulls/recreates only the selected application's container and
 keeps its persistent data. `Switch Mode` changes that game's configuration.
 `Refresh Kubeconfig` reads the bootstrap config again and restarts the NKP
-game container. NCP `Verify State` reads cluster state; it does not prepare it.
+game container. The full NCP `Verify State` also starts node discovery; it is omitted from the
+deployment-only blueprint, which does not initialize cluster-preparation variables.
 Deleting a newly created validation application is distinct from deleting
 learner resources: do not run cleanup/auto-play against shared learners.

@@ -79,3 +79,14 @@ def test_shared_artifact_keeps_import_and_vm_contracts(shared_bp):
     shape.test_service_bearing_packages_retyped_to_deb(shared_bp)
     shape.test_substrate_boot_disk_grown_to_40_gib(shared_bp)
     shape.test_no_banned_imports_in_escripts(shared_bp)
+
+
+def test_shared_day_two_actions_only_operate_on_game_vm(shared_bp):
+    profiles = shared_bp["spec"]["resources"]["app_profile_list"]
+    expected = {"NCP": ["Update Game", "Switch Mode"],
+                "NKPFundamentals": ["Update Game", "Refresh Kubeconfig"]}
+    for profile in profiles:
+        assert [a["name"] for a in profile["action_list"]] == expected[profile["name"]]
+        for action in profile["action_list"]:
+            tasks = action["runbook"]["task_definition_list"]
+            assert all(t["type"] == "DAG" or t["attrs"]["script_type"] == "sh" for t in tasks)
