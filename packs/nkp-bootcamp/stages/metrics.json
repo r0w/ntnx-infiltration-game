@@ -1,0 +1,14 @@
+{
+  "id": "nkp-012",
+  "name": "metrics",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.metrics.intro",
+    "nkp.metrics.explore"
+  ],
+  "needs": [
+    "UserNum"
+  ]
+}

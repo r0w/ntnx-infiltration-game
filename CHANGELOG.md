@@ -15,6 +15,30 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- Add a deployment-only blueprint for installing NCP or NKP on shared clusters without preparing or replacing shared infrastructure.
+- A second game: the NKP Fundamentals bootcamp, 26 stages from multi-tenancy
+  through persistent storage, observability and GitOps.
+- Click any screenshot in the terminal to open it full size.
+- Screenshots can carry their description as a visible caption, and the run can
+  pause on each one so it is not scrolled away while you read it.
+- The NKP tour and the NDK lab open their interactive demo in the game instead
+  of sending players off to the bootcamp site.
+- A collapsible contents menu down the left of the NKP bootcamp, with the
+  chapters of the original. It shows where you are, and opens any step you have
+  already reached so you can read it again without leaving your place.
+- Each game names its own operator: Tank still speaks in the infiltration game,
+  the bootcamp is narrated by the instructor.
+- Auto-play can now walk the whole NKP bootcamp on a real fleet: every lab step
+  it validates, it can also perform.
+- Wiping a bootcamp learner's work is one call: `/api/act/cleanup-all/user01`
+  removes their project and everything in it, ready for another run.
+- Operator act, auto-play and cleanup endpoints accept a bootcamp learner
+  (`user01`, or just `01`) the same way they accept an agent code.
+- The blueprint launch screen now asks which game to install, NCP or NKP.
+- The Pack tab can export the stage setup as one string, import it on another
+  instance, and reset every stage back to the pack defaults.
+- The Pack tab says at a glance how many stages differ from the pack defaults.
+
 - Scoreboard display settings in Admin: fit everyone or scroll smoothly in both directions, with speed, pause, simplified projection and progress highlights. Settings persist on the game server and update its scoreboards automatically.
 - Mock scoreboard previews for 1–200 participants, with presets, cluster labels and optional random progress every five seconds.
 - Step-by-step help on demand: a `[? help]` button, or typing `?`, shows an illustrated walkthrough of the stage with copyable values. Available on the Security Policy, SSH rule and NCM playbook stages, in English, French and German.
@@ -27,6 +51,37 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- The bootcamp now prints the real ingress addresses of the cluster you are on,
+  so a step reads `wordpress07.10.54.93.18.sslip.io` instead of asking you to
+  substitute a placeholder. If an address cannot be read, the original wording
+  is used.
+- The contents menu now opens folded and unfolds only as far as where you are,
+  so a bootcamp does not greet a learner with every step at once.
+- The contents menu no longer carries a "back to where you are" button: reading
+  a step opens a panel, so the run behind it never moves.
+- The two games are called NCP and NKP in `/admin` and on the launch screen.
+- The blueprint's two application profiles now carry the games' names, `NCP` and
+  `NKPFundamentals`, instead of `DefaultProfile` and `NkpProfile`.
+- Installing the NKP bootcamp no longer asks for the console URL or the
+  bootstrap VM address: the install finds the `nkp-boot` VM on Prism Central,
+  and the game builds the console link from the address it already reads off the
+  fleet. Both fields stay on the screen for anyone who wants to pin them.
+- The game's name in the browser tab and header now comes from the pack, so each
+  game carries its own.
+- Screenshots in the terminal are wider and centred, so the detail a step points
+  at is readable without enlarging.
+- Each game now carries its own settings, its own cluster questions and its own
+  Kubernetes access instead of the server holding both games' at once; the
+  kubeconfig setting is named `KUBECONFIG_PATH`, with the old `NKP_KUBECONFIG`
+  still accepted.
+- The bootcamp no longer serves the infiltration game's ops console at `/ssh`.
+- The operator guide now covers both games, including what the NKP bootcamp
+  needs on the cluster and what changes in `/admin`.
+- The Pack tab now opens with the whole run in play order, colour-coded by what
+  each stage will do, and the stage list can be filtered and searched.
+- The prerequisites runbook now asks which project to use instead of assuming
+  one named `lab`, and says so plainly when that project does not exist.
+
 - Scoreboard layout adapts to the screen and participant count, including 50 players at 1920×1080. Progress fills each card's background, and display controls live in Admin to keep the projected view clean.
 - The scoreboard display settings in Admin use the same text sizes as the rest of the console: the option titles were larger than the panel title.
 - The ranking now compares playing time instead of the absolute finish time: finish minus start, minus the time held at gates and by the lunch lock, plus help penalties. A late start or a long wait at a gate no longer costs a place, and players still playing are ordered as before.
@@ -35,6 +90,58 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 - In `test` and `mock` modes, text now appears instantly and `<pause>` beats are skipped by default. The dev panel's speed slider and "no pauses" box still override this, and `live` keeps the pack's pacing.
 
 ### Fixed
+
+- Monitor the selected application’s latest action, including Refresh Kubeconfig and Switch Mode.
+
+- Resolve the game URL from the service variable populated during installation on both supported Calm profiles.
+
+- Restart the game when refreshing its kubeconfig or updating a pinned image, while preserving sessions.
+
+- Capture the deployed VM address for application links on both NCP and NKP, including older Prism Central versions.
+- Keep shared deployments free of cluster discovery actions and scope deployment monitoring to the selected application.
+
+- The NKP blueprint selects the `nkp` image and uses its own VM address for telemetry, with the same SSH user validation as NCP.
+
+- Turning off a stage in the Pack tab now also turns off the stages whose
+  cluster resources it creates, in the infiltration game too: disabling the VM
+  stage takes the six stages that act on that VM with it.
+- Asking to switch player in the bootcamp no longer jumps straight to the end
+  screen: it puts you back at the question, with the previous answer cleared.
+- The terminal now offers to switch player in the words of the game you are
+  playing, "user" in the bootcamp rather than "agent".
+- The NKP app you deploy from the terminal now lands on the cluster whose
+  address its Ingress carries, so `https://user09.<ingress>.sslip.io` really
+  serves NGINX instead of returning a 404.
+- Running the whole bootcamp from the operator endpoints no longer reports every
+  step as failed on a cluster where every step actually worked.
+- Replaying the bootcamp for a learner who already reached the dynamic
+  assignment lab no longer sends the second cluster back out of their project.
+- Usage stats now identify a deployment by the machine it runs on, instead of
+  reporting the same container address from every install.
+- Usage stats say which game they come from, so the two are no longer counted
+  as one.
+- The bootcamp's learners now appear in `/admin` Users: each pack says which
+  captured value names a player, so a user number counts as an identity.
+- When a bootcamp check fails, `/admin` now says what it found, like the
+  infiltration game does.
+- Turning off a bootcamp stage in the Pack tab now also turns off the stages
+  whose cluster resources it creates.
+- Placeholders such as `<any_node_IP>` now show as written, in the text and in
+  the YAML you copy, instead of appearing as `&lt;`.
+- The NKP NodePort step now follows the bootcamp's own wording and its full
+  command sequence, including the `NODE_PORT` variable it relies on.
+- The NKP contents menu now nests like the bootcamp's own: one Optional Labs
+  chapter, with Expose app on production inside Deploy and expose an app.
+- The NKP bootcamp's takeaways, both chapter recaps and the conclusion, now
+  carry the wording of the original instead of a summary of it.
+- The NKP bootcamp puts back ten steps and notes that had been summarised away,
+  including the warning not to break a shared environment, and how to find the
+  MetalLB pool, the node IPs and the Traefik address.
+- A screenshot with a long caption no longer sits off to the left of it.
+- The install no longer stops when the cluster serves an older v4 API than
+  expected, or when erasure coding has to be turned off on an Objects container.
+- The install no longer stops on clusters running NCM Self-Service 4.4.0, which
+  rejected one of the two blueprints the game uploads for later stages.
 
 - Central telemetry uses the game VM address supplied by the blueprint instead of the Docker bridge IP, distinguishing VMs first started on the same day. Update Game also sets this address for existing installations.
 - If telemetry initialization fails, statistics are disabled for that process so the game can still start.

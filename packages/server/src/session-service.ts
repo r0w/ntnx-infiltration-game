@@ -6,6 +6,7 @@ import type {
   ActFunction,
   CheckContext,
   ClusterProfile,
+  KubeClient,
   Locale,
   LocaleBundle,
   Logger,
@@ -15,6 +16,7 @@ import type {
 } from '@ntnx-game/engine';
 import { ActionRegistry, StageRunner, resolveKey } from '@ntnx-game/engine';
 import { withMockOverlay, withVariableInterpolation } from '@ntnx-game/nutanix';
+import { withVariableInterpolation as withKubeInterpolation } from '@ntnx-game/kube-transport';
 import type { DisabledStage, HelpResponse, HelpSnapshot, MessageUnit } from '@ntnx-game/shared';
 import {
   AttemptQueries,
@@ -73,6 +75,7 @@ export interface SessionServiceDeps {
   db: Database;
   runner: StageRunner;
   nutanix: NutanixClient;
+  kube?: KubeClient;
   actions?: ActionRegistry;
   logger: Logger;
   packId: string;
@@ -165,12 +168,18 @@ export class SessionService {
    */
   private readonly baseStages: readonly StageDefinition[];
   private readonly nutanix: NutanixClient;
+  private readonly kube?: KubeClient;
   readonly actions: ActionRegistry;
   private readonly logger: Logger;
   readonly packId: string;
   private readonly bundle: LocaleBundle;
   private readonly globalTypingSpeedMs?: number;
   private readonly initialVariables: Record<string, unknown>;
+  /**
+   * Variables that exist before the first stage plays. Read by the Pack tab's
+   * dependency analysis so a stage needing one of them is not called broken.
+   */
+  readonly seededVariableNames: ReadonlySet<string>;
   private readonly sessionDirectory: SessionDirectory;
   private readonly telemetry?: Telemetry;
   /**
@@ -206,12 +215,18 @@ export class SessionService {
     this.runner = deps.runner;
     this.baseStages = [...deps.runner.listStages()];
     this.nutanix = deps.nutanix;
+    this.kube = deps.kube;
     this.actions = deps.actions ?? new ActionRegistry();
     this.logger = deps.logger;
     this.packId = deps.packId;
     this.bundle = deps.bundle;
     this.globalTypingSpeedMs = deps.globalTypingSpeedMs;
     this.initialVariables = deps.initialVariables ?? {};
+    // `Vlanid` is allocated per session rather than seeded, but it is present
+    // before any stage runs, so the dependency analysis must count it as
+    // available like the rest. Everything else here is whatever the server and
+    // the pack's boot module actually put in — no pack names in code.
+    this.seededVariableNames = new Set([...Object.keys(this.initialVariables), 'Vlanid']);
     this.telemetry = deps.telemetry;
     this.unlockedGateIds = this.rebuildUnlockedSet();
     this.globallyPausedAt = this.packPauses.get(this.packId)?.pausedAt ?? null;
@@ -636,6 +651,8 @@ export class SessionService {
     const ctx = this.buildCheckContext(session);
     const actCtx: ActContext = {
       nutanix: ctx.nutanix,
+      // The check context narrows this to reads; an act needs the writer.
+      kube: this.kube,
       vars: ctx.vars,
       cache: ctx.cache,
       session: ctx.session,
@@ -680,6 +697,45 @@ export class SessionService {
       this.globalTypingSpeedMs,
     );
     return rendered.units.slice(0, session.awaiting.renderOffset);
+  }
+
+  /**
+   * Re-render a stage the player has already reached, for re-reading.
+   *
+   * Read-only in every sense: no check runs, no capture happens, no session
+   * field moves. It also refuses stages ahead of the player, because a
+   * contents menu that let you read the next lab's text would hand out the
+   * answers.
+   *
+   * The prompts, pauses and check beats are stripped. What comes back is the
+   * material — text, screenshots, demos — not a replayable turn.
+   */
+  readStage(sessionId: string, stageName: string): { stage: string; units: MessageUnit[] } {
+    const session = this.getSession(sessionId);
+    const stage = this.runner.stageByName(stageName);
+    if (!stage) throw new HttpError(404, `Stage '${stageName}' not in pack`);
+
+    // Furthest point the player has legitimately seen: the stage they are
+    // parked in, else the one after their last completed.
+    const reached = session.awaiting
+      ? this.stageIndex(session.awaiting.stageName)
+      : this.stageIndex(session.currentStage) + 1;
+    if (this.stageIndex(stageName) > reached) {
+      throw new HttpError(403, `Stage '${stageName}' is ahead of you`);
+    }
+
+    const vars = variablesForSession(session.id, this.variables, this.initialVariables);
+    const rendered = this.runner.render(
+      stage,
+      vars,
+      session.locale,
+      this.bundle,
+      this.globalTypingSpeedMs,
+    );
+    const units = rendered.units.filter(
+      (u) => u.kind !== 'await-input' && u.kind !== 'pause' && u.kind !== 'clear',
+    );
+    return { stage: stageName, units };
   }
 
   /**
@@ -746,6 +802,9 @@ export class SessionService {
     // the fixture for subsequent queries. Real adapters are passthrough.
     const interpolated = withVariableInterpolation(this.nutanix, () => vars.snapshot());
     const nutanix = withMockOverlay(interpolated, () => overlay.list());
+    // Same per-session `{Var}` templating for the k8s transport (NKP pack), so a
+    // fixture named `user{UserNum}-...` matches the player's captured UserNum.
+    const kube = this.kube ? withKubeInterpolation(this.kube, () => vars.snapshot()) : undefined;
     // Snapshot the cluster_config table once per check call. Two rows
     // max (discoverable_node_serials, lcm_available_updates), so two cheap
     // SQLite reads — fine to do per check, no need for an in-memory
@@ -754,6 +813,7 @@ export class SessionService {
     const lcm = this.clusterConfig.get<unknown>('lcm_available_updates');
     return {
       nutanix,
+      kube,
       vars,
       cache,
       args: {},
@@ -1161,29 +1221,45 @@ export class SessionService {
 
   /**
    * Reset the session's identity capture without starting from scratch:
-   * rewind to before the login prompts (so they replay), drop the
-   * Trigram / PIN / Username variables, keep everything else (locale,
-   * sessionId). Wired to the "switch agent" frontend affordance (↓ during
-   * login, header link) — cheaper than a full reset (which also forces the
-   * language picker), and avoids inventing a second sessionId.
+   * rewind to just before the stage that asks who the player is, so its
+   * prompts replay, and drop what the run had captured. Locale and sessionId
+   * survive — cheaper than a full reset (which also forces the language
+   * picker), and it avoids inventing a second sessionId.
+   *
+   * Which stage that is comes from the pack. The infiltration game opens on a
+   * prelude and asks for the trigram second; the bootcamp asks for the user
+   * number in its very first stage. Rewinding to "stage 0, already passed"
+   * suited the first and silently broke the second: the only stage that
+   * captures `UserNum` was marked done without ever capturing it, every later
+   * stage then gated off on the variable it needs, and the runner — finding
+   * nothing left to play — declared the run complete.
    */
   switchIdentity(sessionId: string): { currentStage: string | null } {
     const session = this.getSession(sessionId);
-    const firstStage = this.runner.listStages()[0];
-    const loreName = firstStage?.name ?? null;
-    // Delete every history row from the second stage onward (the lore stage
-    // stays passed so the runner jumps straight to the login prompt).
+    const stages = this.runner.listStages();
+    // The first stage that captures anything is the one that asks who the
+    // player is: `login` in the infiltration game, `welcome` in the bootcamp.
+    // Reading it off the stages needs no per-pack wiring and cannot drift.
+    const found = stages.findIndex((s) => (s.captures ?? []).length > 0);
+    const identityIdx = found >= 0 ? found : 1;
+    // Everything from the identity stage onward replays; the stage before it
+    // (if any) stays passed, so the run resumes exactly at the prompt.
     const names = this.stageNames();
-    if (names.length >= 2) {
-      this.history.deleteFrom(session.id, names[1]!, names);
-    }
+    const rewindTo = names[identityIdx];
+    if (rewindTo) this.history.deleteFrom(session.id, rewindTo, names);
+    const resumeAt = identityIdx > 0 ? (names[identityIdx - 1] ?? null) : null;
+
     this.clearFlowState(session.id);
     this.sessions.clearFinished(session.id);
-    this.sessions.updateCurrentStage(session.id, loreName);
-    for (const name of ['Trigram', 'PIN', 'Username']) {
-      this.variables.delete(session.id, name);
+    this.sessions.updateCurrentStage(session.id, resumeAt);
+    // Whatever the replayed part of the run had learned, read off the stages
+    // rather than named here: a second pack identifies its players by a
+    // different variable (`UserNum`, not `Trigram`), and a hardcoded list left
+    // it behind — the prompt replayed while the old identity still applied.
+    for (const stage of stages.slice(identityIdx)) {
+      for (const name of stage.captures ?? []) this.variables.delete(session.id, name);
     }
-    return { currentStage: loreName };
+    return { currentStage: resumeAt };
   }
 
   /**

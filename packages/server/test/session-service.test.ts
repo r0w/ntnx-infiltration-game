@@ -38,13 +38,17 @@ const silentLogger = {
 // `SessionRecord.currentStage`, so test fixtures need to be consistent.
 const stages: StageDefinition[] = [
   { index: 0, id: 's1', name: 's1', active: true, messages: ['s1.m1'] },
-  { index: 1, id: 's2', name: 's2', active: true, messages: ['s2.m1'] },
+  // s2 is the identity stage, as `login` is in the infiltration game: the
+  // first stage that captures anything. Declared here because the code reads
+  // the pack rather than naming variables of its own.
+  { index: 1, id: 's2', name: 's2', active: true, messages: ['s2.m1'], captures: ['Trigram', 'PIN'] },
   {
     index: 2,
     id: 's3',
     name: 's3',
     active: true,
     messages: ['s3.m1'],
+    captures: ['Username'],
     check: { fn: 'alwaysPass' },
   },
   {
@@ -826,9 +830,9 @@ describe('SessionService', () => {
     service.sessions.updateCurrentStage(session.id, 's5');
 
     const r = service.switchIdentity(session.id);
-    // switchIdentity rewinds to the first stage (the lore stage); in this
-    // fixture that's 's1'. The currentStage is set to that first stage's
-    // name, so it stays "passed" and the runner picks up the login flow next.
+    // Rewinds to just before the stage that captures the identity ('s2'), so
+    // currentStage lands on the prelude 's1' — it stays "passed" and the
+    // runner picks the identity prompt up next.
     expect(r.currentStage).toBe('s1');
 
     const after = service.getSession(session.id);
@@ -1113,5 +1117,68 @@ describe('SessionService — global pause (lunch lock)', () => {
       bundle,
     });
     expect(service2.isGloballyPaused()).toBe(true);
+  });
+});
+
+/**
+ * A pack whose very first stage asks who the player is — the bootcamp's shape.
+ *
+ * Rewinding to "stage 0, already passed" suited a pack that opens on a prelude
+ * and broke this one silently: the only stage that captures the identity was
+ * marked done without ever capturing it, every later stage gated off on the
+ * variable it needs, and the runner — finding nothing left to play — declared
+ * the run complete. The player pressed "switch" and landed on the end screen.
+ */
+describe('switchIdentity — pack that asks first', () => {
+  const bootcampStages: StageDefinition[] = [
+    {
+      index: 0, id: 'b1', name: 'welcome', active: true, messages: ['s1.m1'],
+      captures: ['UserNum'],
+    },
+    {
+      index: 1, id: 'b2', name: 'lab', active: true, messages: ['s2.m1'],
+      needs: ['UserNum'],
+    },
+  ];
+
+  async function bootcamp() {
+    const db = new Database(':memory:');
+    db.exec(SCHEMA);
+    const checks = new CheckRegistry();
+    checks.register('alwaysPass', async () => ({ pass: true, detail: 'ok' }));
+    const service = new SessionService({
+      db,
+      runner: new StageRunner(bootcampStages, checks),
+      nutanix: noopNutanix,
+      logger: silentLogger,
+      packId: 'nkp-bootcamp',
+      bundle,
+    });
+    const session = await service.create({
+      locale: 'en', clusterEndpoint: '', clusterProfile: 'other', capabilities: [],
+    });
+    return { service, session };
+  }
+
+  test('rewinds to before the first stage, so the identity prompt replays', async () => {
+    const { service, session } = await bootcamp();
+    service.variables.upsert(session.id, 'UserNum', '09', 'welcome');
+    service.sessions.updateCurrentStage(session.id, 'welcome');
+
+    const r = service.switchIdentity(session.id);
+    // Nothing precedes the identity stage here, so the run resumes at the top.
+    expect(r.currentStage).toBeNull();
+    expect(service.variables.all(session.id).UserNum).toBeUndefined();
+  });
+
+  test('and the run does not end the moment the player asks to switch', async () => {
+    const { service, session } = await bootcamp();
+    service.variables.upsert(session.id, 'UserNum', '09', 'welcome');
+    service.sessions.updateCurrentStage(session.id, 'welcome');
+
+    service.switchIdentity(session.id);
+    const next = await service.advance(session.id);
+    expect(next.kind).not.toBe('finished');
+    expect(service.getSession(session.id).finishedAt).toBeNull();
   });
 });

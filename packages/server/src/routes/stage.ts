@@ -1,12 +1,13 @@
 import { Hono } from 'hono';
 import type { SessionService } from '../session-service';
 import { HttpError } from '../session-service';
-import { refreshLcmCount } from '../cluster-config-probe';
-import type { ClusterConfigQueries } from '../db/queries';
 import type { LoadedPack } from '../pack-loader';
+import { resolvePackNav } from '../pack-nav';
+import { consoleLogger } from '../logger';
+import { makePackProbes } from '../pack-probes';
+import { storeClusterFacts } from '../cluster-facts';
 import { NutanixTransportError } from '@ntnx-game/nutanix';
 import type { SubmitInputRequest } from '@ntnx-game/shared';
-import { discoverableNodeSerials } from '@ntnx-game/engine';
 
 export interface StageRoutesDeps {
   service: SessionService;
@@ -68,6 +69,25 @@ export function buildStageRoutes(deps: StageRoutesDeps): Hono {
     if (!stageName) throw new HttpError(400, 'missing stage name');
     const r = service.gotoStage(c.req.param('id'), stageName);
     return c.json(r);
+  });
+
+  // The player-facing reading menu. Session-scoped because the titles are
+  // translated and the locale is a property of the session, not the pack.
+  // Returns an empty list for a pack with no `nav` — the caller renders
+  // nothing and the infiltration game is untouched.
+  router.get('/:id/nav', (c) => {
+    const session = service.getSession(c.req.param('id'));
+    const chapters = resolvePackNav(pack, session.locale, (m) =>
+      consoleLogger.warn(m, { pack: pack.manifest.id }),
+    );
+    return c.json({ chapters });
+  });
+
+  // Re-read a stage already played. Read-only: see SessionService.readStage.
+  router.get('/:id/read/:stage', (c) => {
+    const stageName = c.req.param('stage');
+    if (!stageName) throw new HttpError(400, 'missing stage name');
+    return c.json(service.readStage(c.req.param('id'), stageName));
   });
 
   router.post('/:id/switch-identity', (c) => {
@@ -178,14 +198,23 @@ export function buildStageRoutes(deps: StageRoutesDeps): Hono {
     if (!session.awaiting) throw new HttpError(409, 'session is not awaiting input');
     const variable = session.awaiting.variable;
     try {
-      const value = await service.queryWithSessionContext(sessionId, async (ctx) => {
-        if (variable === 'NodeSerial') return await lookupNodeSerial(ctx);
-        if (variable === 'NumberUpdates') return await lookupNumberUpdates(ctx, service.clusterConfig);
-        if (variable === 'Runway') return await lookupRunway(ctx);
-        return null;
-      });
+      // Which variables can be filled, and how, is the pack's business — the
+      // three the infiltration game answers name its own stages 28, 29 and 31.
+      const resolve = pack.autoFill[variable];
+      const value = resolve
+        ? await service.queryWithSessionContext(sessionId, (ctx) => resolve({
+          ...ctx,
+          probes: makePackProbes(ctx.nutanix, ctx.logger),
+          async storeClusterFact(fact) {
+            await storeClusterFacts({ facts: [fact], cfg: service.clusterConfig, logger: ctx.logger });
+            return service.clusterConfig.get(fact.key);
+          },
+        }))
+        : null;
       if (value === null || value === undefined || value === '') {
-        throw new HttpError(404, `no auto-fill for variable "${variable}"`);
+        throw new HttpError(resolve ? 503 : 404, resolve
+          ? `Auto-fill for "${variable}" is not available yet. Wait for the cluster to settle, then retry.`
+          : `no auto-fill for variable "${variable}"`);
       }
       return c.json({ ok: true, variable, value: String(value) });
     } catch (err) {
@@ -196,85 +225,6 @@ export function buildStageRoutes(deps: StageRoutesDeps): Hono {
   });
 
   return router;
-}
-
-/** Live lookup for stage 28 — first DISCOVERABLE (unconfigured) node serial.
- *  Same data source as CheckNewNode so auto-fill ↔ validation stay aligned. */
-async function lookupNodeSerial(ctx: import('@ntnx-game/engine').CheckContext): Promise<string | null> {
-  try {
-    const discoverable = await discoverableNodeSerials(ctx.nutanix, ctx.logger);
-    return discoverable[0] ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/** Re-read LCM if the boot probe had no settled count yet. */
-async function lookupNumberUpdates(
-  ctx: import('@ntnx-game/engine').CheckContext,
-  cfg: ClusterConfigQueries,
-): Promise<string> {
-  const cached = ctx.clusterConfig?.lcmAvailableUpdates;
-  if (typeof cached === 'number') return String(cached);
-  if (ctx.nutanix.mode === 'mock') return '0';
-  await refreshLcmCount({ nutanix: ctx.nutanix, cfg, logger: ctx.logger });
-  const count = cfg.get<number>('lcm_available_updates');
-  if (typeof count === 'number') return String(count);
-  throw new HttpError(503, 'LCM update count is not available yet. Wait for LCM to settle, then retry auto-play.');
-}
-
-/** Live lookup for stage 31 — query OldPC's v3/groups runway endpoint. */
-async function lookupRunway(ctx: import('@ntnx-game/engine').CheckContext): Promise<string | null> {
-  // Mock short-circuit: the OldPC lookup is a raw fetch (different host
-  // than the main PC, can't go through the mock-adapter fixtures). Return
-  // a canned value so mock auto-play can walk stage 31 — CheckRunway
-  // accepts any positive integer in its format-only fallback path when
-  // OldPC env vars aren't wired.
-  if (ctx.nutanix.mode === 'mock') return '120';
-  const oldPc = ctx.vars.get('OldPC');
-  const user = ctx.vars.get('OldPCUsername');
-  const pwd = ctx.vars.get('OldPCPassword');
-  if (typeof oldPc !== 'string' || !oldPc || typeof user !== 'string' || typeof pwd !== 'string') {
-    return null;
-  }
-  try {
-    // Same scheme/port handling as CheckRunway: env may be a bare host
-    // ('10.55.82.39') or a full URL. Detect by leading scheme.
-    const stripped = oldPc.replace(/\/+$/, '');
-    const base = /^https?:\/\//.test(stripped) ? stripped : `https://${stripped}:9440`;
-    const now = Date.now();
-    const res = await fetch(`${base}/api/nutanix/v3/groups`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Basic ${btoa(`${user}:${pwd}`)}`,
-      },
-      body: JSON.stringify({
-        entity_type: 'cluster',
-        group_member_attributes: [{ attribute: 'capacity.runway' }],
-        query_name: 'prism:RunwayInfoQueryModel',
-        interval_start_ms: now - 3 * 86400 * 1000,
-        interval_end_ms: now,
-        downsampling_interval: 86400,
-      }),
-      tls: { rejectUnauthorized: false },
-    });
-    if (!res.ok) return null;
-    const body = (await res.json()) as {
-      group_results?: Array<{
-        entity_results?: Array<{
-          data?: Array<{ name?: string; values?: Array<{ values?: unknown[] }> }>;
-        }>;
-      }>;
-    };
-    const entry = body?.group_results?.[0]?.entity_results?.[0]?.data?.find(
-      (d) => d.name === 'capacity.runway',
-    );
-    const v = entry?.values?.[0]?.values?.[0];
-    return v != null ? String(v) : null;
-  } catch {
-    return null;
-  }
 }
 
 function findTransportError(err: unknown): NutanixTransportError | null {

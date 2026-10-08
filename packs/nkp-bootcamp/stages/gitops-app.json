@@ -1,0 +1,21 @@
+{
+  "id": "nkp-017",
+  "name": "gitops-app",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.boutique.intro",
+    "nkp.boutique.explore",
+    "nkp.boutique.prompt"
+  ],
+  "check": {
+    "fn": "CheckBoutiqueRunning"
+  },
+  "needs": [
+    "UserNum"
+  ],
+  "dependsOn": [
+    "gitops-source"
+  ]
+}

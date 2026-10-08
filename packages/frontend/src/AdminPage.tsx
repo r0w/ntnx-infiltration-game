@@ -35,6 +35,21 @@ type AdminTab = 'users' | 'logs' | 'pack' | 'cluster' | 'emails' | 'scoreboard';
 
 const STORAGE_KEY = 'ntnx-infiltration-admin-pw';
 
+/**
+ * Why a stage would break if the operator went ahead. Two different losses read
+ * differently: a variable nothing produces any more, and the cluster state a
+ * prerequisite stage left behind. Most stages have only the second, so naming
+ * just the variables printed a bare "missing".
+ */
+function cascadeReason(b: { missingVars: string[]; missingStages?: string[] }): string {
+  const parts: string[] = [];
+  if (b.missingVars.length > 0) parts.push(`missing ${b.missingVars.join(', ')}`);
+  if (b.missingStages && b.missingStages.length > 0) {
+    parts.push(`needs ${b.missingStages.join(', ')} to have run`);
+  }
+  return parts.join(' · ') || 'no longer satisfiable';
+}
+
 export function AdminPage() {
   const [password, setPassword] = useState<string | null>(() => {
     try {
@@ -76,6 +91,24 @@ function AdminLogin({ onLoggedIn }: { onLoggedIn: (pw: string) => void }) {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // /api/pack needs no admin password, so the operator sees which game this
+  // console belongs to before signing in.
+  const [title, setTitle] = useState('ntnx infiltration game');
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .pack()
+      .then((p) => {
+        if (!cancelled) setTitle(p.title);
+      })
+      .catch(() => {
+        /* keep the fallback title */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -96,7 +129,7 @@ function AdminLogin({ onLoggedIn }: { onLoggedIn: (pw: string) => void }) {
   return (
     <div className="login">
       <div className="login-card">
-        <h1 className="login-title">admin · ntnx infiltration game</h1>
+        <h1 className="login-title">admin · {title}</h1>
         <p className="login-subtitle">Event-day operator tools.</p>
         <form onSubmit={submit}>
           <label className="login-field">
@@ -161,6 +194,8 @@ function AdminDashboard({
     : 'users';
   const setTab = (next: AdminTab) => navigate(`/admin/${next}`);
   const [entries, setEntries] = useState<AdminUserEntry[] | null>(null);
+  // What this pack calls a player — 'trigram' for NCP, 'user' for the bootcamp.
+  const [identityLabel, setIdentityLabel] = useState('trigram');
   const [gates, setGates] = useState<AdminGateEntry[] | null>(null);
   const [lunch, setLunch] = useState<AdminLunchStatus | null>(null);
   const [lunchBusy, setLunchBusy] = useState(false);
@@ -249,6 +284,7 @@ function AdminDashboard({
         api.adminHelpStatus(password),
       ]);
       setEntries(usersPayload.entries);
+      setIdentityLabel(usersPayload.identityLabel ?? 'trigram');
       setGates(gatesPayload.entries);
       setPackStages(packPayload.stages);
       setPackBrokenCount(packPayload.brokenCount);
@@ -810,6 +846,9 @@ function AdminDashboard({
           const filtered = showAnonymousUsers
             ? entries
             : entries.filter((e) => e.trigram !== null);
+          // Agent and PIN belong to the infiltration game. A pack that never
+          // captures them would otherwise show two columns of dashes.
+          const hasAgentCols = entries.some((e) => e.username !== null || e.pin !== null);
           // Stuck players first, longest-stuck on top — the triage order.
           // The rest keeps the server's newest-session-first order.
           const visible = [...filtered].sort((a, b) => {
@@ -848,9 +887,9 @@ function AdminDashboard({
           <table className="admin-table">
             <thead>
               <tr>
-                <th>Trigram</th>
-                <th>Agent</th>
-                <th>PIN</th>
+                <th>{identityLabel}</th>
+                {hasAgentCols && <th>Agent</th>}
+                {hasAgentCols && <th>PIN</th>}
                 <th>Stage</th>
                 <th>Progress</th>
                 <th>Help</th>
@@ -877,8 +916,10 @@ function AdminDashboard({
                       <span className="c-dim">—</span>
                     )}
                   </td>
-                  <td>{e.username ?? <span className="c-dim">—</span>}</td>
-                  <td className="admin-td-pin">{e.pin ?? <span className="c-dim">—</span>}</td>
+                  {hasAgentCols && <td>{e.username ?? <span className="c-dim">—</span>}</td>}
+                  {hasAgentCols && (
+                    <td className="admin-td-pin">{e.pin ?? <span className="c-dim">—</span>}</td>
+                  )}
                   <td>
                     {e.finishedAt !== null ? (
                       <span className="c-green">finished</span>
@@ -1066,7 +1107,7 @@ function AdminDashboard({
             {packDisableTarget.preview.cascade.map((b) => (
               <li key={b.stageName}>
                 <strong>{b.stageName}</strong>{' '}
-                <span className="c-dim">requires {[...(b.missingStages ?? []), ...b.missingVars].join(', ')}</span>
+                <span className="c-dim">{cascadeReason(b)}</span>
               </li>
             ))}
           </ul>
@@ -1102,7 +1143,7 @@ function AdminDashboard({
           <dl className="modal-meta">
             <dt>agent</dt>
             <dd>{confirmTarget.username ?? <span className="c-dim">—</span>}</dd>
-            <dt>trigram</dt>
+            <dt>{identityLabel}</dt>
             <dd className="modal-trigram">{confirmTarget.trigram ?? <span className="c-dim">—</span>}</dd>
             <dt>session</dt>
             <dd className="c-dim">{confirmTarget.sessionId.slice(0, 8)}</dd>
@@ -1154,7 +1195,7 @@ function AdminDashboard({
           <dl className="modal-meta">
             <dt>agent</dt>
             <dd>{skipTarget.username ?? <span className="c-dim">—</span>}</dd>
-            <dt>trigram</dt>
+            <dt>{identityLabel}</dt>
             <dd className="modal-trigram">{skipTarget.trigram ?? <span className="c-dim">—</span>}</dd>
             <dt>stage to skip</dt>
             <dd className="modal-trigram">{skipTarget.nextStageName}</dd>
@@ -1188,7 +1229,7 @@ function AdminDashboard({
                 <dl className="modal-meta">
                   <dt>agent</dt>
                   <dd>{failTarget.username ?? <span className="c-dim">—</span>}</dd>
-                  <dt>trigram</dt>
+                  <dt>{identityLabel}</dt>
                   <dd className="modal-trigram">
                     {failTarget.trigram ?? <span className="c-dim">—</span>}
                   </dd>

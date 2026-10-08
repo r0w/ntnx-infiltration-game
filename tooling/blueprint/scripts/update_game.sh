@@ -8,7 +8,7 @@ set -euo pipefail
 # as run_container.sh wrote it at install — no env duplication.
 #
 # Note: a roll only fetches something new for a MOVING tag (latest / develop);
-# a pinned tag re-pulls to a no-op.
+# a pinned tag still recreates the container so in-memory credentials reload.
 
 APPDIR=/opt/ntnx-infiltration-game
 cd "$APPDIR"
@@ -22,7 +22,7 @@ sudo sed -i '/^NIG_DEPLOYMENT_IP=/d' .env
 echo 'NIG_DEPLOYMENT_IP=@@{VM.address}@@' | sudo tee -a .env >/dev/null
 
 sudo docker compose pull
-sudo docker compose up -d --remove-orphans
+sudo docker compose up -d --remove-orphans --force-recreate
 
 sleep 3
 sudo docker compose ps

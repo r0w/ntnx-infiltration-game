@@ -158,4 +158,31 @@ describe('parseMessage', () => {
       { kind: 'code', text: '{not-a-var} <red>not a tag</red>' },
     ]);
   });
+  test('&lt; and &gt; decode to literal angle brackets in prose', () => {
+    const r = parseMessage('Replace &lt;any_node_IP&gt; with a node IP.', new VariableStore());
+    expect(r.units).toEqual([
+      { kind: 'text', text: 'Replace <any_node_IP> with a node IP.', color: 'default' },
+    ]);
+  });
+
+  test('a decoded &lt; does not start a tag', () => {
+    const r = parseMessage('&lt;red&gt;stays text&lt;/red&gt;', new VariableStore());
+    expect(r.units).toEqual([
+      { kind: 'text', text: '<red>stays text</red>', color: 'default' },
+    ]);
+  });
+
+  test('entities decode inside <code> too — the learner copies the real YAML', () => {
+    const r = parseMessage('<code lang=\'yaml\'>host: user01.&lt;ingress_lb_ip&gt;.sslip.io</code>', new VariableStore());
+    expect(r.units).toEqual([
+      { kind: 'code', text: 'host: user01.<ingress_lb_ip>.sslip.io', lang: 'yaml' },
+    ]);
+  });
+
+  test('&amp; decodes, and a bare & is left alone', () => {
+    const r = parseMessage('a &amp; b, x=1&y=2', new VariableStore());
+    expect(r.units).toEqual([
+      { kind: 'text', text: 'a & b, x=1&y=2', color: 'default' },
+    ]);
+  });
 });

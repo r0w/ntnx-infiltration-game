@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
+import { useLightbox } from './Lightbox';
 import { CodeBlock } from './CodeBlock';
 import { HelpBlock } from './HelpBlock';
 import { textClasses } from './textClasses';
@@ -9,6 +10,8 @@ export interface TerminalItemProps {
   typingSpeedMs: number;
   /** When true, <pause/> beats and check-result dwells fire instantly. */
   skipPauses?: boolean;
+  /** Print each image's description under it. See PackManifest.imageCaptions. */
+  imageCaptions?: boolean;
   isActive: boolean;
   onDone: () => void;
   /** Session locale, for the few client-side strings inside an item (help block). */
@@ -25,6 +28,7 @@ export const TerminalItem = memo(function TerminalItem({
   item,
   typingSpeedMs,
   skipPauses,
+  imageCaptions,
   isActive,
   onDone,
   locale,
@@ -68,7 +72,26 @@ export const TerminalItem = memo(function TerminalItem({
     return <CodeBlock text={item.text} lang={item.lang} isActive={isActive} onDone={onDone} />;
   }
   if (item.kind === 'image') {
-    return <ImageReveal src={item.src} alt={item.alt} isActive={isActive} onDone={onDone} />;
+    return (
+      <ImageReveal
+        src={item.src}
+        alt={item.alt}
+        showCaption={imageCaptions === true}
+        isActive={isActive}
+        onDone={onDone}
+      />
+    );
+  }
+  if (item.kind === 'demo') {
+    return (
+      <DemoTile
+        src={item.src}
+        poster={item.poster}
+        label={item.label}
+        isActive={isActive}
+        onDone={onDone}
+      />
+    );
   }
   if (item.kind === 'page-break') {
     // data-page-break lets FauxTerminal's scroll policy find the latest
@@ -134,8 +157,20 @@ export const TerminalItem = memo(function TerminalItem({
       </InstantBlock>
     );
   }
-  return null;
+  // A unit kind this build does not know — a server ahead of a cached bundle,
+  // say. Render nothing, but still release the sequencer: silently skipping a
+  // unit is recoverable, freezing the whole run on it is not.
+  return <SkippedUnit isActive={isActive} onDone={onDone} />;
 });
+
+function SkippedUnit({ isActive, onDone }: { isActive: boolean; onDone: () => void }) {
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+  useEffect(() => {
+    if (isActive) onDoneRef.current();
+  }, [isActive]);
+  return null;
+}
 
 /**
  * Show a Braille-dot spinner while the pause is running so the player has
@@ -368,14 +403,17 @@ function TypewriterText({ text, color, styles, href, speedMs, isActive, onDone }
 function ImageReveal({
   src,
   alt,
+  showCaption,
   isActive,
   onDone,
 }: {
   src: string;
   alt?: string;
+  showCaption?: boolean;
   isActive: boolean;
   onDone: () => void;
 }) {
+  const lightbox = useLightbox();
   const [loaded, setLoaded] = useState(false);
   const [phase, setPhase] = useState<'idle' | 'playing' | 'done'>('idle');
   const onDoneRef = useRef(onDone);
@@ -383,9 +421,22 @@ function ImageReveal({
   useEffect(() => {
     if (isActive && phase === 'idle' && loaded) setPhase('playing');
   }, [isActive, phase, loaded]);
-  const url = src.startsWith('http') || src.startsWith('/') ? src : `/api/pack-assets/${src}`;
-  return (
-    <div className={`img-56k-wrap img-56k-${phase}`}>
+  const url = assetUrl(src);
+  // Screenshots are dense: readable in the stream, but the detail the step
+  // actually points at often needs the full size. Clicking opens it.
+  // stopPropagation because the terminal reclaims focus on any click.
+  const enlarge = (ev: { stopPropagation: () => void }) => {
+    ev.stopPropagation();
+    lightbox.open({ kind: 'image', src: url, alt });
+  };
+  const caption = showCaption && alt ? alt : null;
+  const frame = (
+    <button
+      type="button"
+      className={`img-56k-wrap img-56k-${phase}`}
+      onClick={enlarge}
+      aria-label={alt ? `Enlarge: ${alt}` : 'Enlarge image'}
+    >
       <img
         className="img-56k"
         src={url}
@@ -399,6 +450,63 @@ function ImageReveal({
           }
         }}
       />
-    </div>
+      <span className="img-zoom-hint" aria-hidden="true">⤢</span>
+    </button>
+  );
+  if (!caption) return frame;
+  // A figure so the caption is tied to the image rather than floating as the
+  // next line of prose. It sits outside the button: it describes the picture,
+  // it is not part of the control.
+  return (
+    <figure className="img-figure">
+      {frame}
+      <figcaption className="img-caption">{caption}</figcaption>
+    </figure>
+  );
+}
+
+/** Pack assets are served from one route; absolute URLs pass through. */
+export function assetUrl(src: string): string {
+  return src.startsWith('http') || src.startsWith('/') ? src : `/api/pack-assets/${src}`;
+}
+
+/**
+ * An interactive sandbox the player opens. Rendered as a poster tile rather
+ * than an inline frame on purpose: the demos are full applications, and one
+ * silently loading mid-stream would pull attention away from the step being
+ * read. The tile is instant — nothing to reveal, so the sequencer moves on.
+ */
+function DemoTile({
+  src,
+  poster,
+  label,
+  isActive,
+  onDone,
+}: {
+  src: string;
+  poster?: string;
+  label?: string;
+  isActive: boolean;
+  onDone: () => void;
+}) {
+  const lightbox = useLightbox();
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+  useEffect(() => {
+    if (isActive) onDoneRef.current();
+  }, [isActive]);
+  const title = label ?? 'Interactive demo';
+  return (
+    <button
+      type="button"
+      className="demo-tile"
+      onClick={(ev) => {
+        ev.stopPropagation();
+        lightbox.open({ kind: 'embed', src, title });
+      }}
+    >
+      {poster && <img className="demo-tile-poster" src={assetUrl(poster)} alt="" />}
+      <span className="demo-tile-label">▶ {title}</span>
+    </button>
   );
 }

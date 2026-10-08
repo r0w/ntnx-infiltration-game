@@ -1,0 +1,14 @@
+{
+  "id": "nkp-019",
+  "name": "conclusion",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.conclusion.takeaways",
+    "nkp.conclusion.resources"
+  ],
+  "needs": [
+    "UserNum"
+  ]
+}

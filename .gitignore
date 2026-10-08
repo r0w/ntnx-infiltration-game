@@ -40,6 +40,8 @@ tooling/blueprint/**/__pycache__/
 # Blueprint build artifacts — CI-built from source, not tracked
 tooling/blueprint/blueprint.json
 tooling/blueprint/blueprint.patched.json
+tooling/blueprint/blueprint.shared.json
+tooling/blueprint/blueprint.shared.patched.json
 # (tooling/runbook_prerequisites.json is tracked — operator-uploadable
 # artifact bundled into each release alongside the BP)
 tooling/archive/v1/blueprint.json

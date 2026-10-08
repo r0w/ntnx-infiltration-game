@@ -1,0 +1,18 @@
+{
+  "id": "nkp-005",
+  "name": "create-project",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.project.intro",
+    "nkp.project.form",
+    "nkp.project.prompt"
+  ],
+  "check": {
+    "fn": "CheckProject"
+  },
+  "needs": [
+    "UserNum"
+  ]
+}

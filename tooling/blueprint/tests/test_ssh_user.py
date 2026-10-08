@@ -39,15 +39,17 @@ def test_compiled_ssh_uses_one_credential():
     cred, = res['credential_definition_list']
     assert cred['name'] == 'NUTANIX' and cred['username'] == 'nutanix'
     assert cred['editables']['username'] is True
-    substrate, = res['substrate_definition_list']
-    cloud = substrate['create_spec']['resources']['guest_customization']['cloud_init']['user_data']
-    assert 'name: "@@{NUTANIX.username}@@"' in cloud
-    assert "sudo -iu '@@{NUTANIX.username}@@'" in cloud
-    assert substrate['readiness_probe']['login_credential_local_reference']['name'] == 'NUTANIX'
+    substrates = res['substrate_definition_list']
+    assert {s['name'] for s in substrates} == {'VM', 'NkpVM'}
+    for substrate in substrates:
+        cloud = substrate['create_spec']['resources']['guest_customization']['cloud_init']['user_data']
+        assert 'name: "@@{NUTANIX.username}@@"' in cloud
+        assert "sudo -iu '@@{NUTANIX.username}@@'" in cloud
+        assert substrate['readiness_probe']['login_credential_local_reference']['name'] == 'NUTANIX'
     tasks = []
     def walk(value):
         if isinstance(value, dict):
-            if value.get('type') == 'EXEC':
+            if value.get('type') in ('EXEC', 'SET_VARIABLE'):
                 tasks.append(value)
             for v in value.values():
                 walk(v)
@@ -55,11 +57,13 @@ def test_compiled_ssh_uses_one_credential():
             for v in value:
                 walk(v)
     walk(res)
-    validation = next(t for t in tasks if t['name'] == 'Validate VM SSH user')
-    assert 'def _calm_exit' in validation['attrs']['script']
-    assert 'import sys' not in validation['attrs']['script']
+    validations = [t for t in tasks if t.get('name') == 'Validate VM SSH user']
+    assert len(validations) == len(substrates)
+    for validation in validations:
+        assert 'def _calm_exit' in validation['attrs']['script']
+        assert 'import sys' not in validation['attrs']['script']
     ssh = [t for t in tasks if t.get('attrs', {}).get('script_type') == 'sh']
-    assert len(ssh) == 5
+    assert len(ssh) == 11
     for task in ssh:
         assert task['attrs']['login_credential_local_reference']['name'] == 'NUTANIX'
         assert "expected_user='@@{NUTANIX.username}@@'" in task['attrs']['script']

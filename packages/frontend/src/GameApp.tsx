@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
-import { api, ApiError, type PackInfo } from './api';
+import type { MessageUnit } from '@ntnx-game/shared';
+import { api, ApiError, type PackInfo, type PackNavChapter } from './api';
 import { DevPanel } from './DevPanel';
 import { FauxTerminal, type FauxTerminalHelp } from './FauxTerminal';
+import { StageRail } from './StageRail';
+import { StageReader } from './StageReader';
+import { LightboxProvider } from './Lightbox';
 import { LoginForm } from './LoginForm';
 import { ConfirmModal } from './Modal';
 import { effectiveSkipPauses, effectiveTypingSpeed } from './replay-defaults';
@@ -50,6 +54,41 @@ function readStoredSkipPauses(): boolean | null {
   } catch { return null; }
 }
 
+/**
+ * Where the player is in the run, for the reading menu.
+ *
+ * The session reports two different things and neither is "where I am" on its
+ * own: `currentStage` is the last stage *completed*, and `awaitingStageName`
+ * is set only while a prompt is on screen. Parked at a prompt the second one
+ * is the answer; mid-stream it is null and the answer is one past the first.
+ */
+export function readerPosition(
+  order: string[],
+  currentStage: string | null,
+  awaitingStageName: string | null,
+  finished: boolean,
+): { index: number; stage: string | null } {
+  if (finished) return { index: order.length, stage: null };
+  if (awaitingStageName) {
+    const i = order.indexOf(awaitingStageName);
+    if (i >= 0) return { index: i, stage: awaitingStageName };
+  }
+  if (currentStage === null) return { index: 0, stage: order[0] ?? null };
+  const done = order.indexOf(currentStage);
+  if (done < 0) return { index: 0, stage: order[0] ?? null };
+  const next = done + 1;
+  return { index: next, stage: order[next] ?? null };
+}
+
+/** A step opened from the contents menu, while its text is on its way. */
+interface ReadingState {
+  stage: string;
+  title: string;
+  units: MessageUnit[];
+  loading: boolean;
+  error: string | null;
+}
+
 export function GameApp() {
   const session = useSession();
   const [pack, setPack] = useState<PackInfo | null>(null);
@@ -64,6 +103,8 @@ export function GameApp() {
   const [autoPlayActing, setAutoPlayActing] = useState(false);
   const [autoPlayError, setAutoPlayError] = useState<string | null>(null);
   const [logoutPrompt, setLogoutPrompt] = useState(false);
+  const [nav, setNav] = useState<PackNavChapter[]>([]);
+  const [reading, setReading] = useState<ReadingState | null>(null);
   const awaitingRef = session.awaitingVariable;
   const submitInput = session.submitInput;
   const advance = session.advance;
@@ -92,9 +133,33 @@ export function GameApp() {
   const typingSpeedMs = effectiveTypingSpeed(typingSpeedOverride, session.typingSpeedMs, pack?.mode);
   const skipPauses = effectiveSkipPauses(skipPausesOverride, pack?.mode);
 
+  // Re-read a step. The server re-renders it from the pack; nothing about the
+  // run moves, so this is safe to fire mid-stage.
+  const sessionId = session.sessionId;
+  const closeReader = useCallback(() => setReading(null), []);
+  const handleRead = useCallback(
+    (stage: string, title: string) => {
+      if (!sessionId) return;
+      setReading({ stage, title, units: [], loading: true, error: null });
+      api.readStage(sessionId, stage).then(
+        (r) => setReading((cur) => (cur?.stage === stage ? { ...cur, units: r.units, loading: false } : cur)),
+        (err: unknown) =>
+          setReading((cur) =>
+            cur?.stage === stage
+              ? { ...cur, loading: false, error: err instanceof Error ? err.message : String(err) }
+              : cur,
+          ),
+      );
+    },
+    [sessionId],
+  );
+
+  // The pack names the game, so a second pack is not branded as the first.
+  const gameTitle = pack?.title ?? 'ntnx infiltration game';
+
   useEffect(() => {
-    document.title = 'ntnx infiltration game';
-  }, []);
+    document.title = gameTitle;
+  }, [gameTitle]);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,6 +169,21 @@ export function GameApp() {
     );
     return () => { cancelled = true; };
   }, []);
+
+  // The reading menu. Session-scoped because its titles are translated, so it
+  // is refetched when the player signs in again in another language.
+  useEffect(() => {
+    if (!session.sessionId) {
+      setNav([]);
+      return;
+    }
+    let cancelled = false;
+    api.nav(session.sessionId).then(
+      (p) => { if (!cancelled) setNav(p.chapters); },
+      () => { /* no menu is a fine outcome — the terminal is the game */ },
+    );
+    return () => { cancelled = true; };
+  }, [session.sessionId, session.locale]);
 
   const handleSubmit = useCallback(
     (v: string) => {
@@ -264,18 +344,27 @@ export function GameApp() {
         defaultLocale={pack?.defaultLocale ?? 'en'}
         supportedLocales={pack?.supportedLocales ?? ['en']}
         wipLocales={pack?.wipLocales ?? []}
+        title={gameTitle}
         onSubmit={session.createSession}
       />
     );
   }
 
   const appStyle = { '--terminal-max-width': maxWidth } as CSSProperties;
+  const stageOrder = pack?.stages.map((s) => s.name) ?? [];
+  const position = readerPosition(
+    stageOrder,
+    session.currentStage,
+    session.awaitingStageName,
+    session.finished,
+  );
 
   return (
+    <LightboxProvider>
     <div className="app" style={appStyle}>
       <header className="app-header">
         <div className="app-header-side app-header-left">
-          <span className="app-title">ntnx infiltration game</span>
+          <span className="app-title">{gameTitle}</span>
         </div>
         <div className="app-header-side app-header-right">
           <WidthToggle value={maxWidth} onChange={setMaxWidth} />
@@ -288,6 +377,15 @@ export function GameApp() {
           </button>
         </div>
       </header>
+      <div className="app-body">
+      {nav.length > 0 && (
+        <StageRail
+          chapters={nav}
+          currentIndex={position.index}
+          activeStage={position.stage}
+          onRead={handleRead}
+        />
+      )}
       <FauxTerminal
         items={session.items}
         awaitingVariable={session.awaitingVariable}
@@ -296,6 +394,7 @@ export function GameApp() {
         finished={session.finished}
         typingSpeedMs={typingSpeedMs}
         skipPauses={skipPauses}
+        imageCaptions={pack?.imageCaptions ?? false}
         gatedAt={session.gatedAt}
         locale={session.locale}
         autoPlay={autoPlay}
@@ -303,8 +402,10 @@ export function GameApp() {
         onAutoPlayOk={handleAutoPlayOk}
         onAdvance={handleAdvance}
         onSwitchIdentity={inIdentityCapture ? handleSwitchIdentity : undefined}
+        identityLabel={pack?.identity?.label}
         help={help}
       />
+      </div>
       {session.error && <div className="app-error">{session.error}</div>}
       {autoPlayError && <div className="app-error">{autoPlayError}</div>}
       {devToolsAllowed && (
@@ -328,6 +429,15 @@ export function GameApp() {
           onGoto={handleGoto}
         />
       )}
+      {reading && (
+        <StageReader
+          title={reading.title}
+          units={reading.units}
+          loading={reading.loading}
+          error={reading.error}
+          onClose={closeReader}
+        />
+      )}
       {logoutPrompt && (
         <ConfirmModal
           title={<><span className="c-yellow">!</span> log out?</>}
@@ -343,6 +453,7 @@ export function GameApp() {
         </ConfirmModal>
       )}
     </div>
+    </LightboxProvider>
   );
 }
 

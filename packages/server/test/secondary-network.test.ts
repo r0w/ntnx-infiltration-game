@@ -1,15 +1,19 @@
 import { describe, expect, test } from 'bun:test';
 import { selectSecondarySubnet } from '../../../packs/ntnx-infiltration/network';
-import { loadConfig } from '../src/config';
+import { variables } from '../../../packs/ntnx-infiltration/boot';
+import type { PackBootContext } from '@ntnx-game/engine';
+
+const configuredNetwork = (env: Record<string, string>) =>
+  String(variables({ env } as PackBootContext).SecondaryNetwork);
 
 describe('secondary network selection', () => {
   test('defaults to the existing HPoC network convention', () => {
-    expect(loadConfig({}).gameSecondaryNetwork).toBe('secondary');
-    expect(loadConfig({GAME_SECONDARY_NETWORK: '  '}).gameSecondaryNetwork).toBe('secondary');
+    expect(configuredNetwork({})).toBe('secondary');
+    expect(configuredNetwork({GAME_SECONDARY_NETWORK: '  '})).toBe('secondary');
     expect(selectSecondarySubnet([{name: 'SECONDARY-hpoc'}]).name).toBe('SECONDARY-hpoc');
   });
   test('custom names match exactly, ignoring case', () => {
-    const name = loadConfig({GAME_SECONDARY_NETWORK: ' Workshop VLAN '}).gameSecondaryNetwork;
+    const name = configuredNetwork({GAME_SECONDARY_NETWORK: ' Workshop VLAN '});
     expect(selectSecondarySubnet([{name: 'secondary'}, {name: 'WORKSHOP VLAN'}], name).name).toBe('WORKSHOP VLAN');
     expect(() => selectSecondarySubnet([{name: 'Workshop VLAN-other'}], name)).toThrow('not found');
   });

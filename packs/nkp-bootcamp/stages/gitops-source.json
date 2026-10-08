@@ -1,0 +1,21 @@
+{
+  "id": "nkp-016",
+  "name": "gitops-source",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.gitops.intro",
+    "nkp.gitops.source",
+    "nkp.gitops.prompt"
+  ],
+  "check": {
+    "fn": "CheckGitOpsSource"
+  },
+  "needs": [
+    "UserNum"
+  ],
+  "dependsOn": [
+    "create-project"
+  ]
+}

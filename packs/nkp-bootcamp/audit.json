@@ -1,0 +1,17 @@
+{
+  "_comment": "What the stage-dependency audit cannot read off the JSON. See tooling/audit-stage-deps.ts.",
+  "envSeeded": [
+    "PC",
+    "PCUser",
+    "PCPassword",
+    "frontendHost",
+    "DashboardUrl",
+    "MgmtIngressIP",
+    "Workload1IngressIP"
+  ],
+  "alwaysNeeds": ["UserNum"],
+  "checkCaptures": {
+    "CheckUserNum": ["UserNum"]
+  },
+  "ignoreVars": ["$continue"]
+}
