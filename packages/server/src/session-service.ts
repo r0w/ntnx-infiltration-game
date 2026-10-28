@@ -612,6 +612,19 @@ export class SessionService {
       penaltySec,
       charged,
     });
+    // Once per (session, stage), at the billed first display: showing it again
+    // is free and reports nothing.
+    if (charged) {
+      this.telemetry?.record({
+        type: 'help_used',
+        sessionId: session.id,
+        stageId: stage.id,
+        stageName: stage.name,
+        stageIndex: stage.index,
+        penaltySec,
+        afterMs: this.stageWindow(session, Date.now())?.netMs,
+      });
+    }
     return { status: 'ok', stageName: stage.name, units, penaltySec, charged };
   }
 
@@ -893,7 +906,7 @@ export class SessionService {
         this.telemetry?.record({
           type: 'session_finished',
           sessionId: session.id,
-          totalMs: Date.now() - session.startedAt,
+          ...this.finishFields(session, Date.now()),
         });
       }
       this.sessions.markFinished(session.id);
@@ -1300,7 +1313,7 @@ export class SessionService {
       stageId: stage.id,
       stageName: stage.name,
       stageIndex: stage.index,
-      wallMs: session.stageEnteredAt !== null ? Date.now() - session.stageEnteredAt : undefined,
+      ...this.passFields(session, stage.name),
     });
     this.sessions.updateCurrentStage(session.id, stage.name);
     return { kind: 'units', stageName: stage.name, units, actions, disabledStages, typingSpeedMs };
@@ -1372,13 +1385,51 @@ export class SessionService {
       stageName: stage.name,
       stageIndex: stage.index,
       checkMs: Date.now() - start,
-      wallMs:
-        r.pass && session.stageEnteredAt !== null
-          ? Date.now() - session.stageEnteredAt
-          : undefined,
+      ...(r.pass ? this.passFields(session, stage.name) : {}),
     });
     if (r.pass) this.sessions.updateCurrentStage(session.id, stage.name);
     return { kind: 'units', stageName: stage.name, units, actions, check: checkResult, disabledStages, typingSpeedMs };
+  }
+
+  /**
+   * Time the player has spent on the stage they are in, as telemetry reports
+   * it: wall-clock since the previous transition (`stage_entered_at`), the part
+   * of that window the operator held them (an admin gate or the pause), and what
+   * is left. `undefined` for a session with no entry stamp, which predates the
+   * column.
+   */
+  private stageWindow(
+    session: SessionRecord,
+    now: number,
+  ): { wallMs: number; waitMs: number; netMs: number } | undefined {
+    if (session.stageEnteredAt === null) return undefined;
+    const wallMs = now - session.stageEnteredAt;
+    const waitMs = this.waits.overlapMs(session.id, session.stageEnteredAt, now);
+    return { wallMs, waitMs, netMs: wallMs - waitMs };
+  }
+
+  /** Timing and help fields of a `stage_passed` event. */
+  private passFields(session: SessionRecord, stageName: string) {
+    const help = this.helpUsage.get(session.id, stageName);
+    return {
+      ...this.stageWindow(session, Date.now()),
+      helpUsed: help !== null,
+      helpPenaltySec: help?.penaltySec ?? 0,
+    };
+  }
+
+  /** Totals of a `session_finished` event. */
+  private finishFields(session: SessionRecord, now: number) {
+    const totalMs = now - session.startedAt;
+    const waitMs = this.waits.totalBlockedMs(session.id, now);
+    const help = this.helpUsage.list(session.id);
+    return {
+      totalMs,
+      waitMs,
+      netMs: Math.max(0, totalMs - waitMs),
+      helpUses: help.length,
+      helpPenaltySec: help.reduce((sum, h) => sum + h.penaltySec, 0),
+    };
   }
 }
 

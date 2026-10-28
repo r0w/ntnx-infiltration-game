@@ -24,6 +24,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 - Auto-scroll has a fourth speed, **Turbo** (96 px/s), after Slow, Normal and Fast. The speed is now picked from a small menu like the help setting of the Agents table, which also shows each speed in pixels per second.
 - Time spent held by the operator no longer counts against a player: how long each player waited at an admin gate or under the lunch lock is recorded from the moment the game stops them to the moment you unlock or resume.
 - Scoreboard cards show the playing time plus the help penalties, which is the time players are ranked on, not the raw elapsed time: the clock stops while a player is held. An orange `paused` chip means a gate, a violet `lunch` chip the lunch lock, and a cyan `idle` chip means nothing was attempted for over a minute (it restarts at the unlock). The help badge is now red, with an icon, and sits to the left of the playing time. The mock previews show these states too, with presets for 5, 12, 21, 32, 40 and 50 agents.
+- NIG Central statistics now carry the playing time of each stage and of the whole run (the wall-clock time minus the time the operator held the player at a gate or under the lunch lock), the help displayed with its penalties, and a new `help_used` event. The existing `wallMs` and `totalMs` are unchanged, and nothing identifies a player.
 
 ### Changed
 

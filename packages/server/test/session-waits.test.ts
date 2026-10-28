@@ -177,6 +177,27 @@ describe('SessionWaitQueries', () => {
     expect(waits.totalBlockedMs('s1', 9000)).toBe(3000 + 1000);
   });
 
+  test('overlapMs counts only the part of each wait that falls inside the window', () => {
+    const db = freshDb();
+    seedSession(db, 's1');
+    seedSession(db, 's2');
+    const waits = new SessionWaitQueries(db);
+    waits.open('s1', 'gate', 'checkpoint', 1000);
+    waits.close('s1', 4000);
+    waits.open('s1', 'pause', null, 6000); // still running
+    waits.open('s2', 'pause', null, 1000);
+
+    expect(waits.overlapMs('s1', 0, 10_000)).toBe(3000 + 4000); // the open one counts up to the window end
+    expect(waits.overlapMs('s1', 2000, 3000)).toBe(1000); // window inside a wait
+    expect(waits.overlapMs('s1', 3000, 7000)).toBe(1000 + 1000); // straddles the end of one and the start of the next
+    expect(waits.overlapMs('s1', 4000, 6000)).toBe(0); // between the two
+    expect(waits.overlapMs('s1', 0, 500)).toBe(0); // before any wait
+    expect(waits.overlapMs('s1', 20_000, 30_000)).toBe(10_000); // only the open wait, from the window start
+    expect(waits.overlapMs('s3', 0, 10_000)).toBe(0); // unknown session
+    // Another session's waits never leak in.
+    expect(waits.overlapMs('s2', 0, 10_000)).toBe(9000);
+  });
+
   test('listOpen only returns waits still running', () => {
     const db = freshDb();
     seedSession(db, 's1');
