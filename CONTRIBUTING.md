@@ -1,7 +1,13 @@
 # Contributing
 
 Thanks for helping out. This project is a Bun monorepo (engine / server /
-frontend / nutanix packages) plus a game pack under `packs/`.
+frontend / nutanix / kube-transport / shared packages) plus the game packs under
+`packs/` - one directory per game, and a deployment runs one of them.
+
+One rule that only breaks in production: a pack may **type**-import a workspace
+package, never value-import one. The runtime image ships no `node_modules`, so a
+value import resolves locally and kills the container on deploy. Runtime helpers
+live in the pack, or arrive on a context. A test enforces it.
 
 ## Workflow
 

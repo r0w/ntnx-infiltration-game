@@ -1,0 +1,14 @@
+{
+  "id": "nkp-013",
+  "name": "insights",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.insights.intro",
+    "nkp.insights.explore"
+  ],
+  "needs": [
+    "UserNum"
+  ]
+}

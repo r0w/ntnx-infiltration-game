@@ -1,0 +1,21 @@
+{
+  "id": "nkp-010",
+  "name": "wordpress-ingress",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.wping.intro",
+    "nkp.wping.manifest",
+    "nkp.wping.prompt"
+  ],
+  "check": {
+    "fn": "CheckWordpressIngress"
+  },
+  "needs": [
+    "UserNum"
+  ],
+  "dependsOn": [
+    "file-storage"
+  ]
+}

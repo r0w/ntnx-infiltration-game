@@ -1,0 +1,13 @@
+{
+  "id": "nkp-015",
+  "name": "observability-recap",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.recap.observability"
+  ],
+  "needs": [
+    "UserNum"
+  ]
+}

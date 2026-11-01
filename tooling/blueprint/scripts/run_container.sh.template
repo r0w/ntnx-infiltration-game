@@ -42,6 +42,7 @@ sudo tee "$APPDIR/.env" >/dev/null <<'ENVEOF'
 IMAGE_REPO=@@{IMAGE_REPO}@@
 IMAGE_TAG=@@{IMAGE_TAG}@@
 PUBLIC_DIR=/app/public
+GAME_PACK=@@{GAME_PACK}@@
 MODE=@@{MODE}@@
 LOG_LEVEL=@@{LOG_LEVEL}@@
 CLUSTER_PROFILE=@@{CLUSTER_PROFILE}@@
@@ -59,9 +60,17 @@ GAME_OLD_PC_PASSWORD=@@{GAME_OLD_PC_PASSWORD}@@
 GAME_EMAIL_REPORT=@@{GAME_EMAIL_REPORT}@@
 NIG_CENTRAL_URL=@@{NIG_CENTRAL_URL}@@
 NIG_CENTRAL_TOKEN=@@{NIG_CENTRAL_TOKEN}@@
+NKP_DASHBOARD_URL=@@{NKP_DASHBOARD_URL}@@
 NIG_DEPLOYMENT_IP=@@{VM.address}@@
 TZ=@@{TIMEZONE}@@
 ENVEOF
+# The NKP pack reads the cluster through a kubeconfig fetched by an earlier
+# install task; ./data is bind-mounted to /data, so point the container at the
+# path it sees. Only written when the file is actually there, so the NCP
+# profile leaves the variable unset and the k8s transport stays off.
+if [[ -f "$APPDIR/data/nkp-kubeconfig" ]]; then
+    echo "NKP_KUBECONFIG=/data/nkp-kubeconfig" | sudo tee -a "$APPDIR/.env" >/dev/null
+fi
 # FRONTEND_HOST is computed in bash above, so append it outside the quoted heredoc.
 echo "GAME_FRONTEND_HOST=${FRONTEND_HOST}" | sudo tee -a "$APPDIR/.env" >/dev/null
 sudo chmod 600 "$APPDIR/.env"
@@ -75,3 +84,6 @@ sleep 5
 sudo docker compose ps
 echo "--- boot log ---"
 sudo docker compose logs --tail 30
+
+# Captured by Calm for the application links after the selected VM is ready.
+echo "GAME_VM_ADDRESS=@@{VM.address}@@"

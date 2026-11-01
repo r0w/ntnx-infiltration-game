@@ -1,0 +1,13 @@
+{
+  "id": "nkp-011",
+  "name": "fundamentals-recap",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.recap.fundamentals"
+  ],
+  "needs": [
+    "UserNum"
+  ]
+}

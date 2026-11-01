@@ -73,13 +73,16 @@ describe('Telemetry', () => {
       expect(outboxCount(db)).toBe(0);
       expect(received.length).toBe(1);
       const payload = received[0] as {
-        deployment: { id: string; ip: string; packId: string; mode: string };
+        deployment: { id: string; ip: string; packId: string; packTitle: string; mode: string };
         events: Array<{ type: string; stageId?: string; ts: number }>;
       };
       expect(payload.deployment.id).toBe(t.deploymentId);
       expect(payload.deployment.ip).toBe('10.38.66.43');
       expect(payload.deployment.id).toStartWith('10.38.66.43-');
       expect(payload.deployment.packId).toBe('test-pack');
+      // Central labels its per-game view with this; without it two packs are
+      // one indistinguishable pile of numbers.
+      expect(payload.deployment.packTitle).toBe('test-pack');
       expect(payload.deployment.mode).toBe('test');
       expect(payload.events.map((e) => e.type)).toEqual(['session_started', 'stage_passed']);
       expect(payload.events[1]!.stageId).toBe('eg-006');
@@ -108,6 +111,20 @@ describe('Telemetry', () => {
     t.record({ type: 'session_started', sessionId: 's1' });
     await t.flush(); // must not throw
     expect(outboxCount(db)).toBe(1);
+  });
+
+  // In a container localIp() is the docker bridge, identical on every host, so
+  // two deployments would merge into one record at Central.
+  test('the deployment id uses the VM address when the deploy passed one', () => {
+    const db = openDatabase({ path: ':memory:' });
+    const t = new Telemetry({ ...baseDeps, db, url: 'http://127.0.0.1:9', hostIp: '10.54.93.123' });
+    expect(t.deploymentId.startsWith('10.54.93.123-')).toBe(true);
+  });
+
+  test('a blank host address falls back to what the process can see', () => {
+    const db = openDatabase({ path: ':memory:' });
+    const t = new Telemetry({ ...baseDeps, db, url: 'http://127.0.0.1:9', hostIp: '  ' });
+    expect(t.deploymentId).toMatch(/^[^-]+-\d{4}-\d{2}-\d{2}$/);
   });
 
   test('telemetry initialization failure disables statistics without throwing', () => {

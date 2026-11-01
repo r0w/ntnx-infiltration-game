@@ -20,6 +20,13 @@ export interface LocaleBundle {
   catalogs: Record<Locale, LocaleCatalog>;
 }
 
+/**
+ * Something a cluster can offer that a stage may require. The names below are
+ * what the Nutanix probe reports and what the infiltration game's stages ask
+ * for; the trailing `string & {}` keeps the union open, because a game on
+ * another product will probe for other things and must not have to widen a
+ * type in the engine to say so. Editors still complete the known ones.
+ */
 export type CapabilityFlag =
   | 'NCM'
   | 'IO'
@@ -34,7 +41,9 @@ export type CapabilityFlag =
   // Planner cluster). When unwired, both stages auto-skip via the
   // capability gate instead of leaving the player with a broken
   // prompt (empty `{OldPCPassword}` in the displayed creds).
-  | 'PlannerCluster';
+  | 'PlannerCluster'
+  // eslint-disable-next-line @typescript-eslint/ban-types -- keeps the union open
+  | (string & {});
 
 /**
  * Cluster profile drives `impact: 'hpoc-only'` gating.
@@ -130,7 +139,14 @@ export interface StageDefinition {
    * runtime may auto-rehydrate the producer (see StageRunner.rehydrate).
    */
   needs?: string[];
-  /** Stages that create resources required by this stage, even when resolved by name. */
+  /**
+   * Stages that must run for this one to be playable, named directly rather
+   * than through the variables they capture. `needs` models data; this models
+   * *state on the cluster*. The bootcamp's block-storage lab does not consume
+   * a variable from create-project, it consumes the namespace that stage
+   * creates, so turning create-project off silently breaks it. Naming the
+   * prerequisite lets the Pack tab cascade the disable instead.
+   */
   dependsOn?: string[];
   /**
    * Session variables the stage destroys on completion. Fires AFTER the stage's
@@ -268,8 +284,208 @@ export interface NutanixClient {
  */
 export type NutanixSdkSurface = unknown;
 
+/**
+ * Read-only Kubernetes transport for pack checks that validate cluster state
+ * (the NKP pack). Deliberately tiny and read-only: checks only `list` resources
+ * and assert fields. Mirrors {@link NutanixClient} in shape (a `mode` + a read
+ * method backed by fixtures in mock, a real API in live) so the engine stays
+ * transport-agnostic — it names the interface, not any k8s client library.
+ * Optional on {@link CheckContext}: the NCP pack never touches it.
+ */
+export interface KubeResourceRef {
+  /** API group; omit/empty for the core group (`/api/v1`). e.g. `apps`, `source.toolkit.fluxcd.io`. */
+  group?: string;
+  /** API version, e.g. `v1`, `v1beta1`. */
+  version: string;
+  /** Resource plural, e.g. `deployments`, `services`, `gitrepositories`. */
+  plural: string;
+  /** Namespace to scope to; omit for cluster-scoped or all-namespaces. */
+  namespace?: string;
+  /**
+   * Which cluster to read, by NKP name (`workload01`, `workload02`). Omit for
+   * the management cluster. An NKP fleet is several clusters and the same
+   * lab spans them: the learner's Project and GitOps source are management
+   * objects, while the namespace they federate into lives on a workload
+   * cluster. A check names the cluster it means; the transport routes.
+   */
+  cluster?: string;
+  /**
+   * A single object's name. Optional for `list` (which reads the collection),
+   * required by the write verbs, which address one object.
+   */
+  name?: string;
+}
+
+export interface KubeClient {
+  readonly mode: 'mock' | 'live';
+  /** List resources of a kind, returning the `.items` array (empty if none). */
+  list(ref: KubeResourceRef): Promise<Array<Record<string, unknown>>>;
+  /**
+   * Create or update one object from a full manifest (server-side apply).
+   *
+   * Idempotent by construction, which is what an act needs: auto-play may run
+   * a stage twice, and a learner may have done half of it by hand already.
+   * Absent on a read-only client — a check must never mutate a cluster, so
+   * `CheckContext.kube` is narrowed to the reading half.
+   */
+  apply?(ref: KubeResourceRef, manifest: Record<string, unknown>): Promise<void>;
+  /** Merge-patch one object, the `kubectl patch -p '{…}'` of the bootcamp. */
+  patch?(ref: KubeResourceRef, patch: Record<string, unknown>): Promise<void>;
+  /** Delete one object. Missing is success: cleanup is idempotent too. */
+  remove?(ref: KubeResourceRef): Promise<void>;
+  /** Cluster names this client can reach, management first. For diagnostics. */
+  readonly clusters: readonly string[];
+}
+
+/**
+ * A transport a pack asks for beyond `ctx.nutanix`, which every pack gets.
+ * Named in `pack.json.transports`; the server builds it, the pack decides
+ * what to ask it. Today only Kubernetes qualifies.
+ */
+export type PackTransport = 'kube';
+
+/** The transports the server built for this pack, by name. */
+export interface PackTransports {
+  /** Prism Central. Always built — every pack gets one, used or not. */
+  nutanix: NutanixClient;
+  kube?: KubeClient;
+}
+
+/**
+ * Ready-made cluster interrogations the server can run on a pack's behalf.
+ *
+ * A pack is loaded as source from `packs/` and the runtime image ships no
+ * `node_modules`, so a pack can only ever *type*-import a workspace package —
+ * the code behind these lives in the server bundle and cannot be reached from
+ * a pack by an import. Handing them over keeps the decision where it belongs
+ * (the pack chooses whether to ask at all, and what to do with the answer)
+ * without pretending a pack can resolve `@ntnx-game/nutanix` at runtime.
+ *
+ * A game on another product simply calls none of them.
+ */
+export interface PackProbes {
+  /** Ask Prism which optional features it offers. */
+  nutanixCapabilities(): Promise<PackCapabilities>;
+  /** Available LCM updates, or `null` while an inventory is rebuilding the list. */
+  lcmAvailableUpdates(): Promise<number | null>;
+}
+
+/** What a pack's boot module is handed. See {@link PackBoot}. */
+export interface PackBootContext {
+  /** `mock` reads the pack's fixtures; `live` reaches a real cluster. */
+  mode: 'mock' | 'live';
+  /** The process environment, so a pack can read its own settings. */
+  env: Record<string, string | undefined>;
+  logger: Logger;
+  transports: PackTransports;
+  probes: PackProbes;
+}
+
+/**
+ * What a pack's capability probe found: which optional features the cluster
+ * offers, so stages that `requires` them are gated rather than left to fail.
+ *
+ * The flags are the pack's own vocabulary — see {@link CapabilityFlag} — and so
+ * is the probing. A game on another product asks that product what it can do.
+ */
+export interface PackCapabilities {
+  flags: CapabilityFlag[];
+  /** True when the cluster answered nothing at all, so boot can say so loudly. */
+  unreachable: boolean;
+  /** One row per question asked, shown in `/admin` so an operator can see
+   *  *why* a stage is gated rather than only that it is. */
+  details: CapabilityProbeDetail[];
+}
+
+/**
+ * One question a capability probe asked and what came back. Deliberately
+ * product-neutral: `method` and `path` describe an HTTP probe because that is
+ * what both games do, but nothing here names Prism.
+ */
+export interface CapabilityProbeDetail {
+  flag: CapabilityFlag;
+  detected: boolean;
+  method: string;
+  path: string;
+  detail: string;
+  durationMs: number;
+  /**
+   * True when the probe failed before getting a response (DNS, TCP, TLS, or
+   * abort/timeout), false when it got an error status back or succeeded. This
+   * is what separates "the cluster is unreachable" from "that feature is not
+   * deployed here" — the second is normal, the first means VPN or endpoint.
+   */
+  transportError: boolean;
+  /** Lowest syscall code (`ENETUNREACH` / `ECONNREFUSED` / …) when known. */
+  transportCode?: string;
+}
+
+/**
+ * One slow-to-read cluster fact, cached in `cluster_config` so checks don't
+ * re-query it on every player attempt.
+ *
+ * `write` is the pack's call because the two facts the infiltration game caches
+ * want different things: a node-serial list is read once and kept, while the
+ * LCM count is re-read at every boot because it moves. Neither ever overwrites
+ * a value an operator typed in `/admin` — that rule is the server's, and it
+ * holds whatever a pack asks for.
+ */
+export interface PackClusterFact {
+  key: string;
+  value: unknown;
+  /** `if-absent` (default) leaves any existing row alone; `refresh` replaces a probed one. */
+  write?: 'if-absent' | 'refresh';
+}
+
+/**
+ * Optional per-pack boot hooks, loaded from `pack.json.boot`.
+ *
+ * The server owns *building* transports and the settings every game shares
+ * (Prism endpoint, credentials, the host it serves from). Everything a
+ * particular game wants to know at boot belongs here instead, so a third game
+ * is a new directory rather than another branch in `packages/server`.
+ */
+export interface PackBoot {
+  /**
+   * Variables seeded into every session on top of the server's own, e.g. an
+   * image URL read from env, or an address probed off the cluster. Runs once
+   * at boot; failures must be handled here, not thrown — a game that cannot
+   * resolve one address should still start.
+   */
+  variables?(
+    ctx: PackBootContext,
+  ): Promise<Record<string, unknown>> | Record<string, unknown>;
+  /**
+   * Ask the cluster which optional features it offers, for the stages that
+   * `requires` them. A pack that gates nothing omits this and the server asks
+   * nothing — which is not merely an optimisation: these queries carry no
+   * deadline, so one slow answer would hold a game short of listening for the
+   * facts it never reads.
+   */
+  capabilities?(ctx: PackBootContext): Promise<PackCapabilities> | PackCapabilities;
+  /**
+   * Slow facts worth caching once instead of on every check. Return only what
+   * was actually read: an omitted key leaves whatever is already stored, which
+   * is how a mid-flight reading (an LCM inventory in progress) declines to pin
+   * a wrong answer for the whole event.
+   */
+  clusterFacts?(ctx: PackBootContext): Promise<PackClusterFact[]> | PackClusterFact[];
+  /**
+   * Which variables identify the player named in an operator endpoint's path
+   * segment (`/api/act/cleanup-all/user01`). The server always seeds
+   * `Trigram` with the raw segment; a pack that calls its players something
+   * else, or that normalises the value, says so here. Absent = trigram only.
+   */
+  identityFromPath?(segment: string): Record<string, unknown>;
+}
+
 export interface CheckContext {
   nutanix: NutanixClient;
+  /**
+   * Read-only Kubernetes transport, present only for packs that declare they
+   * need it (the NKP pack). `undefined` for the NCP pack. See {@link KubeClient}.
+   */
+  kube?: KubeClient;
   vars: Variables;
   cache: ClusterCache;
   args: Record<string, unknown>;
@@ -295,6 +511,13 @@ export interface CheckContext {
    * without requiring a real probe.
    */
   clusterConfig?: ClusterConfig;
+}
+
+/** Services for a pack's auto-fill resolver; checks keep their read-only context. */
+export interface AutoFillContext extends CheckContext {
+  probes: PackProbes;
+  /** Cache a settled probe result, preserving any operator override, and return the stored value. */
+  storeClusterFact(fact: PackClusterFact): Promise<unknown>;
 }
 
 export interface ClusterConfig {
@@ -415,6 +638,12 @@ export type ActionFunction = (ctx: ActionContext) => Promise<void>;
  */
 export interface ActContext {
   nutanix: NutanixClient;
+  /**
+   * Kubernetes transport, present only for packs that need it (NKP). Unlike
+   * the check context's, this one carries the write verbs: an act's whole job
+   * is to perform the cluster-side step the learner would have done by hand.
+   */
+  kube?: KubeClient;
   vars: Variables;
   cache: ClusterCache;
   session: Pick<GameSession, 'id' | 'trigram' | 'locale' | 'clusterProfile'>;

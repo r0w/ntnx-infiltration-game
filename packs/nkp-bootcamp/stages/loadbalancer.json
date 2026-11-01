@@ -1,0 +1,21 @@
+{
+  "id": "nkp-024",
+  "name": "loadbalancer",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.lb.intro",
+    "nkp.lb.cmd",
+    "nkp.lb.prompt"
+  ],
+  "check": {
+    "fn": "CheckLoadBalancer"
+  },
+  "needs": [
+    "UserNum"
+  ],
+  "dependsOn": [
+    "expose-service"
+  ]
+}

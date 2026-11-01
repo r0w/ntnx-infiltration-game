@@ -1,0 +1,13 @@
+{
+  "id": "nkp-001",
+  "name": "quick-tour",
+  "active": true,
+  "prompt": "system",
+  "defaultColor": "cyan",
+  "messages": [
+    "nkp.tour.demo"
+  ],
+  "needs": [
+    "UserNum"
+  ]
+}

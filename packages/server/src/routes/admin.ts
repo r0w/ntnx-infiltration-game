@@ -1,13 +1,14 @@
 import { Hono } from 'hono';
 import type { Database } from 'bun:sqlite';
-import type { CapabilityFlag, NutanixClient, StageDefinition } from '@ntnx-game/engine';
+import type { CapabilityFlag, KubeClient, NutanixClient, StageDefinition } from '@ntnx-game/engine';
 import { readLcmUpdates } from '@ntnx-game/engine';
-import { probeCapabilities, type CapabilityProbeDetail } from '@ntnx-game/nutanix';
+import type { CapabilityProbeDetail } from '@ntnx-game/nutanix';
 import { HttpError, type SessionService } from '../session-service';
 import { AttemptQueries, SessionQueries, ScoreboardPeerQueries, type AdminSessionRow, type AttemptRow, type ScoreboardPeerRow } from '../db/queries';
 import type { LoadedPack } from '../pack-loader';
 import { analyzeDeps, cascadeDisable, type BrokenStage } from '../dep-analysis';
-import { probeClusterConfig } from '../cluster-config-probe';
+import { storeClusterFacts } from '../cluster-facts';
+import { makePackProbes } from '../pack-probes';
 import { readEnabledWipLocales, writeEnabledWipLocales } from '../effective-locales';
 import { resolveHelpEnabled } from '../help';
 import {
@@ -38,6 +39,8 @@ import { SCOREBOARD_DISPLAY_KEY } from '../scoreboard-display';
 export interface AdminRoutesDeps {
   db: Database;
   pack: LoadedPack;
+  /** Handed to the pack's cluster-fact refresh, for a pack that reads k8s. */
+  kube?: KubeClient;
   /** Read from config; default `nutanix/4u`. See config.ts for rationale. */
   adminPassword: string;
   /**
@@ -345,6 +348,15 @@ export interface AdminLunchStatus {
  * sessions" guard on a trusted LAN.
  */
 export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
+  /** The same context boot hands the pack, for the operator-triggered re-runs. */
+  const bootContext = () => ({
+    mode: deps.nutanix.mode,
+    env: process.env,
+    logger: consoleLogger,
+    transports: { nutanix: deps.nutanix, kube: deps.kube },
+    probes: makePackProbes(deps.nutanix, consoleLogger),
+  });
+
   const router = new Hono();
   // Local HttpError → JSON bridge so the sub-router behaves correctly in
   // isolation (used by tests). The top-level app.onError also catches these
@@ -392,9 +404,16 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     await next();
   });
 
+  // Which captured variable names a player, and what to call it on screen.
+  // The rows keep the field name `trigram` on the wire — renaming it would
+  // ripple through the scoreboard and the session table for no gain — but
+  // what fills it, and the word above it, come from the pack.
+  const identityVar = () => deps.pack.manifest.identity?.variable ?? 'Trigram';
+  const identityLabel = () => deps.pack.manifest.identity?.label ?? 'trigram';
+
   router.get('/users', (c) => {
     const effective = deps.service.listEffectiveStages();
-    const rows = sessions.listAdmin(deps.pack.manifest.id);
+    const rows = sessions.listAdmin(deps.pack.manifest.id, identityVar());
     // Compute once per request — same value for every row on this snapshot.
     const effectiveTotalStages = deps.service.effectivePlayableCount(
       deps.capabilities ?? [],
@@ -437,6 +456,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     return c.json({
       packId: deps.pack.manifest.id,
       packName: deps.pack.manifest.name,
+      identityLabel: identityLabel(),
       totalStages,
       entries,
     });
@@ -447,7 +467,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   router.get('/attempts', (c) => {
     const raw = Number(c.req.query('limit') ?? 200);
     const limit = Number.isFinite(raw) ? Math.min(Math.max(Math.trunc(raw), 1), 1000) : 200;
-    const entries: AttemptRow[] = attempts.listRecent(deps.pack.manifest.id, limit);
+    const entries: AttemptRow[] = attempts.listRecent(deps.pack.manifest.id, limit, identityVar());
     return c.json({ entries });
   });
 
@@ -505,7 +525,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   // check uses the effective adminGate value.
   router.get('/gates', (c) => {
     const unlocked = new Set(deps.service.listUnlockedGates());
-    const allSessions = sessions.listAdmin(deps.pack.manifest.id);
+    const allSessions = sessions.listAdmin(deps.pack.manifest.id, identityVar());
     const active = allSessions.filter((s) => s.finishedAt === null);
     const totalActive = active.length;
     const unlockedAtByName = new Map(
@@ -578,7 +598,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     const overlay = new Map(
       deps.service.packOverlay.list(deps.pack.manifest.id).map((r) => [r.stageName, r]),
     );
-    const analysis = analyzeDeps({ stages: effective });
+    const analysis = analyzeDeps({ stages: effective, envSeeded: deps.service.seededVariableNames });
     const brokenByName = new Map(analysis.broken.map((b) => [b.stageName, b]));
     const baseByName = new Map(baseStages.map((s) => [s.name, s]));
 
@@ -708,7 +728,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   router.get('/lunch', (c) => {
     const info = deps.service.globalPauseInfo();
     const active = sessions
-      .listAdmin(deps.pack.manifest.id)
+      .listAdmin(deps.pack.manifest.id, identityVar())
       .filter((s) => s.finishedAt === null);
     const status: AdminLunchStatus = {
       paused: info !== null,
@@ -763,7 +783,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     const stage = deps.pack.stages.find((s) => s.name === stageName);
     if (!stage) throw new HttpError(404, 'stage not found');
     const effective = deps.service.listEffectiveStages();
-    const r = cascadeDisable(effective, new Set([stageName]));
+    const r = cascadeDisable(effective, new Set([stageName]), undefined, deps.service.seededVariableNames);
     const preview: AdminPackTogglePreview = { requested: stageName, cascade: r.cascade };
     return c.json(preview);
   });
@@ -829,7 +849,10 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       missingStages: plan.missingStages,
       newStages: plan.newStages,
       clearedStages: [...before].filter((n) => !appliedSet.has(n)).sort(),
-      brokenStages: analyzeDeps({ stages: deps.service.listEffectiveStages() })
+      brokenStages: analyzeDeps({
+        stages: deps.service.listEffectiveStages(),
+        envSeeded: deps.service.seededVariableNames,
+      })
         .broken.map((b) => b.stageName)
         .sort(),
     };
@@ -933,13 +956,16 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     if (deps.nutanix.mode !== 'live') {
       throw new HttpError(400, `cluster-config refresh disabled in ${deps.nutanix.mode} mode`);
     }
-    // Force-refresh: drop existing rows so the probe re-populates from
-    // the cluster (the probe's setIfAbsent semantics protect operator
-    // edits, but here the operator explicitly asked to re-fetch).
-    deps.service.clusterConfig.delete('discoverable_node_serials');
-    deps.service.clusterConfig.delete('lcm_available_updates');
-    await probeClusterConfig({
-      nutanix: deps.nutanix,
+    if (!deps.pack.boot.clusterFacts) {
+      throw new HttpError(400, 'this game caches no cluster facts');
+    }
+    // Force-refresh: drop the rows the pack is about to re-read, so its
+    // `if-absent` facts re-populate too. The operator asked for it explicitly,
+    // which is the one case that outranks their own stored value.
+    const facts = await deps.pack.boot.clusterFacts(bootContext());
+    for (const f of facts) deps.service.clusterConfig.delete(f.key);
+    await storeClusterFacts({
+      facts,
       cfg: deps.service.clusterConfig,
       logger: consoleLogger,
     });
@@ -1476,10 +1502,12 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   // MultiNode / ApprovalPolicy).
   router.post('/capabilities/refresh', async (c) => {
     const before = new Set(deps.capabilities);
-    const probe = await probeCapabilities({
-      nutanix: deps.nutanix,
-      logger: consoleLogger,
-    });
+    if (!deps.pack.boot.capabilities) {
+      throw new HttpError(400, 'this game gates no stage on a cluster capability');
+    }
+    // Through the pack, like boot does: the operator re-asks the same questions
+    // this game asked at start-up, not a fixed Prism list the server owns.
+    const probe = await deps.pack.boot.capabilities(bootContext());
     // Mutate in place so the array reference shared by /pack + session
     // route immediately sees the new contents — no need to thread a
     // setter through every consumer.

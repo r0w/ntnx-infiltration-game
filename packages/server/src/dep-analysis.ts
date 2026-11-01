@@ -1,11 +1,17 @@
 import type { StageDefinition } from '@ntnx-game/engine';
 
 /**
- * Variables seeded from env via SessionService.initialVariables. They count
- * as always-available producers — disabling a stage that depends only on
- * env-seeded values doesn't break anything downstream.
+ * Variables the server seeds before a stage ever runs. They count as
+ * always-available producers — disabling a stage that depends only on seeded
+ * values doesn't break anything downstream.
+ *
+ * The fallback below is what the server itself contributes plus the two the
+ * infiltration game has always relied on; callers that know the running pack's
+ * real seeded set (the boot module's variables are a pack's own) pass it in,
+ * because a second game seeds different names and a hardcoded list would
+ * report its stages broken.
  */
-const ENV_SEEDED = new Set(['PC', 'PCUser', 'PCPassword', 'Vlanid', 'ImageURL', 'SecondaryNetwork']);
+const DEFAULT_ENV_SEEDED = new Set(['PC', 'PCUser', 'PCPassword', 'Vlanid', 'ImageURL', 'SecondaryNetwork']);
 
 export interface DepAnalysisInput {
   /** All stages in the pack (effective overlay applied — `active`/`adminGate`
@@ -25,6 +31,11 @@ export interface DepAnalysisInput {
    * needing the vars they capture should be flagged broken).
    */
   unreachableNames?: ReadonlySet<string>;
+  /**
+   * Variable names already seeded when the run starts (server config + the
+   * pack's boot module). Defaults to the infiltration game's historical set.
+   */
+  envSeeded?: ReadonlySet<string>;
 }
 
 export interface BrokenStage {
@@ -77,6 +88,7 @@ export function analyzeDeps(input: DepAnalysisInput): DepAnalysisResult {
   }
 
   const broken: BrokenStage[] = [];
+  const seeded = input.envSeeded ?? DEFAULT_ENV_SEEDED;
   const unavailable = new Set(off);
   const names = new Set(input.stages.map((s) => s.name));
   // Broken stages cannot supply resources or variables to later stages.
@@ -92,7 +104,7 @@ export function analyzeDeps(input: DepAnalysisInput): DepAnalysisResult {
     for (const s of input.stages) {
       if (unavailable.has(s.name)) continue;
       const missingVars = (s.needs ?? []).filter(
-        (v) => !ENV_SEEDED.has(v) && !availableVars.has(v),
+        (v) => !seeded.has(v) && !availableVars.has(v),
       );
       const missingStages = (s.dependsOn ?? []).filter(
         (name) => !names.has(name) || unavailable.has(name),
@@ -126,6 +138,7 @@ export function cascadeDisable(
   stages: readonly StageDefinition[],
   initialDisabled: ReadonlySet<string>,
   unreachableNames?: ReadonlySet<string>,
+  envSeeded?: ReadonlySet<string>,
 ): { disabled: Set<string>; cascade: BrokenStage[] } {
   const disabled = new Set(initialDisabled);
   const cascade: BrokenStage[] = [];
@@ -133,7 +146,7 @@ export function cascadeDisable(
   let prevSize = -1;
   while (disabled.size !== prevSize) {
     prevSize = disabled.size;
-    const r = analyzeDeps({ stages, disabledNames: disabled, unreachableNames });
+    const r = analyzeDeps({ stages, disabledNames: disabled, unreachableNames, envSeeded });
     for (const b of r.broken) {
       disabled.add(b.stageName);
       if (!cascadeSeen.has(b.stageName) && !initialDisabled.has(b.stageName)) {

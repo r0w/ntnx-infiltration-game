@@ -65,7 +65,8 @@ from calm.dsl.builtins.models.runbook import branch  # noqa
 
 # AD endpoint — created by runbook_prerequisites.json. Verified to
 # exist on PC at step 7.
-AD = CalmEndpoint.use_existing("AD")
+DEPLOYMENT_ONLY = os.environ.get("NIG_DEPLOYMENT_ONLY") == "1"
+AD = None if DEPLOYMENT_ONLY else CalmEndpoint.use_existing("AD")
 
 
 # ── Secrets ────────────────────────────────────────────────────────────
@@ -88,13 +89,13 @@ BP_CRED_NUTANIX = basic_cred(
 )
 
 
-def ssh_script(filename):
+def ssh_script(filename, substrate="VM"):
     """Check the effective login before install or day-2 commands run."""
     scripts = os.path.join(os.path.dirname(__file__), "scripts")
     with open(os.path.join(scripts, "check_ssh_user.sh")) as f:
         guard = f.read()
     with open(os.path.join(scripts, filename)) as f:
-        return guard + "\n" + f.read()
+        return (guard + "\n" + f.read()).replace("@@{VM.address}@@", "@@{" + substrate + ".address}@@")
 
 
 # ── Image package ──────────────────────────────────────────────────────
@@ -118,7 +119,9 @@ Ubuntu2204 = vm_disk_package(
 # ── Service ────────────────────────────────────────────────────────────
 
 class Game(Service):
-    pass
+    GAME_VM_ADDRESS = CalmVariable.Simple(
+        "", is_mandatory=False, runtime=False, is_hidden=True,
+    )
 
 
 # ── Substrate ──────────────────────────────────────────────────────────
@@ -163,6 +166,43 @@ class VM(Substrate):
         credential=ref(BP_CRED_NUTANIX),
     )
 
+
+    @action
+    def __pre_create__():
+        CalmTask.Exec.escript.py3(
+            name="Validate VM SSH user",
+            filename=os.path.join("scripts", "validate_ssh_user.py"),
+        )
+
+
+class NkpGameVM(AhvVm):
+    name = "nkp-bootcamp-@@{calm_time}@@"
+    resources = GameVMResources
+
+
+class NkpVM(Substrate):
+    """The NKP profile's own substrate.
+
+    Identical to `VM` but for the VM name, which says which game the VM runs.
+    A substrate per deployment is the conventional Calm shape; both deployments
+    pointing at one substrate also compiles and launches, it just makes the two
+    games indistinguishable in Prism's VM list.
+    """
+    os_type = "Linux"
+    provider_type = "AHV_VM"
+    provider_spec = NkpGameVM
+    provider_spec_editables = read_spec(
+        os.path.join("specs", "VM_create_spec_editables.yaml")
+    )
+    readiness_probe = readiness_probe(
+        connection_type="SSH",
+        disabled=False,
+        retries="5",
+        connection_port=22,
+        address="@@{platform.status.resources.nic_list[0].ip_endpoint_list[0].ip}@@",
+        delay_secs="60",
+        credential=ref(BP_CRED_NUTANIX),
+    )
 
     @action
     def __pre_create__():
@@ -386,8 +426,9 @@ class GameContent(Package):
                 # done" signal: once this returns SUCCESS, the BP app
                 # state flips to `running` and the operator hands out
                 # http://<vm>:3000/ to players.
-                CalmTask.Exec.ssh(
+                CalmTask.SetVariable.ssh(
                     name="Run game container",
+                    variables=["GAME_VM_ADDRESS"],
                     script=ssh_script("run_container.sh"),
                     cred=ref(BP_CRED_NUTANIX),
                     target=ref(Game),
@@ -420,6 +461,22 @@ class GameContent(Package):
                 )
 
 
+    # Calm parses action bodies as AST; select the action at class definition
+    # time so omitted cluster tasks cannot leak into the compiled runbook.
+    if DEPLOYMENT_ONLY:
+        @action
+        def __install__(type="system"):
+            CalmTask.Exec.ssh(
+                name="Install Docker", script=ssh_script("install_docker.sh"),
+                cred=ref(BP_CRED_NUTANIX), target=ref(Game),
+            )
+            CalmTask.SetVariable.ssh(
+                name="Run game container",
+                variables=["GAME_VM_ADDRESS"], script=ssh_script("run_container.sh"),
+                cred=ref(BP_CRED_NUTANIX), target=ref(Game),
+            )
+
+
 # ── Deployment ─────────────────────────────────────────────────────────
 
 class GameDeployment(Deployment):
@@ -431,9 +488,61 @@ class GameDeployment(Deployment):
     substrate = ref(VM)
 
 
+# ── NKP package + deployment ───────────────────────────────────────────
+# The NKP world is already built: the bootcamp's own staging automation
+# creates the management cluster, workload01/02, the storage classes and the
+# MetalLB pools. So this install has none of the NCP world-building (no node
+# shrink, no production VMs, no AD, no prereq blueprints) — it stands up the
+# same VM and container, plus the one thing the NKP pack needs that the NCP
+# pack does not: a kubeconfig.
+#
+# Calm binds __install__ to a Package, not a Profile, so a second profile with
+# a different install means a second package and deployment. They share the
+# substrate: only one profile is ever launched.
+
+class NkpContent(Package):
+    name = "NKP Game Content"
+    services = [ref(Game)]
+
+    @action
+    def __install__(type="system"):
+        CalmTask.Exec.ssh(
+            name="Install Docker",
+            script=ssh_script("install_docker.sh", substrate="NkpVM"),
+            cred=ref(BP_CRED_NUTANIX),
+            target=ref(Game),
+        )
+        # Before the container, so `Run game container` finds the file and
+        # writes NKP_KUBECONFIG into .env. Fails the deploy if the fetch does
+        # not yield a usable kubeconfig: a game whose every check errors is
+        # worse than a deploy that stops and says why.
+        CalmTask.Exec.ssh(
+            name="Fetch NKP kubeconfig",
+            script=ssh_script("fetch_kubeconfig.sh", substrate="NkpVM"),
+            cred=ref(BP_CRED_NUTANIX),
+            target=ref(Game),
+        )
+        CalmTask.SetVariable.ssh(
+            name="Run game container",
+            variables=["GAME_VM_ADDRESS"],
+            script=ssh_script("run_container.sh", substrate="NkpVM"),
+            cred=ref(BP_CRED_NUTANIX),
+            target=ref(Game),
+        )
+
+
+class NkpDeployment(Deployment):
+    name = "NkpDeployment"
+    min_replicas = "1"
+    max_replicas = "1"
+    default_replicas = "1"
+    packages = [ref(NkpContent)]
+    substrate = ref(NkpVM)
+
+
 # ── Profile — runtime + day-2 actions ─────────────────────────────────
 
-class DefaultProfile(Profile):
+class NCP(Profile):
     deployments = [GameDeployment]
 
     # Cycle fix: install-state vars on Profile (NOT Service). Set by
@@ -504,9 +613,10 @@ class DefaultProfile(Profile):
         default="live", is_mandatory=True, runtime=True,
     )
     CLUSTER_PROFILE = CalmVariable.WithOptions(
-        ["hpoc", "other"], label="Cluster profile",
-        description="hpoc = remove 1 node if applicable; enable policy engine",
-        default="hpoc", is_mandatory=True, runtime=True,
+        ["other"] if DEPLOYMENT_ONLY else ["hpoc", "other"], label="Cluster profile",
+        description=("Existing shared cluster; game prerequisites must already be present"
+                     if DEPLOYMENT_ONLY else "hpoc = remove 1 node if applicable; enable policy engine"),
+        default="other" if DEPLOYMENT_ONLY else "hpoc", is_mandatory=True, runtime=True,
     )
     IMAGE_TAG = CalmVariable.Simple(
         "latest", label="Image tag",
@@ -558,6 +668,15 @@ class DefaultProfile(Profile):
     GAME_FRONTEND_HOST = CalmVariable.Simple(
         "", is_mandatory=False, runtime=False, is_hidden=True,
     )
+    # run_container.sh is shared with the NKP profile, so both variables it
+    # reads must exist here too. This profile is the NCP game and never talks
+    # to Kubernetes, so the dashboard URL stays blank.
+    GAME_PACK = CalmVariable.Simple(
+        "ntnx-infiltration", is_mandatory=False, runtime=False, is_hidden=True,
+    )
+    NKP_DASHBOARD_URL = CalmVariable.Simple(
+        "", is_mandatory=False, runtime=False, is_hidden=True,
+    )
     # Anonymous usage stats endpoint (NIG Central). Hidden + non-runtime: set
     # in code here, not on the operator's launch screen. central.ntnx.ch is
     # only the current default, not a permanent home — to move it, edit this
@@ -582,14 +701,15 @@ class DefaultProfile(Profile):
             target=ref(Game),
         )
 
-    @action
-    def VerifyState(name="Verify State"):
-        """Full convergence check: PC reachable, hosts NORMAL, free chassis slot."""
-        CalmTask.Exec.escript.py3(
-            name="Verify final state",
-            filename=os.path.join("scripts", "verify_state.py"),
-            target=ref(Game),
-        )
+    if not DEPLOYMENT_ONLY:
+        @action
+        def VerifyState(name="Verify State"):
+            """Full convergence check: PC reachable, hosts NORMAL, free chassis slot."""
+            CalmTask.Exec.escript.py3(
+                name="Verify final state",
+                filename=os.path.join("scripts", "verify_state.py"),
+                target=ref(Game),
+            )
 
     @action
     def SwitchMode(name="Switch Mode"):
@@ -607,15 +727,176 @@ class DefaultProfile(Profile):
         )
 
 
+class NKPFundamentals(Profile):
+    """The NKP Fundamentals bootcamp, played against a pre-staged NKP fleet.
+
+    Picking this profile on the launch screen swaps both the content pack and
+    the install: the operator is asked for the NKP bootstrap VM instead of the
+    world-building details the NCP game needs.
+    """
+    deployments = [NkpDeployment]
+
+    # ⚠ Same bottom-to-top rendering as the NCP profile: the LAST variable
+    # defined here appears FIRST on the launch screen. Desired order
+    # (top→bottom): Container image repository, Image tag, Run mode,
+    # NKP console URL, NKP bootstrap VM IP, username, password,
+    # Prism Central IP, username, password, Time zone.
+    TIMEZONE = CalmVariable.WithOptions(
+        [
+            "UTC",
+            "Europe/London",
+            "Europe/Paris",
+            "Europe/Zurich",
+            "America/New_York",
+            "America/Chicago",
+            "America/Los_Angeles",
+            "Asia/Tokyo",
+            "Australia/Sydney",
+        ],
+        label="Time zone", default="UTC",
+        is_mandatory=True, runtime=True,
+    )
+    # Prism Central is still probed at boot for the version banner, even though
+    # no NKP check reads it.
+    PC_PASSWORD = CalmVariable.Simple.Secret(
+        Profile_PC_PASSWORD, label="Prism Central password",
+        is_mandatory=True, runtime=True,
+    )
+    PC_USERNAME = CalmVariable.Simple(
+        "admin", label="Prism Central username", is_mandatory=True, runtime=True,
+    )
+    PC_IP = CalmVariable.Simple(
+        "", label="Prism Central IP", is_mandatory=True, runtime=True,
+    )
+    NKP_BOOT_PASSWORD = CalmVariable.Simple.Secret(
+        Profile_PC_PASSWORD, label="NKP bootstrap VM password",
+        description="SSH password for the bootstrap VM; on an HPoC this is the Prism Central password",
+        is_mandatory=True, runtime=True,
+    )
+    NKP_BOOT_USERNAME = CalmVariable.Simple(
+        "nutanix", label="NKP bootstrap VM username",
+        is_mandatory=True, runtime=True,
+    )
+    NKP_BOOT_IP = CalmVariable.Simple(
+        "", label="NKP bootstrap VM IP (optional)",
+        description=(
+            "The nkp-boot VM, whose ~/.kube/config unlocks the whole fleet. "
+            "Leave blank and the install finds the VM named nkp-boot on Prism Central"
+        ),
+        is_mandatory=False, runtime=True,
+    )
+    NKP_DASHBOARD_URL = CalmVariable.Simple(
+        "", label="NKP console URL (optional)",
+        description=(
+            "Shown to players in-game. Leave blank and the game builds it from the "
+            "management ingress address it reads off the fleet at boot"
+        ),
+        is_mandatory=False, runtime=True,
+    )
+    MODE = CalmVariable.WithOptions(
+        ["test", "live"], label="Run mode",
+        default="live", is_mandatory=True, runtime=True,
+    )
+    IMAGE_TAG = CalmVariable.Simple(
+        "nkp", label="Image tag", is_mandatory=True, runtime=True,
+    )
+    IMAGE_REPO = CalmVariable.Simple(
+        "ghcr.io/r0w/ntnx-infiltration-game",
+        label="Container image repository",
+        is_mandatory=True, runtime=True,
+    )
+
+    # Hidden — the pack selector is what makes this profile a different game.
+    GAME_PACK = CalmVariable.Simple(
+        "nkp-bootcamp", is_mandatory=False, runtime=False, is_hidden=True,
+    )
+    # The rest exist because run_container.sh is shared with the NCP profile
+    # and reads them. None apply to the bootcamp.
+    CLUSTER_PROFILE = CalmVariable.Simple(
+        "other", is_mandatory=False, runtime=False, is_hidden=True,
+    )
+    ADMIN_PASSWORD = CalmVariable.Simple(
+        "nutanix/4u", is_mandatory=False, runtime=False, is_hidden=True,
+    )
+    LOG_LEVEL = CalmVariable.WithOptions(
+        ["debug", "info", "warn", "error"], label="Server log level",
+        default="info", is_mandatory=False, runtime=False, is_hidden=True,
+    )
+    GAME_SECONDARY_NETWORK = CalmVariable.Simple(
+        "", is_mandatory=False, runtime=False, is_hidden=True,
+    )
+    GAME_PROD_USERNAME = CalmVariable.Simple(
+        "", is_mandatory=False, runtime=False, is_hidden=True,
+    )
+    GAME_PROD_PASSWORD = CalmVariable.Simple(
+        "", is_mandatory=False, runtime=False, is_hidden=True,
+    )
+    GAME_OLD_PC = CalmVariable.Simple(
+        "", is_mandatory=False, runtime=False, is_hidden=True,
+    )
+    GAME_OLD_PC_USERNAME = CalmVariable.Simple(
+        "", is_mandatory=False, runtime=False, is_hidden=True,
+    )
+    GAME_OLD_PC_PASSWORD = CalmVariable.Simple(
+        "", is_mandatory=False, runtime=False, is_hidden=True,
+    )
+    GAME_EMAIL_REPORT = CalmVariable.Simple(
+        "", is_mandatory=False, runtime=False, is_hidden=True,
+    )
+    GAME_FRONTEND_HOST = CalmVariable.Simple(
+        "", is_mandatory=False, runtime=False, is_hidden=True,
+    )
+    NIG_CENTRAL_URL = CalmVariable.Simple(
+        "https://central.ntnx.ch",
+        is_mandatory=False, runtime=False, is_hidden=True,
+    )
+    NIG_CENTRAL_TOKEN = CalmVariable.Simple(
+        "", is_mandatory=False, runtime=False, is_hidden=True,
+    )
+
+    @action
+    def UpdateGame(name="Update Game"):
+        """docker pull at IMAGE_TAG and restart the container."""
+        CalmTask.Exec.ssh(
+            name="docker pull and replace container",
+            script=ssh_script("update_game.sh", substrate="NkpVM"),
+            cred=ref(BP_CRED_NUTANIX),
+            target=ref(Game),
+        )
+
+    @action
+    def RefreshKubeconfig(name="Refresh Kubeconfig"):
+        """Re-fetch the management kubeconfig and restart the game.
+
+        NKP rotates the client certificate, and a rebuilt fleet issues a new
+        one, so an instance that ran through a rotation needs this rather than
+        a redeploy."""
+        CalmTask.Exec.ssh(
+            name="fetch kubeconfig",
+            script=ssh_script("fetch_kubeconfig.sh", substrate="NkpVM"),
+            cred=ref(BP_CRED_NUTANIX),
+            target=ref(Game),
+        )
+        CalmTask.Exec.ssh(
+            name="restart container",
+            script=ssh_script("update_game.sh", substrate="NkpVM"),
+            cred=ref(BP_CRED_NUTANIX),
+            target=ref(Game),
+        )
+
+
+# The install captures the active substrate address after the VM exists.
+# Referencing inactive substrates in the description is not portable across PC versions.
 class NtnxInfiltrationGame(Blueprint):
     """Nutanix Infiltration Game :
 
- - Game:       http://@@{VM.address}@@:3000/
- - Scoreboard: http://@@{VM.address}@@:3000/scoreboard
- - Admin:      http://@@{VM.address}@@:3000/admin
+ - Game:       http://@@{Game.GAME_VM_ADDRESS}@@:3000/
+ - Scoreboard: http://@@{Game.GAME_VM_ADDRESS}@@:3000/scoreboard
+ - Admin:      http://@@{Game.GAME_VM_ADDRESS}@@:3000/admin
 """
     services = [Game]
-    packages = [Ubuntu2204, GameContent]
-    substrates = [VM]
-    profiles = [DefaultProfile]
+    packages = [Ubuntu2204, GameContent, NkpContent]
+    substrates = [VM, NkpVM]
+    # NCP first, so it is the default selection on the launch screen.
+    profiles = [NCP, NKPFundamentals]
     credentials = [BP_CRED_NUTANIX]

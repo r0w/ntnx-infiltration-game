@@ -2,12 +2,15 @@ import { readFile, readdir } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import type {
   ActFunction,
+  AutoFillContext,
   ActionFunction,
   CheckFunction,
   CleanupFunction,
   Locale,
   LocaleBundle,
   LocaleCatalog,
+  PackBoot,
+  PackTransport,
   StageDefinition,
 } from '@ntnx-game/engine';
 import {
@@ -17,11 +20,91 @@ import {
   CleanupRegistry,
 } from '@ntnx-game/engine';
 
+/**
+ * One row in a pack's reading menu. `title` is a locale key, resolved per
+ * session. `stage` names a stage in `stages` — omit it for a section heading
+ * that only groups the rows under it, which the NKP bootcamp's own sidebar
+ * needs: "Expose app on production" is a heading three levels down, not a page.
+ * Rows nest as deep as the source material does.
+ */
+export interface PackNavItem {
+  stage?: string;
+  title: string;
+  items?: PackNavItem[];
+}
+
+export interface PackNavChapter {
+  id: string;
+  title: string;
+  /** A chapter the run reaches but nobody has to finish (the trailing labs). */
+  optional?: boolean;
+  items: PackNavItem[];
+}
+
 export interface PackManifest {
   id: string;
   name: string;
+  /**
+   * What players see in the browser tab, the header, and the login card.
+   * Distinct from `name`, which is the operator-facing label in `/admin`.
+   * A second pack is a different game and must not wear the first one's
+   * name; falls back to the infiltration game's title when absent so the
+   * original pack renders exactly as it always has.
+   */
+  title?: string;
   version: string;
   description?: string;
+  /**
+   * Park on a "press Enter" after every screenshot. See
+   * {@link StageRunnerOptions.pauseAfterImages}. Off by default.
+   */
+  pauseAfterImages?: boolean;
+  /**
+   * Print each screenshot's description under it in the stream.
+   *
+   * The description already exists as the image's alt text; this decides
+   * whether it is only read by assistive tech and the lightbox, or shown to
+   * everyone. A pack that teaches through screenshots wants the caption
+   * visible; one that uses them as atmosphere does not. Off by default.
+   */
+  imageCaptions?: boolean;
+  /**
+   * A reading menu down the side of the terminal: chapters, the stages under
+   * them, and the order they were taught in. Present only for packs whose
+   * source material had a table of contents worth keeping — the infiltration
+   * game is a story you play forward, and has none.
+   *
+   * The menu is a map, not a controller. It never unlocks anything: lock state
+   * is read from where the player has actually got to, and the order here must
+   * match `stages` for that reading to hold.
+   */
+  nav?: PackNavChapter[];
+  /**
+   * Display names for the speaker labels stages carry in `prompt`, e.g.
+   * `{ "tank": "instructor" }`. See {@link StageRunnerOptions.speakers}.
+   * Absent, or a label the map does not mention, renders as written.
+   */
+  speakers?: Record<string, string>;
+  /**
+   * Which captured variable identifies a player, and what to call it in
+   * `/admin`. The infiltration game asks for a trigram; the bootcamp asks for
+   * a user number, and before this the admin Users tab read `Trigram` only —
+   * so every bootcamp session showed up nameless and was hidden by the
+   * "identified sessions" filter. Defaults to the infiltration game's own.
+   */
+  identity?: { variable: string; label: string };
+  /**
+   * Transports this pack needs beyond `ctx.nutanix`, which it always gets.
+   * The server builds what is named here and hands it to the checks, the acts
+   * and the boot module; a pack that names nothing costs nothing.
+   */
+  transports?: PackTransport[];
+  /**
+   * Path (relative to pack root) to the module exporting {@link PackBoot} —
+   * the hooks that let a game read its own settings at boot instead of the
+   * server carrying them. Optional.
+   */
+  boot?: string;
   checks: string;
   actions?: string;
   /**
@@ -30,6 +113,20 @@ export interface PackManifest {
    * act keep requiring manual player action (auto-play skips them).
    */
   acts?: string;
+  /**
+   * Path (relative to pack root) to the module exporting `autoFill` — a map
+   * from variable name to a resolver that reads the answer off the cluster.
+   * Powers the dev/test "fill it for me" button on a stage the player would
+   * otherwise have to type into. Optional: no entry, no auto-fill.
+   */
+  autoFill?: string;
+  /**
+   * Whether this pack ships the SSH/ops console at `/ssh`. It belongs to the
+   * infiltration game, whose stage 19 has the player lock SSH down to one
+   * address; a bootcamp has no use for it and should not serve its endpoints.
+   * Off by default.
+   */
+  sshConsole?: boolean;
   /**
    * Path (relative to pack root) to the module exporting `cleanups` — a map
    * from stage name to {@link CleanupFunction}. Optional: stages without a
@@ -66,8 +163,15 @@ export interface LoadedPack {
   actions: ActionRegistry;
   acts: ActRegistry;
   cleanups: CleanupRegistry;
+  /** The pack's boot hooks, `{}` when it declares none. */
+  boot: PackBoot;
+  /** Variable name → the resolver that reads its answer off the cluster. */
+  autoFill: Partial<Record<string, AutoFillResolver>>;
   bundle: LocaleBundle;
 }
+
+/** Reads one stage's expected answer off the cluster. `null` = cannot tell. */
+export type AutoFillResolver = (ctx: AutoFillContext) => Promise<string | number | null>;
 
 export async function loadPack(packsDir: string, packId: string): Promise<LoadedPack> {
   const dir = resolve(packsDir, packId);
@@ -84,10 +188,47 @@ export async function loadPack(packsDir: string, packId: string): Promise<Loaded
   const cleanups = manifest.cleanups
     ? await loadCleanups(resolve(dir, manifest.cleanups))
     : new CleanupRegistry();
+  const boot = manifest.boot ? await loadBoot(resolve(dir, manifest.boot)) : {};
+  const autoFill = manifest.autoFill ? await loadAutoFill(resolve(dir, manifest.autoFill)) : {};
   const bundle = manifest.locales
     ? await loadLocaleBundle(resolve(dir, manifest.locales), manifest)
     : emptyBundleFromManifest(manifest);
-  return { manifest, dir, stages, checks, actions, acts, cleanups, bundle };
+  return { manifest, dir, stages, checks, actions, acts, cleanups, boot, autoFill, bundle };
+}
+
+/**
+ * Load the pack's boot hooks. Unlike the registries below, a missing module is
+ * fatal: the manifest named it, so failing quietly would start the game with
+ * its variables unseeded and leave the operator reading holes in the prompts.
+ */
+async function loadBoot(modulePath: string): Promise<PackBoot> {
+  const mod = (await import(modulePath)) as Record<string, unknown>;
+  const exported = (mod.boot ?? mod.default ?? mod) as Partial<PackBoot>;
+  const hook = <K extends keyof PackBoot>(name: K): PackBoot[K] =>
+    typeof exported[name] === 'function' ? exported[name] : undefined;
+  return {
+    variables: hook('variables'),
+    capabilities: hook('capabilities'),
+    clusterFacts: hook('clusterFacts'),
+    identityFromPath: hook('identityFromPath'),
+  };
+}
+
+/** Same contract as the registries: a module that exports nothing usable is
+ *  an empty map, because auto-fill is a convenience and never load-bearing. */
+async function loadAutoFill(modulePath: string): Promise<Partial<Record<string, AutoFillResolver>>> {
+  const out: Partial<Record<string, AutoFillResolver>> = {};
+  try {
+    const mod = (await import(modulePath)) as Record<string, unknown>;
+    const exported = (mod.autoFill ?? {}) as Record<string, unknown>;
+    for (const [variable, fn] of Object.entries(exported)) {
+      if (typeof fn === 'function') out[variable] = fn as AutoFillResolver;
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes('Cannot find module')) throw err;
+  }
+  return out;
 }
 
 async function loadStages(dir: string, order: string[]): Promise<StageDefinition[]> {

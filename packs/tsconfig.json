@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "baseUrl": "..",
+    "paths": {
+      "@ntnx-game/engine": ["packages/engine/src/index.ts"],
+      "@ntnx-game/nutanix": ["packages/nutanix/src/index.ts"],
+      "@ntnx-game/kube-transport": ["packages/kube-transport/src/index.ts"],
+      "@ntnx-game/shared": ["packages/shared/src/index.ts"],
+      "@ntnx-game/shared/protocol": ["packages/shared/src/protocol.ts"]
+    }
+  },
+  "include": ["*/checks/**/*.ts", "*/acts/**/*.ts", "*/actions/**/*.ts", "*/boot/**/*.ts"]
+}

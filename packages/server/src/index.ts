@@ -1,6 +1,8 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { createNutanixClient, probeCapabilities } from '@ntnx-game/nutanix';
+import { createNutanixClient } from '@ntnx-game/nutanix';
+import { makePackProbes } from './pack-probes';
+import { createKubeClient, createLiveKubeFleet } from '@ntnx-game/kube-transport';
 import { loadConfig } from './config';
 import { consoleLogger } from './logger';
 import { openDatabase } from './db/database';
@@ -68,7 +70,51 @@ async function main() {
     maxRetries: cfg.pcMaxRetries,
   });
 
-  const probe = await probeCapabilities({ nutanix, logger: consoleLogger });
+  // Transports beyond `ctx.nutanix` are built only when the pack asked for
+  // them in `pack.json.transports`. In mock mode a transport reads the pack's
+  // own fixtures, no cluster. Live, the kubeconfig points at the *management*
+  // cluster; the workload clusters come from the CAPI kubeconfig secrets on
+  // it, so one file makes the whole fleet readable.
+  let kube;
+  if (pack.manifest.transports?.includes('kube')) {
+    if (transportMode === 'mock') {
+      kube = createKubeClient({ mode: 'mock', fixtures: fixturesPath });
+    } else if (cfg.kubeconfigPath) {
+      const { readFileSync } = await import('node:fs');
+      kube = await createLiveKubeFleet(readFileSync(cfg.kubeconfigPath, 'utf8'));
+      consoleLogger.info('kube transport ready (live)', {
+        kubeconfig: cfg.kubeconfigPath,
+        clusters: kube.clusters.join(', '),
+      });
+    } else {
+      consoleLogger.warn('pack asked for a kube transport but no kubeconfig is set', {
+        pack: pack.manifest.id,
+        expected: 'KUBECONFIG_PATH',
+      });
+    }
+  }
+
+  const bootCtx = {
+    mode: transportMode,
+    env: process.env,
+    logger: consoleLogger,
+    transports: { nutanix, kube },
+    probes: makePackProbes(nutanix, consoleLogger),
+  };
+
+  // Which optional features this cluster offers, for the stages that require
+  // them. The pack does the asking, because the questions are its own: a game
+  // on another product probes that product. A pack that gates nothing answers
+  // nothing, and boot skips a round of no-deadline queries it would only throw
+  // away — the difference between a slow start and never listening at all.
+  const probe = pack.boot.capabilities
+    ? await pack.boot.capabilities(bootCtx)
+    : { flags: [], unreachable: false, details: [] };
+  if (!pack.boot.capabilities) {
+    consoleLogger.info('capability probe skipped (pack gates nothing)', {
+      pack: pack.manifest.id,
+    });
+  }
 
   // Loud aggregate diagnostic when the cluster is fully unreachable in
   // a real-PC mode. Boot continues — server keeps running on mock-ish
@@ -83,22 +129,21 @@ async function main() {
     });
   }
 
-  // Snapshot slow-to-query cluster facts (rackable-unit serials, LCM
-  // update count) into SQLite so checks don't hit the live endpoints
-  // on every player attempt. Skipped in mock mode; failures degrade
-  // to "live query at check-time" via the existing fallback paths.
-  // Operator-edited rows are sticky (probe never overwrites them).
-  if (transportMode === 'live' && !probe.unreachable) {
+  // Snapshot the pack's slow-to-read cluster facts into SQLite so checks don't
+  // hit the live endpoints on every player attempt. Failures degrade to "live
+  // query at check-time" via the existing fallback paths, and an operator's
+  // `/admin` edit is never overwritten — see storeClusterFacts.
+  if (transportMode === 'live' && !probe.unreachable && pack.boot.clusterFacts) {
     try {
       const { ClusterConfigQueries } = await import('./db/queries');
-      const { probeClusterConfig } = await import('./cluster-config-probe');
-      await probeClusterConfig({
-        nutanix,
+      const { storeClusterFacts } = await import('./cluster-facts');
+      await storeClusterFacts({
+        facts: await pack.boot.clusterFacts(bootCtx),
         cfg: new ClusterConfigQueries(db),
         logger: consoleLogger,
       });
     } catch (err) {
-      consoleLogger.warn('cluster-config probe failed', {
+      consoleLogger.warn('cluster-facts probe failed', {
         err: err instanceof Error ? err.message : String(err),
       });
     }
@@ -118,25 +163,23 @@ async function main() {
   }
 
   // Seed template-facing variables from env so `{PC}` / `{PCUser}` /
-  // `{PCPassword}` / `{ImageURL}` render something instead of leaving a hole
-  // in the prompt. Empty strings are kept (template renders ''), which is the
-  // same behavior the player sees pre-login anyway. `Vlanid` is intentionally
-  // absent — it's always allocated per-session (collision-free); pinning it
-  // would break multi-player at stage 10 (two subnets on one VLAN).
-  // OldPC* are NOT in this map — they're projected from cluster_config at
-  // session-create instead, so admin edits via /admin → cluster apply
-  // without a server restart.
+  // `{PCPassword}` render something instead of leaving a hole in the prompt.
+  // Empty strings are kept (template renders ''), which is the same behavior
+  // the player sees pre-login anyway. Only what every game shares lives here;
+  // a game's own world comes from its boot module just below.
   const initialVariables: Record<string, unknown> = {
     PC: cfg.pcEndpoint,
     PCUser: cfg.pcUser,
     PCPassword: cfg.pcPassword,
-    ImageURL: cfg.gameImageUrl,
-    SecondaryNetwork: cfg.gameSecondaryNetwork,
-    EmailReport: cfg.gameEmailReport,
-    ProdUsername: cfg.gameProdUsername,
-    ProdPassword: cfg.gameProdPassword,
     frontendHost: cfg.gameFrontendHost,
   };
+
+  // What this particular game wants to know at boot: values read from its own
+  // env settings, or addresses probed off the cluster it was asked for. A pack
+  // without a boot module adds nothing.
+  if (pack.boot.variables) {
+    Object.assign(initialVariables, await pack.boot.variables(bootCtx));
+  }
 
   // NIG Central stats emitter — inert unless NIG_CENTRAL_URL is set.
   const { Telemetry } = await import('./telemetry');
@@ -148,8 +191,10 @@ async function main() {
     deploymentIp: cfg.nigDeploymentIp,
     packId: pack.manifest.id,
     packVersion: pack.manifest.version,
+    packTitle: pack.manifest.title ?? pack.manifest.name,
     serverMode: cfg.mode,
     clusterProfile,
+    hostIp: cfg.gameFrontendHost,
   });
   telemetry.start();
 
@@ -157,6 +202,7 @@ async function main() {
     db,
     pack,
     nutanix,
+    kube,
     serverMode: cfg.mode,
     clusterEndpoint: cfg.pcEndpoint,
     clusterProfile,

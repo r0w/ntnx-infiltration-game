@@ -90,10 +90,10 @@ function seed(db: Database, input: SeedInput): void {
   }
 }
 
-async function fetchEntries(db: Database): Promise<ScoreboardEntry[]> {
+async function fetchEntries(db: Database, pack = fakePack()): Promise<ScoreboardEntry[]> {
   const router = buildScoreboardRoutes({
     db,
-    pack: fakePack(),
+    pack,
     mode: 'mock',
     // Minimal stub — the scoreboard route only invokes
     // `effectivePlayableCount`. Returning `stages.length` mirrors the
@@ -122,6 +122,23 @@ function freshDb(): Database {
 }
 
 describe('GET /api/scoreboard', () => {
+  test('labels numbered learners without changing named or anonymous NCP identities', async () => {
+    const db = freshDb();
+    const pack = fakePack();
+    pack.manifest.identity = { variable: 'UserNum', label: 'user' };
+    seed(db, { id: 'numbered', startedAt: 1000 });
+    const vars = new VariableQueries(db);
+    vars.upsert('numbered', 'UserNum', '97', 'welcome');
+    expect((await fetchEntries(db, pack))[0]!.username).toBe('user97');
+    vars.upsert('numbered', 'Username', 'Alice', 'welcome');
+    expect((await fetchEntries(db, pack))[0]!.username).toBe('Alice');
+
+    seed(db, { id: 'ncp', startedAt: 2000, capturedTrigram: 'V91' });
+    const ncp = fakePack();
+    ncp.manifest.identity = { variable: 'Trigram', label: 'trigram' };
+    expect((await fetchEntries(db, ncp))[0]!.username).toBeNull();
+  });
+
   test('empty pack returns no entries', async () => {
     const entries = await fetchEntries(freshDb());
     expect(entries).toEqual([]);

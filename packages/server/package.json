@@ -11,6 +11,7 @@
     "@ntnx-game/engine": "workspace:*",
     "@ntnx-game/nutanix": "workspace:*",
     "@ntnx-game/shared": "workspace:*",
-    "hono": "^4.6.10"
+    "hono": "^4.6.10",
+    "@ntnx-game/kube-transport": "workspace:*"
   }
 }
