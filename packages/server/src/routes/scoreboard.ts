@@ -132,7 +132,13 @@ export function buildScoreboardRoutes(deps: ScoreboardRoutesDeps): Hono {
         rank: idx + 1,
         sessionId: row.sessionId,
         trigram: row.trigram,
-        username: row.username,
+        // Number-based packs never ask for a display name. Use their declared
+        // identity so an identified learner is not labelled "anonymous".
+        username: row.username ?? (
+          deps.pack.manifest.identity && deps.pack.manifest.identity.variable !== 'Trigram'
+            ? `${deps.pack.manifest.identity.label}${row.trigram}`
+            : null
+        ),
         stageName,
         stagesPassed: row.stagesPassed,
         stagesDisabled: row.stagesDisabled,

@@ -92,6 +92,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Show numbered bootcamp learners by their user identity on the scoreboard instead of "anonymous".
+
 - Restore blueprint CI and publication by pinning the Python 3.9 jobs to Ubuntu 24.04.
 
 - Monitor the selected application’s latest action, including Refresh Kubeconfig and Switch Mode.
