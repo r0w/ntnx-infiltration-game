@@ -27,7 +27,8 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Calm DSL requires Python 3.9, unavailable on Ubuntu 26.04.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
 
