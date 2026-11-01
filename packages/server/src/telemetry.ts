@@ -53,17 +53,35 @@ export interface TelemetryEvent {
     | 'session_started'
     | 'stage_passed'
     | 'stage_failed'
-    | 'session_finished';
+    | 'session_finished'
+    | 'help_used';
   sessionId: string;
   stageId?: string;
   stageName?: string;
   stageIndex?: number;
-  /** Wall-clock ms the player spent on the stage (entry → pass). */
+  /** Wall-clock ms the player spent on the stage (entry → pass). Includes the
+   *  time the operator held the player: see `waitMs`. */
   wallMs?: number;
   /** Check execution ms (subset of wallMs). */
   checkMs?: number;
   /** session_finished: total ms from session start to finish. */
   totalMs?: number;
+  /** stage_passed / session_finished: ms of `wallMs` / `totalMs` the operator
+   *  held the player (admin gate, pack-wide pause). */
+  waitMs?: number;
+  /** stage_passed / session_finished: playing time, `wallMs` / `totalMs` minus
+   *  `waitMs`. */
+  netMs?: number;
+  /** stage_passed: the stage's step-by-step help was displayed. */
+  helpUsed?: boolean;
+  /** stage_passed: penalty billed on this stage. session_finished: total. */
+  helpPenaltySec?: number;
+  /** session_finished: stages whose help was displayed. */
+  helpUses?: number;
+  /** help_used: penalty billed by this first display. */
+  penaltySec?: number;
+  /** help_used: playing time between entering the stage and asking for help. */
+  afterMs?: number;
   locale?: string;
 }
 

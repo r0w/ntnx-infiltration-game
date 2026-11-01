@@ -126,7 +126,7 @@ CI runs both on every push and PR. No live cluster needed - everything is mock-b
 
 ## Telemetry
 
-Blueprint deployments report anonymous usage stats (session counts, per-stage timings, game version) to the team's NIG Central dashboard - never trigrams, names or credentials. Controlled by `NIG_CENTRAL_URL`; unset = off (the local-dev default).
+Blueprint deployments report anonymous usage stats (session counts, per-stage timings with the time the operator held players, help usage, game version) to the team's NIG Central dashboard - never trigrams, names or credentials. Controlled by `NIG_CENTRAL_URL`; unset = off (the local-dev default).
 
 `NIG_DEPLOYMENT_IP` identifies the game VM in Central; new blueprints supply the VM address at install and in Update Game. Existing apps retain their original Calm scripts: set this variable to the VM's IP in `/opt/ntnx-infiltration-game/.env` and recreate the container when upgrading them. Without it, telemetry falls back to the local network interface, which is usually a Docker bridge IP. Changing this address creates a new Central deployment entry; it does not repair historical entries or split merged data.
 

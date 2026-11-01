@@ -671,6 +671,21 @@ export class SessionWaitQueries {
     return row.ms;
   }
 
+  /**
+   * Held time in ms that falls inside `[from, to]`: each wait is clipped to the
+   * window, and an open wait counts up to `to`. Tells a stage's telemetry how
+   * much of its wall-clock time the operator spent holding the player.
+   */
+  overlapMs(sessionId: string, from: number, to: number): number {
+    const row = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(MAX(0, MIN(COALESCE(released_at, $to), $to) - MAX(blocked_at, $from))), 0) AS ms
+         FROM session_waits WHERE session_id = $sid`,
+      )
+      .get({ $sid: sessionId, $from: from, $to: to }) as { ms: number };
+    return row.ms;
+  }
+
   private rows(clause: string, params: Record<string, string>): SessionWaitRow[] {
     const rows = this.db
       .prepare(
