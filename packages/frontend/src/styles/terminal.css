@@ -3765,7 +3765,7 @@ a.terminal-link:visited {
 .copy-value-wrap { position: relative; display: inline; }
 .copy-value {
   font: inherit; color: inherit; background: none; border: 0; padding: 0;
-  text-decoration: underline dotted; text-underline-offset: 3px; cursor: copy;
+  text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer;
   white-space: inherit;
 }
 .copy-value:hover, .copy-value:focus-visible { background: #ffffff18; }

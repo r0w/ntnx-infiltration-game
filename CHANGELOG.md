@@ -96,6 +96,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Use the familiar hand cursor for copyable instruction values instead of the platform-specific copy cursor.
+
 - Auto-play now waits for microsegmentation and protection policy tasks and reports failures instead of returning success. Missing categories and microsegmentation visibility timeouts also fail explicitly.
 - Correct “Catagories” in the English category instructions.
 
