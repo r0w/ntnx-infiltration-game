@@ -91,9 +91,13 @@ Everything runs from `http://<vm>:3000/admin`. Default password **`nutanix/4u`**
 
 ### Cluster prerequisites
 
-The **AOS + PC Demo - Latest** runbook has moved from the 7.5 stack to 7.6. Deployments have been tested with PC/AOS 7.5 and Self-Service 4.3.1, and PC 7.6.0.6, AOS 7.6, AHV 11.2 and Self-Service 4.4.0.1. The game requires Flow Networking/Security, Advanced networking and Leap. Check the provisioned versions rather than relying only on the booking label.
+**The NCP game on `develop` targets PC/AOS 7.5.** The player keeps a real project, its user membership and VM assignment; categories use the 7.5 model without an Owner Project requirement. Deployment was also checked on PC 7.5.1.8 / AOS 7.5.1 / AHV 11.0.1 (single node, `other` / `test`). A complete manual review of the stage instructions against that UI is still pending.
 
-- **4 nodes**, no more, no less. The install removes one so stage 28 (expand-cluster) has a node to add back.
+The **AOS + PC Demo - Latest** runbook has moved to 7.6. A successful deployment on PC 7.6.0.6 / AOS 7.6 / AHV 11.2 / Self-Service 4.4.0.1 does **not** establish gameplay compatibility: project-owned categories fail when used by storage and protection policies. See [the reproduction report preserved on branch 7.7](https://github.com/r0w/ntnx-infiltration-game/blob/7.7/docs/PROJECT_CATEGORY_COMPATIBILITY.md). That branch preserves the investigation and partial fixes; it does not certify 7.7 support. Per the operator's Jira follow-up, fixes may arrive in 7.7, January 2027 at the earliest; neither the delivery date nor resolution is confirmed.
+
+The game requires Flow Networking/Security, Advanced networking and Leap. Check the provisioned versions rather than relying only on the booking label.
+
+- **HPoC profile: 4 nodes**, no more, no less. The install removes one so stage 28 (expand-cluster) has a node to add back. The `other` profile also permits a single-node cluster and skips node removal; stages requiring multiple nodes are unavailable.
 - **Intelligent Operations enabled.** The create-report stage checks against it. Fresh HPoCs ship it off; enable it in Prism. `/admin` shows a banner while it's off.
 - **A cluster dedicated to the game.** The install reshapes it: removes a node, creates the production VMs, project and subnets.
 
@@ -103,7 +107,7 @@ Both the runbook and blueprint need a project before import. On two fresh HPOCs 
 
 Create a project with a Prism Central administrator who can manage Self-Service projects:
 
-1. On PC 7.6, open **Admin Center > Projects > Create Project**. From Infrastructure, **Administration > Projects > Manage Projects in Admin Center** reaches the same page. Enter **Project Name** (`lab` is a convenient default) and click **Create**. Older versions expose project management in Self-Service.
+1. On the target 7.5 stack, create the project in **Self-Service > Projects**. For a 7.6 deployment investigation, open **Admin Center > Projects > Create Project**. From Infrastructure, **Administration > Projects > Manage Projects in Admin Center** reaches the same page. Enter **Project Name** (`lab` is a convenient default) and click **Create**.
 2. Open the project’s **Infrastructure** tab, click **Add Infrastructure**, and select **NTNX_LOCAL_AZ** under **System Provider Accounts**. Click **Configure Resources** and select the target AHV cluster.
 3. Click **Select VLANs**, select the existing **primary** subnet, then **Next**. Under **Confirm and Select Default**, select it as the default VLAN and click **Confirm**. Its name may be `primary-<cluster-name>`. It needs working IPAM/DHCP and connectivity for the game VM.
 4. Click **Save** on the project. Give the deployment user the appropriate role under **Identities & Access** if another user will launch the game. Wait until the project is active before importing anything.

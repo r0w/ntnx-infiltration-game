@@ -1053,10 +1053,9 @@ async function actCreateMicrosegPolicy(ctx: ActContext): Promise<void> {
   const cats = await listAllSdk<AnyRec>(($p) => sdk(ctx).prism.categories.listCategories($p));
   const critical = cats.find((c) => c.key === `${trigram}-cat` && c.value === 'Critical');
   if (!critical?.extId) {
-    ctx.logger.warn(`actCreateMicrosegPolicy: {trigram}-cat:Critical missing, run create-category first`);
-    return;
+    throw new Error(`${trigram}-cat:Critical missing, run create-category first`);
   }
-  await ensure<AnyRec>({
+  const result = await ensure<AnyRec>({
     name: `microseg-policy ${name}`,
     logger: ctx.logger,
     list: async () => listAllSdk(($p) => sdk(ctx).microseg.policies.listNetworkSecurityPolicies($p)),
@@ -1097,6 +1096,9 @@ async function actCreateMicrosegPolicy(ctx: ActContext): Promise<void> {
         ],
       })).data,
   });
+  if (result?.$objectType?.includes('TaskReference') && result.extId) {
+    await waitForTask(ctx, result.extId);
+  }
   // Poll until the policy is queryable with state=ENFORCE. Microseg POST
   // is task-tracked: the policy lands in the list immediately but the
   // GET-by-id (which CheckSecurityPolicy uses to read rules) lags a few
@@ -1121,7 +1123,7 @@ async function actCreateMicrosegPolicy(ctx: ActContext): Promise<void> {
       });
     }
   }
-  ctx.logger.warn('actCreateMicrosegPolicy: policy not ENFORCE-visible within 20 s');
+  throw new Error('Microseg policy not ENFORCE-visible within 20 s');
 }
 
 /** Stage 19 allow-ssh-in-microseg: adds inbound-SSH rule to the existing microseg policy. */
@@ -1233,10 +1235,9 @@ async function actCreateProtectionPolicy(ctx: ActContext): Promise<void> {
   const cats = await listAllSdk<AnyRec>(($p) => sdk(ctx).prism.categories.listCategories($p));
   const criticalCat = cats.find((c) => c.key === `${trigram}-cat` && c.value === 'Critical');
   if (!criticalCat?.extId) {
-    ctx.logger.warn(`actCreateProtectionPolicy: ${trigram}-cat:Critical missing, run create-category first`);
-    return;
+    throw new Error(`${trigram}-cat:Critical missing, run create-category first`);
   }
-  await ensure<AnyRec>({
+  const result = await ensure<AnyRec>({
     name: `protection-policy ${name}`,
     logger: ctx.logger,
     list: async () => listAllSdk(($p) => sdk(ctx).datapolicies.protection.listProtectionPolicies($p)),
@@ -1278,6 +1279,9 @@ async function actCreateProtectionPolicy(ctx: ActContext): Promise<void> {
         },
       )).data,
   });
+  if (result?.$objectType?.includes('TaskReference') && result.extId) {
+    await waitForTask(ctx, result.extId);
+  }
 }
 
 /**

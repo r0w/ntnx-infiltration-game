@@ -52,6 +52,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- Target PC/AOS 7.5 for the NCP game: restore project creation and category instructions in all five languages without the 7.6 identity-source sharing or category Owner Project requirement. Preserve the project-category investigation separately on branch `7.7`; future compatibility remains unconfirmed.
+
 - The bootcamp now prints the real ingress addresses of the cluster you are on,
   so a step reads `wordpress07.10.54.93.18.sslip.io` instead of asking you to
   substitute a placeholder. If an address cannot be read, the original wording
@@ -91,6 +93,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 - In `test` and `mock` modes, text now appears instantly and `<pause>` beats are skipped by default. The dev panel's speed slider and "no pauses" box still override this, and `live` keeps the pack's pacing.
 
 ### Fixed
+
+- Auto-play now waits for microsegmentation and protection policy tasks and reports failures instead of returning success. Missing categories and microsegmentation visibility timeouts also fail explicitly.
+- Correct “Catagories” in the English category instructions.
 
 - Show numbered bootcamp learners by their user identity on the scoreboard instead of "anonymous".
 
