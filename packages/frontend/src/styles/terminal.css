@@ -3760,3 +3760,20 @@ a.terminal-link:visited {
 }
 .admin-help-reset:disabled { opacity: 0.4; cursor: wait; }
 .admin-help-save:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+
+/* Inline values keep the narrative's typography; feedback never shifts it. */
+.copy-value-wrap { position: relative; display: inline; }
+.copy-value {
+  font: inherit; color: inherit; background: none; border: 0; padding: 0;
+  text-decoration: underline dotted; text-underline-offset: 3px; cursor: copy;
+  white-space: inherit;
+}
+.copy-value:hover, .copy-value:focus-visible { background: #ffffff18; }
+.copy-value:focus-visible { outline: 1px solid currentColor; outline-offset: 3px; }
+.copy-value:disabled { cursor: default; text-decoration: none; }
+.copy-value-status {
+  display: none; position: absolute; bottom: 100%; left: 0; z-index: 5;
+  background: #15251b; color: #b5f4c9; border: 1px solid #63856c;
+  padding: 2px 6px; font-size: 12px; white-space: nowrap; pointer-events: none;
+}
+.copy-value-status.is-visible { display: block; }

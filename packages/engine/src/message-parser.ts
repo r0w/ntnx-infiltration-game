@@ -22,6 +22,7 @@ export interface ParsedMessage {
  *   <image src='foo.png' alt='…'/>  — inline image from the pack's assets dir
  *   <red>text</red>, <green>, ...   — foreground color (one active at a time)
  *   <dim>text</dim>, <bold>text</bold>  — style modifiers (stackable with colors + each other)
+ *   <copy>value</copy>             — inline value copied on click
  *   <a href='url'>text</a>          — clickable link (renders target=_blank)
  *   &lt; &gt; &amp;              — literal `<`, `>`, `&`
  *
@@ -50,6 +51,7 @@ export function parseMessage(
   const colorStack: string[] = [];
   const styleStack: string[] = [];
   const hrefStack: string[] = [];
+  let copyDepth = 0;
 
   const currentColor = () => colorStack[colorStack.length - 1] ?? defaultColor;
   const currentHref = () => hrefStack[hrefStack.length - 1];
@@ -65,6 +67,7 @@ export function parseMessage(
       color,
       ...(styles ? { styles } : {}),
       ...(href ? { href } : {}),
+      ...(copyDepth > 0 ? { copyable: true } : {}),
     });
     textBuf = '';
   };
@@ -254,6 +257,7 @@ export function parseMessage(
   }
 
   function handleOpenTag(name: string): boolean {
+    if (name === 'copy') { flushText(); copyDepth++; return true; }
     if (COLOR_TAGS.has(name)) {
       flushText();
       colorStack.push(name);
@@ -268,6 +272,7 @@ export function parseMessage(
   }
 
   function handleCloseTag(name: string): boolean {
+    if (name === 'copy') { flushText(); copyDepth = Math.max(0, copyDepth - 1); return true; }
     if (COLOR_TAGS.has(name)) {
       const topIdx = colorStack.lastIndexOf(name);
       if (topIdx === -1) return true; // orphan close — consume and ignore

@@ -1,5 +1,5 @@
 export type MessageUnit =
-  | { kind: 'text'; text: string; color?: string; styles?: string[]; href?: string }
+  | { kind: 'text'; text: string; color?: string; styles?: string[]; href?: string; copyable?: boolean }
   | { kind: 'pause'; ms: number }
   | { kind: 'await-input'; variable: string }
   | { kind: 'clear' }

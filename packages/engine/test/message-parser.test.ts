@@ -186,3 +186,19 @@ describe('parseMessage', () => {
     ]);
   });
 });
+
+test('inline copy substitutes values and keeps IP pool endpoints separate', () => {
+  const vars = new VariableStore({ Trigram: 'rbo', Vlanid: 198 });
+  const parsed = parseMessage("<white><copy>{Trigram}-subnet</copy></white>: <copy>192.168.{Vlanid}.50</copy> - <copy>192.168.{Vlanid}.115</copy> <white>Enter</white>", vars);
+  const values = parsed.units.filter(u => u.kind === 'text' && u.copyable);
+  expect(values.map(u => u.kind === 'text' && u.text)).toEqual(['rbo-subnet', '192.168.198.50', '192.168.198.115']);
+  expect(parsed.units.at(-1)).toEqual({ kind: 'text', text: 'Enter', color: 'white' });
+});
+
+test('inline copy treats substituted markup as text and decodes entities', () => {
+  const parsed = parseMessage('<copy>{Secret}&amp;</copy> plain', new VariableStore({ Secret: '<input/>$x' }));
+  expect(parsed.units).toEqual([
+    { kind: 'text', text: '<input/>$x&', color: 'default', copyable: true },
+    { kind: 'text', text: ' plain', color: 'default' },
+  ]);
+});

@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { useLightbox } from './Lightbox';
+import { CopyValue } from './CopyValue';
 import { CodeBlock } from './CodeBlock';
 import { HelpBlock } from './HelpBlock';
 import { textClasses } from './textClasses';
@@ -40,6 +41,8 @@ export const TerminalItem = memo(function TerminalItem({
         color={item.color}
         styles={item.styles}
         href={item.href}
+        copyable={item.copyable}
+        locale={locale}
         speedMs={typingSpeedMs}
         isActive={isActive}
         onDone={onDone}
@@ -336,12 +339,14 @@ interface TypewriterTextProps {
   color?: string;
   styles?: string[];
   href?: string;
+  copyable?: boolean;
+  locale?: string;
   speedMs: number;
   isActive: boolean;
   onDone: () => void;
 }
 
-function TypewriterText({ text, color, styles, href, speedMs, isActive, onDone }: TypewriterTextProps) {
+function TypewriterText({ text, color, styles, href, copyable, locale, speedMs, isActive, onDone }: TypewriterTextProps) {
   const [shown, setShown] = useState('');
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
@@ -387,6 +392,7 @@ function TypewriterText({ text, color, styles, href, speedMs, isActive, onDone }
       </a>
     );
   }
+  if (copyable && shown) return <CopyValue text={text} className={className} locale={locale} disabled={shown !== text}>{shown}</CopyValue>;
   return <span className={className}>{shown}</span>;
 }
 

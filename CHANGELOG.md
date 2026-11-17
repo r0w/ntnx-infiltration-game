@@ -15,6 +15,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- Click instruction values to copy resource names, credentials, category values and network settings, including each IP pool endpoint separately. Inline copy supports HTTP labs, keyboard access and feedback in all five NCP languages.
+
 - Add a deployment-only blueprint for installing NCP or NKP on shared clusters without preparing or replacing shared infrastructure.
 - A second game: the NKP Fundamentals bootcamp, 26 stages from multi-tenancy
   through persistent storage, observability and GitOps.

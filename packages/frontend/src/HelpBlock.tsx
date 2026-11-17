@@ -1,3 +1,4 @@
+import { CopyValue } from './CopyValue';
 import { useEffect, useRef, useState } from 'react';
 import type { MessageUnit } from '@ntnx-game/shared';
 import { HelpIcon } from './AgentIcons';
@@ -72,7 +73,7 @@ export function HelpBlock({ id, units, penaltySec, locale, isActive, onDone }: H
         <>
           <div className="help-body">
             {units.map((unit, i) => (
-              <HelpUnit key={i} unit={unit} labels={labels} onZoom={setZoomed} />
+              <HelpUnit key={i} unit={unit} locale={locale} labels={labels} onZoom={setZoomed} />
             ))}
           </div>
           {cost && <div className="help-foot">{labels.charged(cost)}</div>}
@@ -94,10 +95,12 @@ export function HelpBlock({ id, units, penaltySec, locale, isActive, onDone }: H
 
 function HelpUnit({
   unit,
+  locale,
   labels,
   onZoom,
 }: {
   unit: MessageUnit;
+  locale?: string;
   labels: HelpLabels;
   onZoom: (z: Zoomed) => void;
 }) {
@@ -116,6 +119,7 @@ function HelpUnit({
         </a>
       );
     }
+    if (unit.copyable) return <CopyValue text={unit.text} className={cls} locale={locale}>{unit.text}</CopyValue>;
     return <span className={cls}>{unit.text}</span>;
   }
   if (unit.kind === 'code') {
