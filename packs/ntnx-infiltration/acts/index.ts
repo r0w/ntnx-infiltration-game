@@ -17,6 +17,7 @@ import type { ActContext } from '@ntnx-game/engine';
 import { restoreRecoveryVm } from './recovery';
 import { refreshAction, dailyScheduleError, nextReportTime, reportRunsAtThree, reportWriteBody } from '../schedule';
 import { assignVmOwnership } from './vm-ownership';
+import { projectCategories, categoryProjectError } from '../category-project';
 import type { NutanixSdk } from '@ntnx-game/nutanix';
 import {
   deleteV4Entity,
@@ -955,14 +956,28 @@ async function actCreateCategory(ctx: ActContext): Promise<void> {
   const trigram = getTrigram(ctx);
   if (!trigram) return;
   const key = `${trigram}-cat`;
-  const existing = await listAllSdk<AnyRec>(($p) => sdk(ctx).prism.categories.listCategories($p));
+  const projects = await listAllV3<AnyRec>(ctx, '/api/nutanix/v3/projects/list');
+  const projectId = projects.find(p => (p.spec?.name ?? p.status?.name) === `${trigram}-proj`)?.metadata?.uuid;
+  if (!projectId) throw new Error(`Project '${trigram}-proj' not found`);
+  const existing = await projectCategories(ctx);
+  const mismatch = categoryProjectError(existing, key, projectId);
+  if (mismatch) throw new Error(mismatch);
   for (const value of ['Critical', 'Test']) {
-    if (existing.some((c) => c.key === key && c.value === value)) continue;
-    await postV4(ctx, '/api/prism/v4.2/config/categories', {
-      key,
-      value,
-      description: `Seeded ${key}:${value}`,
+    if (existing.some(c => c.key === key && c.value === value)) continue;
+    // Owner Project is supported by v4.4, not the old v4.2 create schema.
+    // Do not fall back to a global category: that would hide the player path.
+    const result = await postV4<{ data?: AnyRec }>(ctx, '/api/prism/v4.4/config/categories', {
+      key, value, projectExtId: projectId, description: `Seeded ${key}:${value}`,
     });
+    if (result.data?.$objectType?.includes('TaskReference') && result.data.extId) {
+      await waitForTask(ctx, result.data.extId);
+    }
+  }
+  const created = (await projectCategories(ctx)).filter(c => c.key === key);
+  const invalid = categoryProjectError(created, key, projectId);
+  if (invalid) throw new Error(invalid);
+  if (['Critical', 'Test'].some(value => !created.some(c => c.value === value))) {
+    throw new Error(`Category '${key}' creation not confirmed`);
   }
 }
 
@@ -1050,24 +1065,26 @@ async function actCreateMicrosegPolicy(ctx: ActContext): Promise<void> {
   // `{Trigram}-cat` fall off page 1 silently → no critical → empty rules
   // → microseg rejects with "Array is too short". `_limit: 100` covers
   // typical PC density; bump if any site exceeds.
-  const cats = await listAllSdk<AnyRec>(($p) => sdk(ctx).prism.categories.listCategories($p));
+  const cats = await projectCategories(ctx);
   const critical = cats.find((c) => c.key === `${trigram}-cat` && c.value === 'Critical');
   if (!critical?.extId) {
-    ctx.logger.warn(`actCreateMicrosegPolicy: {trigram}-cat:Critical missing, run create-category first`);
-    return;
+    throw new Error(`${trigram}-cat:Critical missing, run create-category first`);
   }
-  await ensure<AnyRec>({
+  const projectId = critical.projectExtId;
+  const projectOwned = !!projectId && projectId !== '00000000-0000-0000-0000-000000000000';
+  const result = await ensure<AnyRec>({
     name: `microseg-policy ${name}`,
     logger: ctx.logger,
     list: async () => listAllSdk(($p) => sdk(ctx).microseg.policies.listNetworkSecurityPolicies($p)),
     match: (p) => p.name === name,
     create: async () =>
-      (await postV4<{ data?: AnyRec }>(ctx, '/api/microseg/v4.0/config/policies', {
+      (await postV4<{ data?: AnyRec }>(ctx, `/api/microseg/${projectOwned ? 'v4.3' : 'v4.0'}/config/policies`, {
         // Shape confirmed against live `cur-mseg-policy`. Rules use
         // `securedGroupCategoryAssociatedEntityType` + `securedGroupCategoryReferences`
         // + `srcAllowSpec`/`destAllowSpec` + `isAllProtocolAllowed`. Scope is
         // `GLOBAL`, not `ALL_VLAN`.
         name,
+        ...(projectOwned ? { projectExtId: projectId } : {}),
         type: 'APPLICATION',
         state: 'ENFORCE',
         scope: 'GLOBAL',
@@ -1097,6 +1114,9 @@ async function actCreateMicrosegPolicy(ctx: ActContext): Promise<void> {
         ],
       })).data,
   });
+  if (result?.$objectType?.includes('TaskReference') && result.extId) {
+    await waitForTask(ctx, result.extId);
+  }
   // Poll until the policy is queryable with state=ENFORCE. Microseg POST
   // is task-tracked: the policy lands in the list immediately but the
   // GET-by-id (which CheckSecurityPolicy uses to read rules) lags a few
@@ -1121,7 +1141,7 @@ async function actCreateMicrosegPolicy(ctx: ActContext): Promise<void> {
       });
     }
   }
-  ctx.logger.warn('actCreateMicrosegPolicy: policy not ENFORCE-visible within 20 s');
+  throw new Error('Microseg policy not ENFORCE-visible within 20 s');
 }
 
 /** Stage 19 allow-ssh-in-microseg: adds inbound-SSH rule to the existing microseg policy. */
@@ -1236,7 +1256,7 @@ async function actCreateProtectionPolicy(ctx: ActContext): Promise<void> {
     ctx.logger.warn(`actCreateProtectionPolicy: ${trigram}-cat:Critical missing, run create-category first`);
     return;
   }
-  await ensure<AnyRec>({
+  const result = await ensure<AnyRec>({
     name: `protection-policy ${name}`,
     logger: ctx.logger,
     list: async () => listAllSdk(($p) => sdk(ctx).datapolicies.protection.listProtectionPolicies($p)),
@@ -1278,6 +1298,9 @@ async function actCreateProtectionPolicy(ctx: ActContext): Promise<void> {
         },
       )).data,
   });
+  if (result?.$objectType?.includes('TaskReference') && result.extId) {
+    await waitForTask(ctx, result.extId);
+  }
 }
 
 /**

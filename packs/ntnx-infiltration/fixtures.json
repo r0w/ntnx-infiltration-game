@@ -318,8 +318,8 @@
     "data": [
       { "extId": "cat-env-prod", "key": "Environment", "value": "Production" },
       { "extId": "cat-env-test", "key": "Environment", "value": "Test" },
-      { "extId": "cat-{Trigram}-critical", "key": "{Trigram}-cat", "value": "Critical" },
-      { "extId": "cat-{Trigram}-test", "key": "{Trigram}-cat", "value": "Test" }
+      { "extId": "cat-{Trigram}-critical", "key": "{Trigram}-cat", "value": "Critical", "projectExtId": "proj-{Trigram}" },
+      { "extId": "cat-{Trigram}-test", "key": "{Trigram}-cat", "value": "Test", "projectExtId": "proj-{Trigram}" }
     ]
   },
   "GET /api/datapolicies/v4.2/config/storage-policies": {

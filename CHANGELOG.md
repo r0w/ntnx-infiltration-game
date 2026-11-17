@@ -92,6 +92,14 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Auto-play and the category check now require the instructed Owner Project
+  for both values. Project-owned microseg policies use the matching project,
+  and microseg/protection actions propagate asynchronous failures.
+- This path needs Prism v4.4 for category creation; older stacks are not yet
+  validated. Storage/protection failures with project-owned categories remain
+  reproducible on PC 7.6.0.6. See [validation details](docs/PROJECT_CATEGORY_COMPATIBILITY.md).
+- Correct the English category-stage typo.
+
 - Show numbered bootcamp learners by their user identity on the scoreboard instead of "anonymous".
 
 - Restore blueprint CI and publication by pinning the Python 3.9 jobs to Ubuntu 24.04.

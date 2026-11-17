@@ -1,3 +1,4 @@
+import { projectCategories, categoryProjectError } from '../category-project';
 import { refreshAction, dailyScheduleError, reportRunsAtThree } from '../schedule';
 import { selectSecondarySubnet } from '../network';
 import { checkSdk, listAllSdk } from './sdk';
@@ -765,9 +766,11 @@ async function CheckCat(ctx: CheckContext): Promise<CheckResult> {
   const trigram = getTrigram(ctx);
   const expectedKey = `${trigram}-cat`;
   try {
-    const categories = await listAllSdk<{ extId?: string; key?: string; value?: string }>(
-      p => checkSdk(ctx.nutanix).prism.categories.listCategories(p)
-    );
+    const categories = await projectCategories(ctx);
+    const projectId = await lookupProjectUuid(ctx, `${trigram}-proj`);
+    if (!projectId) return { pass: false, detail: `Project '${trigram}-proj' not found.` };
+    const ownershipError = categoryProjectError(categories, expectedKey, projectId);
+    if (ownershipError) return { pass: false, detail: ownershipError };
     const matching = categories.filter((c) => c.key === expectedKey);
     const values = new Set(matching.map((c) => c.value).filter((v): v is string => !!v));
     const missing = ['Critical', 'Test'].filter((v) => !values.has(v));
