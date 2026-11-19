@@ -28,7 +28,7 @@
   "stage-007.line-02": "Pulse <white>Enter</white> cuando esté hecho: <input/>\n",
   "stage-007.line-03": "Genial, déjeme comprobar eso... \n",
   "stage-008.line-02": "Ahora, desconéctese de Nutanix Prism Central y vuelva a conectarse con su nuevo usuario <white><copy>{Trigram}-adm</copy></white>. Pulse <white>Enter</white> cuando esté dentro.<input/>",
-  "stage-009.line-01": "¡No tengo tiempo de comprobar si de verdad está conectado con la cuenta <white><copy>{Trigram}-adm</copy></white>! Confío en usted por esta vez <white>{Username}</white>, aunque errar es (solo) humano...<pause sec='2'/>\n\n",
+  "stage-009.line-01": "¡No tengo tiempo de comprobar si de verdad está conectado con la cuenta <white>{Trigram}-adm</white>! Confío en usted por esta vez <white>{Username}</white>, aunque errar es (solo) humano...<pause sec='2'/>\n\n",
   "stage-009.line-02": "Necesito que cree un nuevo proyecto. Los proyectos sirven para agrupar recursos, gestionar los derechos de acceso y definir cuotas. Es la forma en que Nutanix gestiona los tenants. Los usuarios de otros proyectos no verán lo que hacemos en nuestro propio proyecto.\n\n",
   "stage-009.line-03": "<red>Oh... ¡Solo una cosa importante!</red> Si me he olvidado de guiarle hasta la parte correcta de la interfaz, ¡use la <white>barra de búsqueda</white> en la parte superior de la interfaz de Prism Central! Es taaan útil para moverse rápidamente de una página a otra.<pause sec='3'/>\n\n",
   "stage-009.line-04": "¡Probémoslo! Escriba <white>projects</white> en la barra de búsqueda y luego cree un nuevo proyecto llamado <white><copy>{Trigram}-proj</copy></white> con el usuario <white><copy>TheProjectManager</copy></white> como <white>Project Admin</white>.\n\n",

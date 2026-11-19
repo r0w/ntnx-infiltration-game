@@ -96,6 +96,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Remove the copy affordance from the narrative reminder of the logged-in account before project creation.
+
 - Keep the local-account warning as plain highlighted text; the login username remains copyable in the credentials line.
 
 - Use the familiar hand cursor for copyable instruction values instead of the platform-specific copy cursor.
