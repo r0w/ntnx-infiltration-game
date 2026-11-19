@@ -23,7 +23,7 @@
   "stage-006.line-05": "We need to act quickly! You are used to this kind of situation... <pause sec='3'/>\n\n",
   "stage-006.line-06": "First we have to create a new local administrator for this Cluster, in case the vilains change the password. They are sharing passwords using emails, but they probably have a change policy.\n\n",
   "stage-006.line-07": "Please, connect to the cluster and create a new user <white><copy>{Trigram}-adm</copy></white>. This can be done in the <white>Admin Center</white> part of the GUI.\n",
-  "stage-006.line-08": "<red>Be careful when you login, the </red><white><copy>{PCUser}</copy></white><red> user is a local account!</red>\n<image src='stage-006-local-account.png' alt='Nutanix login screen — click the Local Account link to switch.'/>\n\n",
+  "stage-006.line-08": "<red>Be careful when you login, the </red><white>{PCUser}</white><red> user is a local account!</red>\n<image src='stage-006-local-account.png' alt='Nutanix login screen — click the Local Account link to switch.'/>\n\n",
   "stage-006.line-09": "Press <white>Enter</white> when it's done: <input/>\n",
   "stage-006.line-10": "Ok, let me check that... \n",
   "stage-007.line-01": "Now create an <white>Authorization Policy</white> named <white><copy>{Trigram}-auth</copy></white> to give <white>Super Admin</white> rights to <white><copy>{Trigram}-adm</copy></white>.\n",

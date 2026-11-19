@@ -21,7 +21,7 @@
   "stage-006.line-05": "¡Debemos actuar rápido! Está acostumbrado a este tipo de situaciones...<pause sec='3'/>\n\n",
   "stage-006.line-06": "Primero, tenemos que crear un nuevo administrador local para este Cluster, por si los villanos cambian la contraseña. Comparten las contraseñas por correo electrónico, pero probablemente tengan una política de cambio.\n\n",
   "stage-006.line-07": "Por favor, conéctese al cluster y cree un nuevo usuario <white><copy>{Trigram}-adm</copy></white>. Esto se hace en la sección <white>Admin Center</white> de la interfaz gráfica.\n",
-  "stage-006.line-08": "<red>¡Cuidado al conectarse, el usuario </red><white><copy>{PCUser}</copy></white><red> es una cuenta local!</red>\n<image src='stage-006-local-account.png' alt='Pantalla de inicio de sesión de Nutanix — haga clic en el enlace Local Account para cambiar.'/>\n\n",
+  "stage-006.line-08": "<red>¡Cuidado al conectarse, el usuario </red><white>{PCUser}</white><red> es una cuenta local!</red>\n<image src='stage-006-local-account.png' alt='Pantalla de inicio de sesión de Nutanix — haga clic en el enlace Local Account para cambiar.'/>\n\n",
   "stage-006.line-09": "Pulse <white>Enter</white> cuando esté hecho: <input/>\n",
   "stage-006.line-10": "Recibido, déjeme comprobar eso... \n",
   "stage-007.line-01": "Ahora cree una <white>Authorization Policy</white> llamada <white><copy>{Trigram}-auth</copy></white> para dar los derechos de <white>Super Admin</white> a <white><copy>{Trigram}-adm</copy></white>.\n",

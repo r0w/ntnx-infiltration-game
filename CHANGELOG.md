@@ -96,6 +96,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Keep the local-account warning as plain highlighted text; the login username remains copyable in the credentials line.
+
 - Use the familiar hand cursor for copyable instruction values instead of the platform-specific copy cursor.
 
 - Auto-play now waits for microsegmentation and protection policy tasks and reports failures instead of returning success. Missing categories and microsegmentation visibility timeouts also fail explicitly.
