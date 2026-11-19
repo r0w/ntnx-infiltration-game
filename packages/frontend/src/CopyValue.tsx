@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { copyText } from './clipboard';
+import { copyTerminalText } from './clipboard';
 
 const labels: Record<string, [string, string, string]> = {
   en: ['Copy', 'Copied', 'Copy failed — select and copy manually'],
@@ -23,7 +23,7 @@ export function CopyValue({ text, children, className = '', locale = 'en', disab
       onClick={async e => {
         e.stopPropagation();
         clearTimeout(timer.current);
-        try { await copyText(text); setStatus(1); } catch { setStatus(2); }
+        try { await copyTerminalText(text, e.currentTarget); setStatus(1); } catch { setStatus(2); }
         timer.current = setTimeout(() => setStatus(0), 2000);
       }}>{children}</button>
     <span role="status" className={`copy-value-status${status ? ' is-visible' : ''}`}>{status ? message : ''}</span>

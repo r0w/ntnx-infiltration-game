@@ -23,3 +23,13 @@ export async function copyText(text: string): Promise<void> {
     }
   }
 }
+
+/** Copy without leaving the terminal prompt focused on the copy button.
+ * Focus before starting the async write so a delayed result never steals
+ * focus from another control the player selected in the meantime.
+ */
+export function copyTerminalText(text: string, trigger: HTMLElement): Promise<void> {
+  const input = trigger.closest('.terminal')?.querySelector<HTMLInputElement>('[data-primary-input]:not(:disabled)');
+  input?.focus({ preventScroll: true });
+  return copyText(text);
+}

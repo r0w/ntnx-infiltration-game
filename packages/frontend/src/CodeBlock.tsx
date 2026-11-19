@@ -1,4 +1,4 @@
-import { copyText } from './clipboard';
+import { copyTerminalText } from './clipboard';
 import { useEffect, useRef, useState } from 'react';
 
 export interface CodeBlockProps {
@@ -28,9 +28,9 @@ export function CodeBlock({ text, lang, isActive, onDone }: CodeBlockProps) {
     if (isActive) onDoneRef.current();
   }, [isActive]);
 
-  const copy = async () => {
+  const copy = async (trigger: HTMLButtonElement) => {
     try {
-      await copyText(text);
+      await copyTerminalText(text, trigger);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch (err) {
@@ -46,7 +46,7 @@ export function CodeBlock({ text, lang, isActive, onDone }: CodeBlockProps) {
         // Don't bubble to the terminal's click-to-focus, which scrolls the input into view.
         onClick={(e) => {
           e.stopPropagation();
-          void copy();
+          void copy(e.currentTarget);
         }}
         aria-label={copied ? 'Copied' : 'Copy to clipboard'}
         title={copied ? 'Copied' : 'Copy'}

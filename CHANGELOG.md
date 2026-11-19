@@ -96,6 +96,12 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Return focus to the terminal prompt when copying an instruction value or code block, so Enter can validate the stage without another click and without scrolling the page.
+
+- Highlight the instruction to start the VM on its own line before stage validation, in all five languages.
+
+- Use VLAN/Subnet in the project infrastructure instructions in all five languages.
+
 - Remove the copy affordance from the narrative reminder of the logged-in account before project creation.
 
 - Keep the local-account warning as plain highlighted text; the login username remains copyable in the credentials line.
