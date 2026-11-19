@@ -1,16 +1,17 @@
 import { CopyValue } from './CopyValue';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useId, type ReactNode } from 'react';
 import type { MessageUnit } from '@ntnx-game/shared';
 import { HelpIcon } from './AgentIcons';
 import { CodeBlock } from './CodeBlock';
 import { fmtPenaltyShort } from './duration';
 import { helpLabels, type HelpLabels } from './helpLabels';
-import { Modal } from './Modal';
+import { createPortal } from 'react-dom';
 import { textClasses } from './textClasses';
 
 export interface HelpBlockProps {
   /** Item id; also exposed as `data-help-id` so the terminal can scroll to it. */
   id: string;
+  openRequestId?: string;
   units: MessageUnit[];
   /** What the first display cost, in seconds. 0 = free: no cost is shown. */
   penaltySec: number;
@@ -28,68 +29,91 @@ function assetUrl(src: string): string {
   return src.startsWith('http') || src.startsWith('/') ? src : `/api/pack-assets/${src}`;
 }
 
-/**
- * The framed step-by-step help block of a stage. Reference material the
- * player reads while working in another window, so it appears at once (no
- * typewriter), can be folded to get the prompt back, and its screenshots open
- * large in a modal. Content is the pack's own message grammar, rendered from
- * the units the server sent: coloured text, links, copyable code, images.
- */
-export function HelpBlock({ id, units, penaltySec, locale, isActive, onDone }: HelpBlockProps) {
+/** A compact terminal entry opens a scroll-preserving help reader. */
+export function HelpBlock({ id, openRequestId = id, units, penaltySec, locale, isActive, onDone }: HelpBlockProps) {
   const labels = helpLabels(locale);
   const cost = fmtPenaltyShort(penaltySec);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const [zoomed, setZoomed] = useState<Zoomed | null>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+  const scrollTop = useRef(0);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const lastRequest = useRef<string>();
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
   useEffect(() => {
+    if (!isActive && lastRequest.current === undefined) return;
+    if (lastRequest.current !== openRequestId) {
+      lastRequest.current = openRequestId;
+      setOpen(true);
+    }
     if (isActive) onDoneRef.current();
-  }, [isActive]);
+  }, [isActive, openRequestId]);
 
+  const close = () => {
+    if (bodyRef.current) scrollTop.current = bodyRef.current.scrollTop;
+    bodyRef.current?.closest('dialog')?.close();
+    setZoomed(null);
+    setOpen(false);
+    sectionRef.current?.closest('.terminal')?.querySelector<HTMLInputElement>('[data-primary-input]:not(:disabled)')?.focus({ preventScroll: true });
+  };
   return (
-    <section
-      className={`help-block${open ? ' is-open' : ''}`}
-      data-help-id={id}
-      aria-label={labels.title}
-    >
-      <button
-        type="button"
-        className="help-head"
-        aria-expanded={open}
-        // Keep the terminal's click-to-focus out of it: folding is not an input.
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-      >
-        <HelpIcon />
-        <span className="help-title">{labels.title}</span>
+    <section ref={sectionRef} className="help-block" data-help-id={id} aria-label={labels.title}>
+      <button type="button" className="help-head" aria-haspopup="dialog" aria-expanded={open}
+        onClick={e => { e.stopPropagation(); setOpen(true); }}>
+        <HelpIcon /><span className="help-title">{labels.title}</span>
         {cost && <span className="help-pill">{cost}</span>}
-        <span className="help-fold">
-          {open ? '▴' : '▾'} {open ? labels.fold : labels.unfold}
-        </span>
+        <span className="help-fold">{labels.review} ↗</span>
       </button>
-      {open && (
-        <>
-          <div className="help-body">
-            {units.map((unit, i) => (
-              <HelpUnit key={i} unit={unit} locale={locale} labels={labels} onZoom={setZoomed} />
-            ))}
-          </div>
-          {cost && <div className="help-foot">{labels.charged(cost)}</div>}
-        </>
-      )}
-      {zoomed && (
-        <Modal title={zoomed.alt ?? labels.title} onClose={() => setZoomed(null)} wide className="modal-card-zoom">
+      {open && <HelpDialog title={labels.title} closeLabel={labels.close} onClose={close} initialScrollTop={scrollTop.current}>
+        <div className="help-body help-reader-body"
+          ref={bodyRef}
+          onScroll={e => { if (e.currentTarget.closest('dialog')?.open) scrollTop.current = e.currentTarget.scrollTop; }}>
+          {units.map((unit, i) => <HelpUnit key={i} unit={unit} locale={locale} labels={labels} onZoom={setZoomed} />)}
+        </div>
+        {cost && <div className="help-foot">{labels.charged(cost)}</div>}
+      </HelpDialog>}
+      {zoomed && <HelpDialog title={zoomed.alt ?? labels.title} closeLabel={labels.close} onClose={() => setZoomed(null)}>
+        <div className="help-reader-body help-reader-zoom">
           <img className="help-zoom" src={assetUrl(zoomed.src)} alt={zoomed.alt ?? ''} />
-          <div className="modal-actions">
-            <button type="button" className="modal-btn" onClick={() => setZoomed(null)} autoFocus>
-              {labels.close}
-            </button>
-          </div>
-        </Modal>
-      )}
+        </div>
+      </HelpDialog>}
     </section>
+  );
+}
+
+/** Native modal supplies focus trapping, inert background and topmost Escape.
+ * Portal keeps copy controls outside the terminal's DOM focus scope.
+ */
+function HelpDialog({ title, closeLabel, onClose, children, initialScrollTop = 0 }: {
+  title: string; closeLabel: string; onClose: () => void; children: ReactNode; initialScrollTop?: number;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  useLayoutEffect(() => {
+    const dialog = ref.current!;
+    dialog.showModal();
+    const body = dialog.querySelector<HTMLElement>('.help-body');
+    if (body) body.scrollTop = initialScrollTop;
+    return () => dialog.close();
+  }, []);
+  return createPortal(
+    <dialog ref={ref} className="help-reader" aria-labelledby={titleId}
+      onCancel={e => { e.preventDefault(); onClose(); }}
+      onClick={e => e.stopPropagation()}
+      onMouseDown={e => {
+        e.stopPropagation();
+        if (e.target === e.currentTarget) {
+          const r = e.currentTarget.getBoundingClientRect();
+          if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) onClose();
+        }
+      }}>
+      <header className="help-reader-head">
+        <h2 id={titleId}>{title}</h2>
+        <button type="button" className="modal-btn" onClick={onClose} autoFocus>{closeLabel} ✕</button>
+      </header>
+      {children}
+    </dialog>, document.body,
   );
 }
 

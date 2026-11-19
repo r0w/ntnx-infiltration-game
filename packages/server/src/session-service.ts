@@ -557,9 +557,9 @@ export class SessionService {
 
   // ---------------- step-by-step help ----------------
 
-  /** Global help flag (operator switch in /admin). Off until turned on. */
+  /** Global help flag. Defaults on for mock transport; explicit operator choices win. */
   isHelpEnabledGlobally(): boolean {
-    return readHelpEnabledGlobally(this.clusterConfig);
+    return readHelpEnabledGlobally(this.clusterConfig, this.nutanix.mode === 'mock');
   }
 
   setHelpEnabledGlobally(enabled: boolean): void {

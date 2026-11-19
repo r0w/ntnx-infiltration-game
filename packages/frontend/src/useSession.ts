@@ -70,7 +70,7 @@ export type RenderItem =
   | { kind: 'info'; id: string; text: string; color?: string }
   // Step-by-step help the player asked for. `hidden` retires an earlier block
   // of the same stage when it is shown again (kept in the list, not rendered).
-  | { kind: 'help'; id: string; stageName: string; units: MessageUnit[]; penaltySec: number; hidden?: boolean };
+  | { kind: 'help'; id: string; stageName: string; units: MessageUnit[]; penaltySec: number; hidden?: boolean; openRequestId?: string };
 
 /** Outcome of {@link SessionHandle.askHelp}. */
 export type HelpOutcome =
@@ -161,20 +161,17 @@ function sameList(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
-/** Append a help block, retiring any earlier one of the same stage (one block
- *  per stage on screen; "review help" moves it to the bottom). */
+/** Reopen an existing reader so its scroll position survives repeated requests. */
 function withHelpBlock(
   prev: RenderItem[],
   id: string,
   r: Extract<HelpResponse, { status: 'ok' }>,
 ): RenderItem[] {
-  const retired = prev.map((it): RenderItem =>
-    it.kind === 'help' && it.stageName === r.stageName && !it.hidden ? { ...it, hidden: true } : it,
-  );
-  return [
-    ...retired,
-    { kind: 'help', id, stageName: r.stageName, units: r.units, penaltySec: r.penaltySec },
-  ];
+  const existing = prev.find(it => it.kind === 'help' && it.stageName === r.stageName && !it.hidden);
+  if (existing) return prev.map(it => it === existing
+    ? { ...it, units: r.units, penaltySec: r.penaltySec, openRequestId: id } as RenderItem
+    : it);
+  return [...prev, { kind: 'help', id, openRequestId: id, stageName: r.stageName, units: r.units, penaltySec: r.penaltySec }];
 }
 
 export function appendUnits(

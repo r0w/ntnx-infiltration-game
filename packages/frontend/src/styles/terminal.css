@@ -3777,3 +3777,29 @@ a.terminal-link:visited {
   padding: 2px 6px; font-size: 12px; white-space: nowrap; pointer-events: none;
 }
 .copy-value-status.is-visible { display: block; }
+
+/* Help reader: a native modal keeps the game inert while reading/copying. */
+.help-reader {
+  width: min(1080px, calc(100vw - 32px)); max-height: calc(100dvh - 32px);
+  padding: 0; margin: auto; border: 1px solid #547781; border-radius: 10px;
+  background: #101a20; color: #dce8eb; font: inherit;
+  box-shadow: 0 20px 80px #000a;
+}
+.help-reader[open] { display: flex; flex-direction: column; }
+.help-reader::backdrop { background: #000b; }
+.help-reader-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 14px 20px; border-bottom: 1px solid #38505a; flex-shrink: 0;
+}
+.help-reader-head h2 { margin: 0; font-size: 18px; color: #7cdcfe; }
+.help-reader-body { overflow: auto; min-height: 0; overscroll-behavior: contain; }
+.help-reader .help-body { padding: 20px 24px; line-height: 1.65; }
+.help-reader .help-foot { flex-shrink: 0; }
+.help-reader .help-shot { width: 100%; }
+.help-reader .help-shot img { width: 100%; height: auto; }
+.help-reader-zoom { padding: 16px; }
+.help-reader-zoom img { max-width: 100%; height: auto; }
+@media (max-width: 600px) {
+  .help-reader { width: calc(100vw - 12px); max-height: calc(100dvh - 12px); }
+  .help-reader-head, .help-reader .help-body { padding: 12px; }
+}

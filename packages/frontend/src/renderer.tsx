@@ -142,6 +142,7 @@ export const TerminalItem = memo(function TerminalItem({
     return (
       <HelpBlock
         id={item.id}
+        openRequestId={item.openRequestId}
         units={item.units}
         penaltySec={item.penaltySec}
         locale={locale ?? 'en'}

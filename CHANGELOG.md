@@ -54,6 +54,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- Step-by-step help opens in a large modal reader with zoomable screenshots, copyable values and preserved reading position. Closing it returns focus to the terminal; rereading does not add another penalty.
+- Help defaults to enabled in mock mode, while explicit global and per-player settings still take precedence.
+
 - Target PC/AOS 7.5 for the NCP game: restore project creation and category instructions in all five languages without the 7.6 identity-source sharing or category Owner Project requirement. Preserve the project-category investigation separately on branch `7.7`; future compatibility remains unconfirmed.
 
 - The bootcamp now prints the real ingress addresses of the cluster you are on,

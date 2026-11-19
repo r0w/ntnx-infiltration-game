@@ -69,7 +69,7 @@ const bundle: LocaleBundle = makeBundle('en', {
 });
 
 const noopNutanix: NutanixClient = {
-  mode: 'mock',
+  mode: 'live',
   async request() {
     throw new Error('noop client — not used in these tests');
   },
@@ -103,11 +103,11 @@ function freshDb(): Database {
   return db;
 }
 
-function makeService(db: Database = freshDb()) {
+function makeService(db: Database = freshDb(), mode: 'mock' | 'live' = 'live') {
   const service = new SessionService({
     db,
     runner: new StageRunner(stages, new CheckRegistry()),
-    nutanix: noopNutanix,
+    nutanix: { ...noopNutanix, mode },
     logger: silentLogger,
     packId: PACK_ID,
     bundle,
@@ -152,6 +152,20 @@ describe('resolveHelpEnabled', () => {
 });
 
 describe('SessionService step-by-step help', () => {
+  test('mock help defaults on, is callable, and respects explicit overrides', async () => {
+    const { service } = makeService(freshDb(), 'mock');
+    const session = await awaitingSession(service, 'free');
+    expect(service.isHelpEnabledGlobally()).toBe(true);
+    expect(service.requestHelp(session.id).status).toBe('ok');
+    service.setHelpEnabledGlobally(false);
+    expect(httpStatus(() => service.requestHelp(session.id))).toBe(403);
+    service.setSessionHelp(session.id, true);
+    expect(service.requestHelp(session.id).status).toBe('ok');
+    service.setSessionHelp(session.id, false);
+    service.setHelpEnabledGlobally(true);
+    expect(httpStatus(() => service.requestHelp(session.id))).toBe(403);
+  });
+
   test('is disabled by default: the server refuses the request', async () => {
     const { service } = makeService();
     const session = await awaitingSession(service, 'paid');

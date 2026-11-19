@@ -3,9 +3,10 @@ import type { ClusterConfigQueries } from './db/queries';
 /** cluster_config key holding the operator's global help switch (boolean). */
 export const HELP_ENABLED_KEY = 'help_enabled';
 
-/** Global flag. Step-by-step help is OFF until the operator turns it on. */
-export function readHelpEnabledGlobally(cfg: ClusterConfigQueries): boolean {
-  return cfg.get<unknown>(HELP_ENABLED_KEY) === true;
+/** Global flag. An explicit operator choice wins over the transport default. */
+export function readHelpEnabledGlobally(cfg: ClusterConfigQueries, defaultEnabled = false): boolean {
+  const configured = cfg.get<unknown>(HELP_ENABLED_KEY);
+  return typeof configured === 'boolean' ? configured : defaultEnabled;
 }
 
 export function writeHelpEnabledGlobally(cfg: ClusterConfigQueries, enabled: boolean): void {
