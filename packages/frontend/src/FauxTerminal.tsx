@@ -74,6 +74,7 @@ export interface FauxTerminalProps {
   identityLabel?: string;
   /** Step-by-step help of the stage being played. Absent = no help UI. */
   help?: FauxTerminalHelp;
+  helpTitle?: string;
 }
 
 export function FauxTerminal({
@@ -86,6 +87,7 @@ export function FauxTerminal({
   typingSpeedMs,
   skipPauses,
   imageCaptions,
+  helpTitle,
   gatedAt,
   autoPlay,
   onSubmit,
@@ -350,6 +352,7 @@ export function FauxTerminal({
             typingSpeedMs={typingSpeedMs}
             skipPauses={skipPauses}
             imageCaptions={imageCaptions}
+            helpTitle={helpTitle}
             isActive={idx === activeIdx}
             onDone={advanceSequencer}
             locale={locale}
@@ -497,11 +500,13 @@ function Line({
   typingSpeedMs,
   skipPauses,
   imageCaptions,
+  helpTitle,
   isActive,
   onDone,
   locale,
 }: {
   item: RenderItem;
+  helpTitle?: string;
   typingSpeedMs: number;
   imageCaptions?: boolean;
   skipPauses: boolean;
@@ -537,6 +542,7 @@ function Line({
       typingSpeedMs={typingSpeedMs}
       skipPauses={skipPauses}
       imageCaptions={imageCaptions}
+      helpTitle={helpTitle}
       isActive={isActive}
       onDone={handleDone}
       locale={locale}

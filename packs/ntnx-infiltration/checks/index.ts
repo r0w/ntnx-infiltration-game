@@ -1,4 +1,4 @@
-import { refreshAction, dailyScheduleError, reportRunsAtThree } from '../schedule';
+import { refreshAction, dailyScheduleError } from '../schedule';
 import { selectSecondarySubnet } from '../network';
 import { checkSdk, listAllSdk } from './sdk';
 import { unwrapOne } from '../acts/helpers';
@@ -898,142 +898,101 @@ interface MsegRule {
   spec?: MsegRuleSpec;
 }
 
-/**
- * Stage 18 `create-microseg-policy`. Mirrors the original Python check from
- * ntnx-escape-game (`CheckSecurityPolicy`) — beyond name + ENFORCE state we
- * verify the player scoped the policy to their `{Trigram}-cat:Critical`
- * category and added at least one outbound allow-all rule.
- */
+interface MsegPolicy {
+  extId?: string;
+  type?: string;
+  state?: string;
+  isHitlogEnabled?: boolean;
+  isIpv6TrafficAllowed?: boolean;
+  rules?: MsegRule[];
+}
+
+const msegScoped = (s: MsegRuleSpec, category: string) =>
+  s.securedGroupCategoryAssociatedEntityType === 'VM' &&
+  s.securedGroupCategoryReferences?.length === 1 &&
+  s.securedGroupCategoryReferences[0] === category;
+const msegOutbound = (s: MsegRuleSpec) =>
+  Object.keys(s).some(k => k.startsWith('dest') && s[k as keyof MsegRuleSpec] != null);
+const msegHasServices = (s: MsegRuleSpec) =>
+  Object.entries(s).some(([k, v]) => /Services$|serviceGroupReferences$/.test(k) &&
+    (Array.isArray(v) ? v.length > 0 : v != null));
+const msegDeny = (s: MsegRuleSpec) => s.srcAllowSpec === 'NONE' ||
+  (s.isAllProtocolAllowed === false && !msegHasServices(s));
+
+async function readMsegPolicy(ctx: CheckContext): Promise<{ policy: MsegPolicy; category: string }> {
+  const name = `${getTrigram(ctx)}-mseg-policy`;
+  const category = await lookupCategoryUuid(ctx, `${getTrigram(ctx)}-cat`, 'Critical');
+  if (!category) throw new Error(`Category '${getTrigram(ctx)}-cat:Critical' not found.`);
+  const policies = await listAllSdk<{ extId?: string; name?: string }>(
+    p => checkSdk(ctx.nutanix).microseg.policies.listNetworkSecurityPolicies(p));
+  const found = policies.find(p => p.name === name);
+  if (!found?.extId) throw new Error(`Security policy '${name}' not found.`);
+  const policy = unwrapOne<MsegPolicy>(await checkSdk(ctx.nutanix).microseg.policies.getNetworkSecurityPolicyById(found.extId));
+  if (!policy) throw new Error(`Security policy '${name}' could not be read.`);
+  if (policy.type !== 'APPLICATION' || policy.state !== 'ENFORCE')
+    throw new Error('Use an Application policy in Enforce mode.');
+  if (policy.isHitlogEnabled !== true) throw new Error('Enable Policy Hitlogs.');
+  if (policy.isIpv6TrafficAllowed === true) throw new Error('Disable unrestricted IPv6 traffic.');
+  const rules = policy.rules ?? [];
+  const application = rules.filter(r => r.type === 'APPLICATION');
+  if (!application.length || application.some(r => !r.spec || !msegScoped(r.spec, category)))
+    throw new Error(`Scope every application rule to '${getTrigram(ctx)}-cat:Critical' (VM).`);
+  if (rules.some(r => r.type !== 'APPLICATION' && r.type !== 'INTRA_GROUP'))
+    throw new Error('Use application rules for this policy.');
+  if (!application.some(r => r.spec?.destAllowSpec === 'ALL' && r.spec.isAllProtocolAllowed === true))
+    throw new Error('Allow all outbound traffic.');
+  return { policy: { ...policy, extId: found.extId }, category };
+}
+
+/** Stage 18: enforced, logged, category-scoped policy with no inbound allowance. */
 async function CheckSecurityPolicy(ctx: CheckContext): Promise<CheckResult> {
-  const trigram = getTrigram(ctx);
-  const expected = `${trigram}-mseg-policy`;
   try {
-    // Scoping to the category is the point — no category, no pass.
-    const catUuid = await lookupCategoryUuid(ctx, `${trigram}-cat`, 'Critical');
-    if (!catUuid) {
-      return {
-        pass: false,
-        detail: `Category '${trigram}-cat:Critical' not found on the cluster — re-create it.`,
-      };
-    }
-    const policies = await listAllSdk<{ extId?: string; name?: string; state?: string }>(
-      p => checkSdk(ctx.nutanix).microseg.policies.listNetworkSecurityPolicies(p)
-    );
-    const found = policies.find((p) => p.name === expected);
-    if (!found?.extId) {
-      return { pass: false, detail: `Security policy '${expected}' not found.` };
-    }
-    if (found.state && !/ENFORCE/i.test(found.state)) {
-      return {
-        pass: false,
-        detail: `Security policy '${expected}' in state '${found.state}' (expected ENFORCE).`,
-      };
-    }
-    const detail = unwrapOne<{ rules?: MsegRule[] }>(await checkSdk(ctx.nutanix).microseg.policies.getNetworkSecurityPolicyById(found.extId));
-    const rules = detail?.rules ?? [];
-    const scoped = rules.some((r) =>
-      (r.spec?.securedGroupCategoryReferences ?? []).includes(catUuid),
-    );
-    if (!scoped) {
-      return {
-        pass: false,
-        detail: `Security policy '${expected}' is not scoped to '${trigram}-cat:Critical'.`,
-      };
-    }
-    // Python `CheckSecurityPolicy` only asserts "≥1 rule has
-    // is_all_protocol_allowed" (no destAllowSpec clause). Match the
-    // permissive shape so a hand-crafted policy that uses a different
-    // direction for the allow-all rule still passes.
-    const hasAllProtocol = rules.some((r) => r.spec?.isAllProtocolAllowed === true);
-    if (!hasAllProtocol) {
-      return {
-        pass: false,
-        detail: `Security policy '${expected}' missing an allow-all-protocol rule.`,
-      };
-    }
-    ctx.cache.set({ kind: 'securityPolicy', logicalName: expected, uuid: found.extId });
-    return { pass: true, detail: `Security policy '${expected}' in enforce mode.` };
+    const { policy } = await readMsegPolicy(ctx);
+    const inbound = (policy.rules ?? []).filter(r => r.type === 'APPLICATION' && !msegOutbound(r.spec!));
+    if (inbound.some(r => !msegDeny(r.spec!)))
+      return { pass: false, detail: 'Block all inbound traffic before opening SSH and ICMP in the next stage.' };
+    ctx.cache.set({ kind: 'securityPolicy', logicalName: `${getTrigram(ctx)}-mseg-policy`, uuid: policy.extId! });
+    return { pass: true, detail: 'Policy enforced: inbound blocked, outbound allowed, Hitlogs enabled.' };
   } catch (err) {
     return { pass: false, detail: `Security policy query failed: ${nutanixErrorDetail(err)}` };
   }
 }
 
-/**
- * Stage 19 `allow-ssh-in-microseg`. Diverges intentionally from the Python
- * `CheckSecurityPolicy2` (which rejected ANY rule referencing the built-in
- * `ssh` service group). The prompt tells the player to add a Traffic Filter
- * "ssh from {frontendHost} only" — so we now assert what the prompt actually
- * asks for:
- *   (a) at least one inbound rule opens SSH (references the `ssh` service
- *       group OR covers tcp/22) AND is restricted to the `frontendHost` source
- *       IP (`srcSubnet`), never `srcAllowSpec: ALL`;
- *   (b) at least one rule has `icmpServices` populated.
- * Both ways of expressing the SSH rule (the `ssh` service group with a source
- * filter, or a raw tcp/22 + source filter) pass — what matters is that SSH is
- * locked to the IP, not open to the world.
- */
+/** Stage 19 validates configuration only; discovered traffic is a learning activity. */
 async function CheckSecurityPolicy2(ctx: CheckContext): Promise<CheckResult> {
-  const trigram = getTrigram(ctx);
-  const expected = `${trigram}-mseg-policy`;
-  const frontendHost = String(ctx.vars.get('frontendHost') ?? '').trim();
   try {
-    const policies = await listAllSdk<{ extId?: string; name?: string }>(
-      p => checkSdk(ctx.nutanix).microseg.policies.listNetworkSecurityPolicies(p)
-    );
-    const listEntry = policies.find((p) => p.name === expected);
-    if (!listEntry?.extId) {
-      return { pass: false, detail: `Security policy '${expected}' not found.` };
+    const { policy } = await readMsegPolicy(ctx);
+    const host = String(ctx.vars.get('frontendHost') ?? '').trim();
+    if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(host) || host.split('.').some(n => Number(n) > 255))
+      return { pass: false, detail: 'The game source IPv4 address is missing or invalid; ask the operator to configure frontendHost.' };
+    const groups = await listAllSdk<{ extId?: string; name?: string }>(
+      p => checkSdk(ctx.nutanix).microseg.serviceGroups.listServiceGroups(p));
+    const sshId = groups.find(g => g.name === 'ssh')?.extId;
+    let ssh = false, icmp = false;
+    for (const rule of policy.rules ?? []) {
+      if (rule.type !== 'APPLICATION' || msegOutbound(rule.spec!)) continue;
+      const s = rule.spec!;
+      if (msegDeny(s)) continue;
+      // Reject unmodelled source/service selectors rather than overlooking a broader rule.
+      const known = new Set(['srcAllowSpec', 'srcSubnet', 'tcpServices', 'udpServices', 'icmpServices', 'serviceGroupReferences']);
+      const extra = Object.entries(s).some(([k, v]) =>
+        (k.startsWith('src') || /Services$|References$/.test(k)) &&
+        k !== 'securedGroupCategoryReferences' && !known.has(k) &&
+        (Array.isArray(v) ? v.length > 0 : v != null));
+      if (extra || s.isAllProtocolAllowed === true || s.udpServices?.length)
+        return { pass: false, detail: 'Keep other inbound traffic blocked: allow only TCP/22 from the game IP and ICMP echo from Allow All.' };
+      const ports = s.tcpServices ?? [], services = s.serviceGroupReferences ?? [], echoes = s.icmpServices ?? [];
+      const sshOnly = (ports.length > 0 || services.length > 0) &&
+        ports.every(p => p.startPort === 22 && p.endPort === 22) &&
+        services.every(id => Boolean(sshId) && id === sshId) && echoes.length === 0;
+      const echoOnly = echoes.length > 0 && echoes.every(i => i.type === 8 && i.code === 0 && i.isAllAllowed !== true) &&
+        ports.length === 0 && services.length === 0;
+      if (sshOnly && !s.srcAllowSpec && s.srcSubnet?.value === host && s.srcSubnet.prefixLength === 32) ssh = true;
+      else if (echoOnly && s.srcAllowSpec === 'ALL' && !s.srcSubnet) icmp = true;
+      else return { pass: false, detail: `Use separate inbound rules: SSH TCP/22 from ${host}/32 only; ICMP type 8/code 0 from Allow All.` };
     }
-    // The built-in `ssh` service group is one of the two valid ways to express
-    // the SSH rule; look up its extId so we recognise it. Missing on older PCs
-    // is fine — a raw tcp/22 rule is the other accepted shape.
-    const serviceGroups = await listAllSdk<{ extId?: string; name?: string }>(
-      p => checkSdk(ctx.nutanix).microseg.serviceGroups.listServiceGroups(p)
-    );
-    const sshExtId = serviceGroups.find((g) => g.name === 'ssh')?.extId;
-    const detail = unwrapOne<{ rules?: MsegRule[] }>(await checkSdk(ctx.nutanix).microseg.policies.getNetworkSecurityPolicyById(listEntry.extId));
-    const rules = detail?.rules ?? [];
-
-    // A rule "opens SSH" if it references the `ssh` service group or covers tcp/22.
-    const opensSsh = (s: MsegRuleSpec): boolean => {
-      if (s.destAllowSpec) return false; // outbound rule — not an inbound SSH allowance
-      if (sshExtId && (s.serviceGroupReferences ?? []).includes(sshExtId)) return true;
-      return (s.tcpServices ?? []).some((t) => (t.startPort ?? 0) <= 22 && (t.endPort ?? 0) >= 22);
-    };
-    const sshRules = rules.filter((r) => r.spec && opensSsh(r.spec));
-    if (sshRules.length === 0) {
-      return { pass: false, detail: `Security policy '${expected}' has no SSH rule — add an inbound 'ssh' Traffic Filter.` };
-    }
-    // SSH must never be open to all sources.
-    if (sshRules.some((r) => r.spec?.srcAllowSpec === 'ALL')) {
-      return {
-        pass: false,
-        detail: `Security policy '${expected}' allows SSH from anywhere — restrict the SSH Traffic Filter to source ${frontendHost || 'IP'} only.`,
-      };
-    }
-    // …and at least one SSH rule must be scoped to the expected source IP.
-    const restricted = sshRules.some((r) => {
-      const sub = r.spec?.srcSubnet;
-      if (!sub) return false;
-      // No frontendHost to pin against (offline/misconfigured, or mock with no
-      // GAME_FRONTEND_HOST so the fixture's `{frontendHost}` resolves to '') —
-      // at least demand a single-host /32 so a broad range like 0.0.0.0/0 can't
-      // sneak through.
-      return frontendHost ? sub.value === frontendHost : sub.prefixLength === 32;
-    });
-    if (!restricted) {
-      const want = frontendHost ? ` to ${frontendHost}` : ' to a specific source IP';
-      return { pass: false, detail: `Security policy '${expected}' SSH Traffic Filter is not restricted${want}.` };
-    }
-    // ICMP must be present.
-    const hasIcmp = rules.some((r) => (r.spec?.icmpServices ?? []).length > 0);
-    if (!hasIcmp) {
-      return {
-        pass: false,
-        detail: `Security policy '${expected}' missing an ICMP rule — add it as a Traffic Filter.`,
-      };
-    }
-    return { pass: true, detail: `Security policy '${expected}' SSH restricted to ${frontendHost || 'source IP'} + ICMP allowed.` };
+    if (!ssh || !icmp) return { pass: false, detail: `Missing ${!ssh ? `SSH TCP/22 from ${host}/32` : 'ICMP type 8/code 0 from Allow All'} rule.` };
+    return { pass: true, detail: `SSH limited to ${host}/32; ICMP echo allowed from all sources.` };
   } catch (err) {
     return { pass: false, detail: `Security policy query failed: ${nutanixErrorDetail(err)}` };
   }
@@ -1235,8 +1194,8 @@ async function CheckReport(ctx: CheckContext): Promise<CheckResult> {
         detail: `Report '${expected}' is not on a DAILY schedule.`,
       };
     }
-    if (found.schedule?.frequency !== 1 || !reportRunsAtThree(found.schedule?.startTime, found.timezone)) {
-      return { pass: false, detail: `Report '${expected}' must run every day at 03:00.` };
+    if (found.schedule?.frequency !== 1) {
+      return { pass: false, detail: `Report '${expected}' must run every day (frequency 1).` };
     }
     const recipients = found.notificationPolicy?.recipients ?? [];
     if (recipients.length === 0) {

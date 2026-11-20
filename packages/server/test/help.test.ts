@@ -612,3 +612,17 @@ describe('admin help routes', () => {
     ]);
   });
 });
+
+
+test('a resumed single-input stage rebases stale text offsets and needs only one Enter', async () => {
+  const { service, db } = makeService();
+  try {
+    const session = await awaitingSession(service, 'paid');
+    const saved = service.getSession(session.id);
+    const replay = service.replayAwaiting(saved)!;
+    expect(replay.at(-1)?.kind).toBe('await-input');
+    const result = await service.submitInput(session.id, '$continue', '');
+    expect(result.kind).not.toBe('awaiting-input');
+    expect(service.getSession(session.id).awaiting).toBeNull();
+  } finally { db.close(); }
+});

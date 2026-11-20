@@ -22,10 +22,14 @@ export interface HelpLabels {
   charged: (cost: string) => string;
   zoomHint: string;
   close: string;
+  contents: string;
+  guideTitle: (operator: string) => string;
 }
 
 export const HELP_LABELS: Record<string, HelpLabels> = {
   en: {
+    contents: 'In this guide',
+    guideTitle: (operator) => `Guide me, ${operator}.`,
     button: 'help',
     review: 'review help',
     title: 'Step-by-step help',
@@ -36,10 +40,12 @@ export const HELP_LABELS: Record<string, HelpLabels> = {
     no: 'no (Esc)',
     unavailable: 'no help available here',
     charged: (cost) => `${cost} charged once for this stage`,
-    zoomHint: 'enlarge',
+    zoomHint: 'Enlarge screenshot',
     close: 'close',
   },
   fr: {
+    contents: 'Dans ce guide',
+    guideTitle: (operator) => `Guide-moi, ${operator}.`,
     button: 'aide',
     review: "revoir l'aide",
     title: 'Aide pas-à-pas',
@@ -50,10 +56,12 @@ export const HELP_LABELS: Record<string, HelpLabels> = {
     no: 'non (Échap)',
     unavailable: "pas d'aide disponible ici",
     charged: (cost) => `${cost} facturées une seule fois pour ce stage`,
-    zoomHint: 'agrandir',
+    zoomHint: 'Agrandir la capture',
     close: 'fermer',
   },
   de: {
+    contents: 'In dieser Anleitung',
+    guideTitle: (operator) => `Zeig mir den Weg, ${operator}.`,
     button: 'Hilfe',
     review: 'Hilfe erneut anzeigen',
     title: 'Schritt-für-Schritt-Hilfe',
@@ -64,10 +72,12 @@ export const HELP_LABELS: Record<string, HelpLabels> = {
     no: 'nein (Esc)',
     unavailable: 'hier ist keine Hilfe verfügbar',
     charged: (cost) => `${cost} einmalig für diesen Stage berechnet`,
-    zoomHint: 'vergrößern',
+    zoomHint: 'Screenshot vergrößern',
     close: 'schließen',
   },
   es: {
+    contents: 'En esta guía',
+    guideTitle: (operator) => `Guíame, ${operator}.`,
     button: 'ayuda',
     review: 'ver la ayuda de nuevo',
     title: 'Ayuda paso a paso',
@@ -78,10 +88,12 @@ export const HELP_LABELS: Record<string, HelpLabels> = {
     no: 'no (Esc)',
     unavailable: 'no hay ayuda disponible aquí',
     charged: (cost) => `${cost} cobrados una sola vez en este stage`,
-    zoomHint: 'ampliar',
+    zoomHint: 'Ampliar captura',
     close: 'cerrar',
   },
   it: {
+    contents: 'In questa guida',
+    guideTitle: (operator) => `Guidami, ${operator}.`,
     button: 'aiuto',
     review: "rivedi l'aiuto",
     title: 'Aiuto passo passo',
@@ -92,7 +104,7 @@ export const HELP_LABELS: Record<string, HelpLabels> = {
     no: 'no (Esc)',
     unavailable: 'nessun aiuto disponibile qui',
     charged: (cost) => `${cost} addebitati una sola volta per questo stage`,
-    zoomHint: 'ingrandisci',
+    zoomHint: 'Ingrandisci schermata',
     close: 'chiudi',
   },
 };

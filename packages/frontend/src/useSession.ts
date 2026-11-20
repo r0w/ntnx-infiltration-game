@@ -57,7 +57,7 @@ export function describeDisabled(d: DisabledStage): string {
 }
 
 export type RenderItem =
-  | { kind: 'text'; id: string; color?: string; styles?: string[]; text: string; href?: string; copyable?: boolean }
+  | { kind: 'text'; id: string; color?: string; styles?: string[]; text: string; href?: string; copyable?: boolean; copyText?: string }
   | { kind: 'pause'; id: string; ms: number }
   | { kind: 'await-input'; id: string; variable: string }
   | { kind: 'code'; id: string; text: string; lang?: string }
@@ -185,7 +185,7 @@ export function appendUnits(
   units.forEach((u, idx) => {
     const id = `${idPrefix}-${idx}-${out.length}`;
     if (u.kind === 'text') {
-      out.push({ kind: 'text', id, color: u.color, styles: u.styles, text: u.text, href: u.href, copyable: u.copyable });
+      out.push({ kind: 'text', id, color: u.color, styles: u.styles, text: u.text, href: u.href, copyable: u.copyable, copyText: u.copyText });
     } else if (u.kind === 'await-input') {
       out.push({ kind: 'await-input', id, variable: u.variable });
       awaiting = u.variable;

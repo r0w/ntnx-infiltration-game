@@ -17,6 +17,7 @@ export interface TerminalItemProps {
   onDone: () => void;
   /** Session locale, for the few client-side strings inside an item (help block). */
   locale?: string;
+  helpTitle?: string;
 }
 
 /**
@@ -33,6 +34,7 @@ export const TerminalItem = memo(function TerminalItem({
   isActive,
   onDone,
   locale,
+  helpTitle,
 }: TerminalItemProps) {
   if (item.kind === 'text') {
     return (
@@ -42,6 +44,7 @@ export const TerminalItem = memo(function TerminalItem({
         styles={item.styles}
         href={item.href}
         copyable={item.copyable}
+        copyText={item.copyText}
         locale={locale}
         speedMs={typingSpeedMs}
         isActive={isActive}
@@ -142,6 +145,7 @@ export const TerminalItem = memo(function TerminalItem({
     return (
       <HelpBlock
         id={item.id}
+        title={helpTitle}
         openRequestId={item.openRequestId}
         units={item.units}
         penaltySec={item.penaltySec}
@@ -341,13 +345,14 @@ interface TypewriterTextProps {
   styles?: string[];
   href?: string;
   copyable?: boolean;
+  copyText?: string;
   locale?: string;
   speedMs: number;
   isActive: boolean;
   onDone: () => void;
 }
 
-function TypewriterText({ text, color, styles, href, copyable, locale, speedMs, isActive, onDone }: TypewriterTextProps) {
+function TypewriterText({ text, color, styles, href, copyable, copyText, locale, speedMs, isActive, onDone }: TypewriterTextProps) {
   const [shown, setShown] = useState('');
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
@@ -393,7 +398,7 @@ function TypewriterText({ text, color, styles, href, copyable, locale, speedMs, 
       </a>
     );
   }
-  if (copyable && shown) return <CopyValue text={text} className={className} locale={locale} disabled={shown !== text}>{shown}</CopyValue>;
+  if (copyable && shown) return <CopyValue text={copyText ?? text} className={className} locale={locale} disabled={shown !== text}>{shown}</CopyValue>;
   return <span className={className}>{shown}</span>;
 }
 

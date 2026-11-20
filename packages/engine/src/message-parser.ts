@@ -51,7 +51,7 @@ export function parseMessage(
   const colorStack: string[] = [];
   const styleStack: string[] = [];
   const hrefStack: string[] = [];
-  let copyDepth = 0;
+  const copyTransforms: boolean[] = [];
 
   const currentColor = () => colorStack[colorStack.length - 1] ?? defaultColor;
   const currentHref = () => hrefStack[hrefStack.length - 1];
@@ -67,7 +67,8 @@ export function parseMessage(
       color,
       ...(styles ? { styles } : {}),
       ...(href ? { href } : {}),
-      ...(copyDepth > 0 ? { copyable: true } : {}),
+      ...(copyTransforms.length > 0 ? { copyable: true } : {}),
+      ...(copyTransforms.at(-1) ? { copyText: textBuf.toLowerCase() } : {}),
     });
     textBuf = '';
   };
@@ -199,7 +200,7 @@ export function parseMessage(
       return handleVoidTag(tag);
     }
     if (tag.kind === 'open') {
-      return handleOpenTag(tag.name);
+      return handleOpenTag(tag.name, tag.attrs);
     }
     return handleCloseTag(tag.name);
   }
@@ -256,8 +257,8 @@ export function parseMessage(
     }
   }
 
-  function handleOpenTag(name: string): boolean {
-    if (name === 'copy') { flushText(); copyDepth++; return true; }
+  function handleOpenTag(name: string, attrs: Record<string, string>): boolean {
+    if (name === 'copy') { flushText(); copyTransforms.push(attrs.transform === 'lowercase'); return true; }
     if (COLOR_TAGS.has(name)) {
       flushText();
       colorStack.push(name);
@@ -272,7 +273,7 @@ export function parseMessage(
   }
 
   function handleCloseTag(name: string): boolean {
-    if (name === 'copy') { flushText(); copyDepth = Math.max(0, copyDepth - 1); return true; }
+    if (name === 'copy') { flushText(); copyTransforms.pop(); return true; }
     if (COLOR_TAGS.has(name)) {
       const topIdx = colorStack.lastIndexOf(name);
       if (topIdx === -1) return true; // orphan close — consume and ignore

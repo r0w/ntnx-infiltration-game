@@ -10,8 +10,7 @@
     "stage-017.line-03",
     "stage-017.line-04",
     "stage-017.line-05",
-    "stage-017.line-06",
-    "stage-017.line-07"
+    "stage-017.line-06"
   ],
   "check": {
     "fn": "CheckStoragePolicy"
@@ -21,5 +20,6 @@
   ],
   "dependsOn": [
     "create-category"
-  ]
+  ],
+  "checkMessagePrefix": "sentences.check-"
 }

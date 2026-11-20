@@ -99,23 +99,36 @@ test('storage act adds Critical while preserving existing category bindings',asy
   expect(writes[0].encryptionSpec.encryptionState).toBe('ENABLED');
 });
 
-test('reports use the next 03:00 and accept 03:00 in any timezone',async()=>{
-  const {nextReportTime, reportRunsAtThree}=await import('../../../packs/ntnx-infiltration/schedule');
+test('new report schedules still use the next 03:00 UTC',async()=>{
+  const {nextReportTime}=await import('../../../packs/ntnx-infiltration/schedule');
   expect(nextReportTime(new Date('2026-09-13T02:59:00Z'))).toBe('2026-09-13T03:00:00.000Z');
   expect(nextReportTime(new Date('2026-09-13T03:00:00Z'))).toBe('2026-09-14T03:00:00.000Z');
-  expect(reportRunsAtThree('2026-09-13T01:00:00Z','Europe/Zurich')).toBe(true);
-  expect(reportRunsAtThree('2026-09-13T03:00:00Z','Europe/Zurich')).toBe(true);
-  expect(reportRunsAtThree('2026-09-13T03:00:00Z','Invalid/Zone')).toBe(true);
-  expect(reportRunsAtThree('2026-09-13T03:00:00Z')).toBe(true);
-  expect(reportRunsAtThree('2026-09-13T02:00:00Z','Europe/Zurich')).toBe(false);
-  expect(reportRunsAtThree('2026-09-13T12:00:00Z','UTC')).toBe(false);
-  expect(reportRunsAtThree(undefined)).toBe(false);
-  expect(reportRunsAtThree('invalid')).toBe(false);
+});
+
+test('report validation ignores time and timezone but requires daily frequency, recipient and VM widget',async()=>{
+  const ctx=context();
+  ctx.vars.set('EmailReport','@example.com','test');
+  const report:any={name:'fid-report',extId:'report',timezone:'UTC',schedule:{scheduleInterval:'DAILY',frequency:1},notificationPolicy:{recipients:[{emailAddress:'fid@example.com'}]},sections:[{rows:[{widgets:[{widgetInfo:{entityType:'VM'}}]}]}]};
+  ctx.nutanix.sdk={opsmgmt:{reportConfigs:{listReportConfigs:async()=>({data:{data:[report]}})}}};
+  for(const time of ['2026-11-20T02:00:21Z','2026-11-20T08:00:00Z','2026-11-19T21:30:00Z','2026-11-19T21:15:00Z']) {
+    report.schedule.startTime=time;
+    expect((await checks.CheckReport!(ctx as unknown as CheckContext)).pass).toBe(true);
+  }
+  report.schedule.frequency=2;
+  expect((await checks.CheckReport!(ctx as unknown as CheckContext)).pass).toBe(false);
+  report.schedule.frequency=1;report.schedule.scheduleInterval='WEEKLY';
+  expect((await checks.CheckReport!(ctx as unknown as CheckContext)).pass).toBe(false);
+  report.schedule.scheduleInterval='DAILY';report.notificationPolicy.recipients=[];
+  expect((await checks.CheckReport!(ctx as unknown as CheckContext)).pass).toBe(false);
+  report.notificationPolicy.recipients=[{emailAddress:'wrong@example.com'}];
+  expect((await checks.CheckReport!(ctx as unknown as CheckContext)).pass).toBe(false);
+  report.notificationPolicy.recipients=[{emailAddress:'fid@example.com'}];report.sections=[];
+  expect((await checks.CheckReport!(ctx as unknown as CheckContext)).pass).toBe(false);
 });
 
 test('report act repairs an old schedule without replacing its recipients or widgets',async()=>{
   const ctx=context();const writes:any[]=[];
-  const old={name:'fid-report',extId:'report',sections:[{name:'VMs',rows:[{widgets:[{$widgetInfoItemDiscriminator:'server-only',widgetInfo:{$objectType:'opsmgmt.v4.config.WidgetConfig',entityType:'VM'}}]}]}],notificationPolicy:{recipients:[{emailAddress:'fid@example.com'}]},schedule:{scheduleInterval:'DAILY',frequency:1,startTime:'2026-01-01T12:00:00Z'}};
+  const old={name:'fid-report',extId:'report',sections:[{name:'VMs',rows:[{widgets:[{$widgetInfoItemDiscriminator:'server-only',widgetInfo:{$objectType:'opsmgmt.v4.config.WidgetConfig',entityType:'VM'}}]}]}],notificationPolicy:{recipients:[{emailAddress:'fid@example.com'}]},schedule:{scheduleInterval:'DAILY',frequency:2,startTime:'2026-01-01T12:00:00Z'}};
   ctx.nutanix.sdk={opsmgmt:{reportConfigs:{listReportConfigs:async()=>({data:{data:[old]}})}}};
   const fetch=spyOn(globalThis,'fetch').mockImplementation(async(_url,init)=>{
     if(init?.method==='PUT')writes.push(JSON.parse(String(init.body)));
@@ -126,4 +139,12 @@ test('report act repairs an old schedule without replacing its recipients or wid
   expect(writes[0].notificationPolicy).toEqual(old.notificationPolicy);expect(JSON.stringify(writes[0].sections)).not.toContain('ItemDiscriminator');
   expect(writes[0].sections[0].rows[0].widgets[0].widgetInfo).toEqual(old.sections[0].rows[0].widgets[0].widgetInfo);
   expect(writes[0].schedule.startTime).toContain('T03:00:00.000Z');expect(writes[0].extId).toBeUndefined();
+});
+
+test('report act leaves an existing daily schedule at its chosen time',async()=>{
+  const ctx=context();
+  ctx.nutanix.sdk={opsmgmt:{reportConfigs:{listReportConfigs:async()=>({data:{data:[{name:'fid-report',extId:'report',timezone:'UTC',schedule:{scheduleInterval:'DAILY',frequency:1,startTime:'2026-11-20T02:00:21Z'}}]}})}}};
+  const fetch=spyOn(globalThis,'fetch').mockImplementation(async()=>{throw new Error('Must not change this report');});
+  try { await acts['create-report'](ctx); expect(fetch).not.toHaveBeenCalled(); }
+  finally { fetch.mockRestore(); }
 });

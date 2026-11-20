@@ -1,5 +1,5 @@
 /** Also works on the HTTP lab URLs where the Clipboard API is unavailable. */
-export async function copyText(text: string): Promise<void> {
+export async function copyText(text: string, trigger?: HTMLElement): Promise<void> {
   if (window.isSecureContext && navigator.clipboard) {
     try { await navigator.clipboard.writeText(text); return; } catch { /* try legacy copy */ }
   }
@@ -10,7 +10,10 @@ export async function copyText(text: string): Promise<void> {
   ta.value = text;
   ta.setAttribute('readonly', '');
   Object.assign(ta.style, { position: 'fixed', top: '0', left: '0', opacity: '0', pointerEvents: 'none' });
-  document.body.appendChild(ta);
+  // A modal makes the rest of the document inert, including a textarea
+  // appended to body. Keep the fallback inside the active dialog.
+  const dialog = trigger?.closest('dialog[open]') ?? focused?.closest('dialog[open]');
+  (dialog ?? document.body).appendChild(ta);
   try {
     ta.select();
     if (!document.execCommand('copy')) throw new Error('Clipboard unavailable');
@@ -31,5 +34,5 @@ export async function copyText(text: string): Promise<void> {
 export function copyTerminalText(text: string, trigger: HTMLElement): Promise<void> {
   const input = trigger.closest('.terminal')?.querySelector<HTMLInputElement>('[data-primary-input]:not(:disabled)');
   input?.focus({ preventScroll: true });
-  return copyText(text);
+  return copyText(text, trigger);
 }

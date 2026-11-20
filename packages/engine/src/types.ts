@@ -116,6 +116,8 @@ export interface StageDefinition {
     args?: Record<string, unknown>;
     rehydrate?: string;
   };
+  /** Optional localized phrase pool played before a deferred check. */
+  checkMessagePrefix?: string;
   captures?: string[];
   /**
    * When true and the stage's check passes, the server omits the `check` field

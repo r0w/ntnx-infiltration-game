@@ -10,13 +10,13 @@
     "stage-027.line-03",
     "stage-027.line-04",
     "stage-027.line-05",
-    "stage-027.line-06",
-    "stage-027.line-07"
+    "stage-027.line-06"
   ],
   "check": {
     "fn": "CheckReport"
   },
   "needs": [
     "Trigram"
-  ]
+  ],
+  "checkMessagePrefix": "sentences.check-"
 }

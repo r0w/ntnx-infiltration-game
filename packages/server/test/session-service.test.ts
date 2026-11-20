@@ -1182,3 +1182,30 @@ describe('switchIdentity — pack that asks first', () => {
     expect(service.getSession(session.id).finishedAt).toBeNull();
   });
 });
+
+test('check phrases vary on retries and remember the previous choice after service recreation', async () => {
+  const db = new Database(':memory:'); db.exec(SCHEMA);
+  const registry = new CheckRegistry(); let runs = 0;
+  registry.register('fail', async () => { runs++; return { pass: false }; });
+  const stage: StageDefinition = { index: 0, id: 'task', name: 'task', active: true, messages: ['task'], check: { fn: 'fail' }, checkMessagePrefix: 'sentences.check-' };
+  const bundle = makeBundle('en', { en: { task: 'Ready? <input/>', 'sentences.check-01': 'One<pause sec="2"/>', 'sentences.check-02': 'Two<pause sec="2"/>' } });
+  const create = () => new SessionService({ db, runner: new StageRunner([stage], registry), nutanix: noopNutanix, logger: silentLogger, packId: 'test', bundle });
+  try {
+    let service = create();
+    const session = await service.create({ locale: 'en', clusterEndpoint: '', clusterProfile: 'other', capabilities: [] });
+    await service.advance(session.id);
+    let previous = '';
+    for (let i = 0; i < 6; i++) {
+      service = create();
+      const result = await service.submitInput(session.id, '$continue', '');
+      expect(result.checkPending).toBe(true);
+      expect(runs).toBe(i);
+      const text = result.units.filter(u => u.kind === 'text').map(u => u.kind === 'text' ? u.text : '').join('').trim();
+      expect(['One', 'Two']).toContain(text);
+      expect(text).not.toBe(previous);
+      expect(result.units.some(u => u.kind === 'pause' && u.ms === 2000)).toBe(true);
+      previous = text;
+      await service.resolvePendingCheck(session.id);
+    }
+  } finally { db.close(); }
+});

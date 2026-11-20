@@ -202,3 +202,14 @@ test('inline copy treats substituted markup as text and decodes entities', () =>
     { kind: 'text', text: ' plain', color: 'default' },
   ]);
 });
+
+
+test('lowercase copy preserves display names and leaves ordinary copy unchanged', () => {
+  const parsed = parseMessage("<white><copy transform='lowercase'>Charlie</copy>, <copy transform='lowercase'>{Approver}</copy>, <copy>William</copy></white>", new VariableStore({ Approver: 'Thom' }));
+  const names = parsed.units.filter(u => u.kind === 'text' && u.copyable);
+  expect(names).toEqual([
+    { kind: 'text', text: 'Charlie', color: 'white', copyable: true, copyText: 'charlie' },
+    { kind: 'text', text: 'Thom', color: 'white', copyable: true, copyText: 'thom' },
+    { kind: 'text', text: 'William', color: 'white', copyable: true },
+  ]);
+});

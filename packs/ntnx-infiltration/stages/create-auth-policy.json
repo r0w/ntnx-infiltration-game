@@ -6,8 +6,7 @@
   "defaultColor": "magenta",
   "messages": [
     "stage-007.line-01",
-    "stage-007.line-02",
-    "stage-007.line-03"
+    "stage-007.line-02"
   ],
   "check": {
     "fn": "CheckAuthPolicy"
@@ -17,5 +16,6 @@
   ],
   "dependsOn": [
     "create-admin-user"
-  ]
+  ],
+  "checkMessagePrefix": "sentences.check-"
 }

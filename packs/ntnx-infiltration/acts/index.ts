@@ -15,7 +15,7 @@
  */
 import type { ActContext } from '@ntnx-game/engine';
 import { restoreRecoveryVm } from './recovery';
-import { refreshAction, dailyScheduleError, nextReportTime, reportRunsAtThree, reportWriteBody } from '../schedule';
+import { refreshAction, dailyScheduleError, nextReportTime, reportWriteBody } from '../schedule';
 import { assignVmOwnership } from './vm-ownership';
 import type { NutanixSdk } from '@ntnx-game/nutanix';
 import {
@@ -1069,6 +1069,7 @@ async function actCreateMicrosegPolicy(ctx: ActContext): Promise<void> {
         name,
         type: 'APPLICATION',
         state: 'ENFORCE',
+        isHitlogEnabled: true,
         scope: 'GLOBAL',
         rules: [
           {
@@ -1157,9 +1158,10 @@ async function actAllowSshInMicroseg(ctx: ActContext): Promise<void> {
     const s = r.spec;
     if (!s || s.destAllowSpec) return false;
     if (s.srcAllowSpec === 'ALL') return false;
-    return coversSsh(s) && Boolean(s.srcSubnet?.value);
+    return coversSsh(s) && s.srcSubnet?.value === frontendHost && s.srcSubnet?.prefixLength === 32;
   });
-  const hasIcmp = rules.some((r) => (r.spec?.icmpServices ?? []).length > 0);
+  const hasIcmp = rules.some((r) => !r.spec?.destAllowSpec && r.spec?.srcAllowSpec === 'ALL' &&
+    (r.spec?.icmpServices ?? []).some((i: AnyRec) => i.type === 8 && i.code === 0 && !i.isAllAllowed));
   if (hasSsh && hasIcmp) return;
   // `securedGroupCategoryAssociatedEntityType` + `securedGroupCategoryReferences`
   // must match the existing rules so the new rule binds to the same VMs.
@@ -1422,8 +1424,7 @@ async function actCreateReport(ctx: ActContext): Promise<void> {
   const reports = await listAllSdk<AnyRec>(p => sdk(ctx).opsmgmt.reportConfigs.listReportConfigs(p));
   const existing = reports.find(r => r.name === name);
   if (existing?.extId) {
-    if (existing.schedule?.scheduleInterval === 'DAILY' && existing.schedule?.frequency === 1 &&
-        reportRunsAtThree(existing.schedule?.startTime, existing.timezone)) return;
+    if (existing.schedule?.scheduleInterval === 'DAILY' && existing.schedule?.frequency === 1) return;
     const path = `/api/opsmgmt/v4.0/config/report-configs/${existing.extId}`;
     const current = await getV4WithEtag<{ data?: AnyRec }>(ctx, path);
     if (!current?.etag || !current.body.data) throw new Error('Report revision unavailable; retry');

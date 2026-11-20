@@ -15,8 +15,7 @@
     "stage-033.line-08",
     "stage-033.line-09",
     "stage-033.line-10",
-    "stage-033.line-11",
-    "stage-033.line-12"
+    "stage-033.line-11"
   ],
   "check": {
     "fn": "CheckPlaybook"
@@ -33,5 +32,6 @@
     "stage-033.help-06",
     "stage-033.help-07"
   ],
-  "helpPenaltySec": 150
+  "helpPenaltySec": 150,
+  "checkMessagePrefix": "sentences.check-"
 }

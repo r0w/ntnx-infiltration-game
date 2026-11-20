@@ -15,8 +15,7 @@
     "stage-020.line-08",
     "stage-020.line-09",
     "stage-020.line-10",
-    "stage-020.line-11",
-    "stage-020.line-12"
+    "stage-020.line-11"
   ],
   "check": {
     "fn": "CheckProtectionPolicy"
@@ -26,5 +25,6 @@
   ],
   "dependsOn": [
     "apply-category-to-vm"
-  ]
+  ],
+  "checkMessagePrefix": "sentences.check-"
 }

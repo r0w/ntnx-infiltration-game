@@ -1,3 +1,4 @@
+import { helpLabels } from './helpLabels';
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import type { MessageUnit } from '@ntnx-game/shared';
 import { api, ApiError, type PackInfo, type PackNavChapter } from './api';
@@ -395,6 +396,7 @@ export function GameApp() {
         typingSpeedMs={typingSpeedMs}
         skipPauses={skipPauses}
         imageCaptions={pack?.imageCaptions ?? false}
+        helpTitle={pack?.id === 'ntnx-infiltration' ? helpLabels(session.locale).guideTitle('Tank') : undefined}
         gatedAt={session.gatedAt}
         locale={session.locale}
         autoPlay={autoPlay}

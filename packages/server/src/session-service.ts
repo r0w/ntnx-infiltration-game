@@ -14,7 +14,7 @@ import type {
   SessionDirectory,
   StageDefinition,
 } from '@ntnx-game/engine';
-import { ActionRegistry, StageRunner, resolveKey } from '@ntnx-game/engine';
+import { ActionRegistry, StageRunner, resolveKey, parseMessage } from '@ntnx-game/engine';
 import { withMockOverlay, withVariableInterpolation } from '@ntnx-game/nutanix';
 import { withVariableInterpolation as withKubeInterpolation } from '@ntnx-game/kube-transport';
 import type { DisabledStage, HelpResponse, HelpSnapshot, MessageUnit } from '@ntnx-game/shared';
@@ -697,6 +697,15 @@ export class SessionService {
    * resuming a session sees the same prompt text instead of a bare marker.
    * Returns null when the session is not awaiting anything.
    */
+  private awaitingOffset(units: MessageUnit[], awaiting: NonNullable<SessionRecord['awaiting']>): number {
+    const inputs = units.flatMap((unit, index) => unit.kind === 'await-input' ? [{ unit, index }] : []);
+    // A saved render offset can drift when an operator deploys revised text.
+    // A single input has an unambiguous identity; multi-input stages retain
+    // their saved position so repeated continue prompts are never skipped.
+    if (inputs.length === 1 && inputs[0]!.unit.variable === awaiting.variable) return inputs[0]!.index + 1;
+    return awaiting.renderOffset;
+  }
+
   replayAwaiting(session: SessionRecord): MessageUnit[] | null {
     if (!session.awaiting) return null;
     const stage = this.runner.stageByName(session.awaiting.stageName);
@@ -709,7 +718,7 @@ export class SessionService {
       this.bundle,
       this.globalTypingSpeedMs,
     );
-    return rendered.units.slice(0, session.awaiting.renderOffset);
+    return rendered.units.slice(0, this.awaitingOffset(rendered.units, session.awaiting));
   }
 
   /**
@@ -804,7 +813,7 @@ export class SessionService {
     }
   }
 
-  private buildCheckContext(session: SessionRecord): CheckContext {
+  private buildCheckContext(session: SessionRecord, stageName?: string): CheckContext {
     const vars = variablesForSession(session.id, this.variables, this.initialVariables);
     const cache = clusterCacheForSession(session.id, this.clusterCache);
     const overlay = mockOverlayForSession(session.id, this.mockOverlay);
@@ -813,7 +822,7 @@ export class SessionService {
     // like `{Trigram}-adm` without hard-coding a trigram. Then apply the
     // per-session mock overlay so stage-fired actions (deleteVM, etc.) shadow
     // the fixture for subsequent queries. Real adapters are passthrough.
-    const interpolated = withVariableInterpolation(this.nutanix, () => vars.snapshot());
+    const interpolated = withVariableInterpolation(this.nutanix, () => vars.snapshot(), () => stageName ?? session.pendingCheck?.stageName ?? session.awaiting?.stageName);
     const nutanix = withMockOverlay(interpolated, () => overlay.list());
     // Same per-session `{Var}` templating for the k8s transport (NKP pack), so a
     // fixture named `user{UserNum}-...` matches the player's captured UserNum.
@@ -1096,7 +1105,7 @@ export class SessionService {
       this.bundle,
       this.globalTypingSpeedMs,
     );
-    const fromIdx = session.awaiting.renderOffset;
+    const fromIdx = this.awaitingOffset(rendered.units, session.awaiting);
     const nextInputIdx = this.runner.nextAwaitInputAfter(rendered.units, fromIdx);
 
     if (nextInputIdx >= 0) {
@@ -1147,7 +1156,6 @@ export class SessionService {
       };
     }
 
-    const prevAwaiting = session.awaiting;
     this.sessions.setAwaiting(session.id, null);
 
     // finalizeStage defers a check (streams the "wait…" narrative, parks
@@ -1161,7 +1169,7 @@ export class SessionService {
       rendered.actions,
       [],
       rendered.typingSpeedMs,
-      { variable, offset: prevAwaiting.renderOffset },
+      { variable, offset: fromIdx },
     );
   }
 
@@ -1316,7 +1324,7 @@ export class SessionService {
       if (stage.index <= currentIdx) continue;
       if (stage.index > targetIdx) break;
       const start = Date.now();
-      const result = await this.runner.rehydrate(stage, ctx);
+      const result = await this.runner.rehydrate(stage, this.buildCheckContext(session, stage.name));
       this.history.record(
         session.id,
         stage.name,
@@ -1362,6 +1370,25 @@ export class SessionService {
     pendingRetry?: { variable: string; offset: number },
   ): Promise<AdvanceResult> {
     if (stage.check) {
+      if (stage.checkMessagePrefix) {
+        const prefix = stage.checkMessagePrefix;
+        const local = this.bundle.catalogs[session.locale];
+        const fallback = this.bundle.catalogs[this.bundle.defaultLocale];
+        const entries = (catalog: typeof local) => Object.entries(catalog ?? {})
+          .filter(([key, value]) => key.startsWith(prefix) && typeof value === 'string' && value.trim());
+        const localized = entries(local);
+        const pool = localized.length ? localized : entries(fallback);
+        const stateKey = `__lastCheckPhrase:${prefix}`;
+        const previous = ctx.vars.get(stateKey);
+        const alternatives = pool.filter(([key]) => key !== previous);
+        const choices = alternatives.length ? alternatives : pool;
+        const selected = choices[Math.floor(Math.random() * choices.length)];
+        if (selected) {
+          ctx.vars.set(stateKey, selected[0], stage.name);
+          const phrase = parseMessage(selected[1], ctx.vars, stage.defaultColor);
+          units = [...units, ...phrase.units];
+        }
+      }
       this.sessions.setPendingCheck(session.id, {
         stageName: stage.name,
         retryVariable: pendingRetry?.variable ?? '',

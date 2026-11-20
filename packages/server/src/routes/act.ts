@@ -87,7 +87,7 @@ export function buildActRoutes(deps: ActRoutesDeps): Hono {
     });
   }
 
-  function makeContext(trigram: string, extraVars: Record<string, unknown> = {}): ActContext {
+  function makeContext(trigram: string, extraVars: Record<string, unknown> = {}, getStage?: () => string | undefined): ActContext {
     const varStore = new Map<string, unknown>();
     for (const [k, v] of Object.entries(deps.initialVariables ?? {})) varStore.set(k, v);
     varStore.set('Trigram', trigram);
@@ -129,7 +129,7 @@ export function buildActRoutes(deps: ActRoutesDeps): Hono {
       // `Trigram` in its requests. No-op on non-mock transports
       // (withVariableInterpolation early-returns when mode !== 'mock').
       nutanix: withVariableInterpolation(deps.nutanix, () =>
-        Object.fromEntries(varStore),
+        Object.fromEntries(varStore), getStage,
       ),
       vars,
       cache,
@@ -168,7 +168,7 @@ export function buildActRoutes(deps: ActRoutesDeps): Hono {
     };
     const fn = deps.pack.acts.get(stage);
     if (!fn) throw new HttpError(404, `no act registered for stage "${stage}"`);
-    const ctx = makeContext(trigram, body.vars ?? {});
+    const ctx = makeContext(trigram, body.vars ?? {}, () => stage);
     const startedAt = Date.now();
     try {
       await fn(ctx);
@@ -240,7 +240,8 @@ export function buildActRoutes(deps: ActRoutesDeps): Hono {
     // worst-case.
     const maxRetries = Math.max(0, body.maxRetries ?? 10);
     const retryDelayMs = Math.max(0, body.retryDelayMs ?? 3000);
-    const ctx = makeContext(trigram, body.vars ?? {});
+    let activeStage: string | undefined;
+    const ctx = makeContext(trigram, body.vars ?? {}, () => activeStage);
 
     const results: Array<{
       stage: string;
@@ -252,6 +253,7 @@ export function buildActRoutes(deps: ActRoutesDeps): Hono {
     }> = [];
 
     for (const stage of deps.pack.stages) {
+      activeStage = stage.name;
       const started = Date.now();
       const actFn = deps.pack.acts.get(stage.name);
       const checkFn = stage.check ? deps.pack.checks.get(stage.check.fn) : undefined;
