@@ -16,7 +16,7 @@ Before importing the runbook or blueprint, create a project named "lab" if it do
 
 You need an HPoC and two files. That's it.
 
-1. Book one dedicated 4-node HPoC cluster using the custom runbook.
+1. Book one dedicated HPoC cluster using the custom runbook: **4 nodes for the full game**, or a single node with unsupported stages skipped. Use profile `hpoc` for either.
     - AOS and Prism Central: **7.5.x**
     - NCM Self-Service: **enabled**
     - Flow Network Security (microsegmentation): **enabled**

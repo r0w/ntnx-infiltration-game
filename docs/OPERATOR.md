@@ -6,16 +6,16 @@ The blueprint also includes **NKP Fundamentals (experimental)**, which is outsid
 
 ## Before you start
 
-Book one **dedicated 4-node HPoC cluster** using the custom runbook:
+Book one **dedicated HPoC cluster** using the custom runbook (**4 nodes for the full game**, or a single node with unsupported stages skipped):
 
 - **AOS and Prism Central 7.5.x**. Do not select 7.6 for this game.
 - **NCM Self-Service** and **Flow Network Security (microsegmentation)** enabled.
 - Flow Networking, Advanced networking and Leap available.
 - **Intelligent Operations** enabled for the report and automation stages.
 
-The `hpoc` installation prepares the lab and removes one node so players can add it back. Use a cluster dedicated to the game.
+Use `hpoc` for a dedicated lab, including a single-node HPoC. On a 4-node HPoC, installation removes one node for players to add back; on a single node, removal is skipped and the expansion stage is unavailable.
 
-A single-node lab uses profile `other`; node removal and unsupported stages are skipped. The full installer still prepares networks, users and VMs. For an existing training world, see the optional [deployment-only variant](DEPLOYMENT_NOTES.md#shared-clusters-and-existing-installations).
+Use `other` for shared clusters, where HPoC-only operations are skipped. The full installer still prepares networks, users and VMs. For an existing training world, see the optional [deployment-only variant](DEPLOYMENT_NOTES.md#shared-clusters-and-existing-installations).
 
 ## Install
 
@@ -31,7 +31,7 @@ Download `nig-00-runbook-prerequisites.json` and `nig-01-blueprint.json` from th
 
 | Field | Value |
 |---|---|
-| Cluster profile | `hpoc` for the dedicated 4-node lab; `other` for a single-node lab |
+| Cluster profile | `hpoc` for a dedicated lab (single-node or 4-node); `other` for a shared cluster |
 | Run mode | `live` for an event, `test` for a rehearsal |
 | NUTANIX credential | Game VM SSH account: keep username `nutanix`, set its password |
 | Secondary network name | `secondary` for HPoC; the existing lab VLAN for `other` |
