@@ -6,7 +6,7 @@ A hands-on game that teaches the **Nutanix Cloud Platform** by playing it. Playe
 
 ![The live scoreboard on the event screen](docs/screenshots/scoreboard.png)
 
-39 stages, 25 live checks against the Nutanix v4 APIs, three languages (two more in progress), an operator console, and a live leaderboard. Deploys from a [Calm blueprint](./tooling/blueprint/) onto PC 7.3 or 7.5.
+39 stages, 25 live checks against the Nutanix v4 APIs, three languages (two more in progress), an operator console, and a live leaderboard. Deploys from a [Calm blueprint](./tooling/blueprint/) onto a dedicated AOS / PC 7.5.x lab.
 
 Based on the original [`ntnx-escape-game`](https://github.com/Golgautier/ntnx-escape-game) by Golgautier.
 
@@ -16,13 +16,19 @@ Before importing the runbook or blueprint, create a project named "lab" if it do
 
 You need an HPoC and two files. That's it.
 
-1. Book an HPoC with the **AOS + PC Demo - Latest (7.5.x)** runbook.
+1. Book one dedicated 4-node HPoC cluster using the custom runbook.
+    - AOS and Prism Central: **7.5.x**
+    - NCM Self-Service: **enabled**
+    - Flow Network Security (microsegmentation): **enabled**
+    - Enable Intelligent Operations before the session. See the [full prerequisites](docs/OPERATOR.md#before-you-start).
 2. Download the two assets from the [latest release](https://github.com/r0w/ntnx-infiltration-game/releases/latest): `nig-00-runbook-prerequisites.json` and `nig-01-blueprint.json`.
 3. **Run the runbook** (Self-Service > Runbooks): upload `nig-00...` and run it. It creates the AD endpoint the install needs.
 4. **Launch the blueprint** (Self-Service > Blueprints): upload `nig-01...`, set the `NUTANIX` credential to your PC admin password, then launch and fill the short form (PC IP + credentials, run mode). The install then runs on its own.
 5. When the app reaches `running`, its description shows the URLs: `/` for players, `/scoreboard` for the projector, `/admin` for you.
 
-Want to tune it (pick the run mode, gate stages, lock for lunch, wire a multi-cluster leaderboard, email your participants)? It's all in the [**operator guide**](docs/OPERATOR.md).
+Some stages offer illustrated **help**, disabled by default in `live` and `test` and enabled in `mock`. Switch it on for everyone or individual players in `/admin`; optional help penalties count toward the score.
+
+For launch settings, help, gates and the scoreboard, see the [**operator guide**](docs/OPERATOR.md).
 
 ## Develop locally
 
@@ -107,7 +113,7 @@ docs/
 5. (For mock mode) Add a fixture to `packs/<pack>/fixtures.json` keyed by `"METHOD path"`.
 6. Tag with `"impact": "destructive"` if the stage mutates cluster-wide state - it then only runs when the cluster profile is `hpoc`. Tag `"requires": ["NCM"]` (or `IO`, `CalmDSL`, `NodeRemove`) if the stage depends on an optional feature.
 7. Declare `"dependsOn": ["create-vm"]` for each earlier stage whose *cluster state* this one consumes - `needs` only models variables, so without this the `/admin` cascade lets an operator disable a prerequisite and leave this stage looking fine. Then run `bun tooling/audit-stage-deps.ts <pack> --apply` to refresh the derived `needs` / `captures`.
-8. (Optional) Add a step-by-step help block shown on demand: `"help": ["my-stage.help-01", ...]` lists locale keys written in the same grammar as `messages` (`<code>` for copyable values, `<image src='my-stage-step-01.png' alt='Caption'/>` for screenshots kept in `packs/<pack>/assets/`). `"helpPenaltySec": 120` is the time added to the player's playing time the first time they display it; leave it out for a free help. The operator switches the help on in `/admin` (off by default).
+8. (Optional) Add a step-by-step help block shown on demand: `"help": ["my-stage.help-01", ...]` lists locale keys written in the same grammar as `messages` (`<code>` for copyable values, `<image src='my-stage-step-01.png' alt='Caption'/>` for screenshots kept in `packs/<pack>/assets/`). `"helpPenaltySec": 120` is the time added to the player's playing time the first time they display it; leave it out for a free help. The operator controls help in `/admin` (off by default in `live` / `test`, on in `mock`).
 
 The frontend `DevPanel` lets you jump to any stage without replaying the whole game. Captured variables and the cluster cache are preserved across jumps. Restart the backend after editing pack JSON - Bun caches the pack at boot.
 

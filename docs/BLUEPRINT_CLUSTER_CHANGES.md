@@ -5,7 +5,7 @@ installation and day-2 actions; gameplay/auto-play has its own resource writes.
 
 The full NCP `other` profile skips dedicated-cluster operations, but still
 prepares a training world. On a shared cluster with existing games, use the
-deployment-only artifact described in [OPERATOR.md](OPERATOR.md#shared-clusters-and-existing-installations).
+deployment-only artifact described in [deployment reference](DEPLOYMENT_NOTES.md#shared-clusters-and-existing-installations).
 
 | Task | Full NCP `hpoc` | Full NCP `other` | NKP / deployment-only NCP |
 | --- | --- | --- | --- |
