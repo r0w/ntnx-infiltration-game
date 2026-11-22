@@ -21,165 +21,31 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ## [1.2.0] - 2026-11-22
 
+**Reverted the NCP game to PC/AOS 7.5. Version 7.6 will not be supported.**
+
 ### Added
 
-- Click instruction values to copy resource names, credentials, category values and network settings, including each IP pool endpoint separately. Inline copy supports HTTP labs, keyboard access and feedback in all five NCP languages.
-
-- Add a deployment-only blueprint for installing NCP or NKP on shared clusters without preparing or replacing shared infrastructure.
-- A second game: the NKP Fundamentals bootcamp, 26 stages from multi-tenancy
-  through persistent storage, observability and GitOps.
-- Click any screenshot in the terminal to open it full size.
-- Screenshots can carry their description as a visible caption, and the run can
-  pause on each one so it is not scrolled away while you read it.
-- The NKP tour and the NDK lab open their interactive demo in the game instead
-  of sending players off to the bootcamp site.
-- A collapsible contents menu down the left of the NKP bootcamp, with the
-  chapters of the original. It shows where you are, and opens any step you have
-  already reached so you can read it again without leaving your place.
-- Each game names its own operator: Tank still speaks in the infiltration game,
-  the bootcamp is narrated by the instructor.
-- Auto-play can now walk the whole NKP bootcamp on a real fleet: every lab step
-  it validates, it can also perform.
-- Wiping a bootcamp learner's work is one call: `/api/act/cleanup-all/user01`
-  removes their project and everything in it, ready for another run.
-- Operator act, auto-play and cleanup endpoints accept a bootcamp learner
-  (`user01`, or just `01`) the same way they accept an agent code.
-- The blueprint launch screen now asks which game to install, NCP or NKP.
-- The Pack tab can export the stage setup as one string, import it on another
-  instance, and reset every stage back to the pack defaults.
-- The Pack tab says at a glance how many stages differ from the pack defaults.
-
-- Scoreboard display settings in Admin: fit everyone or scroll smoothly in both directions, with speed, pause, simplified projection and progress highlights. Settings persist on the game server and update its scoreboards automatically.
-- Mock scoreboard previews for 1–200 participants, with presets, cluster labels and optional random progress every five seconds.
-- Step-by-step help on demand: a `[? help]` button, or typing `?`, shows an illustrated walkthrough of the stage with copyable values. Available on the Security Policy, SSH rule and NCM playbook stages, in English, French and German.
-- Help counts in the score: each stage can set a time penalty, in seconds, added to the playing time in the ranking. The scoreboard shows a badge, the Agents table has a Penalties column, and the player confirms before a costly first display.
-- Switch the help on or off for everyone, or for one player, from `/admin`. It is off by default, and the player's setting wins over the global one. The per-player setting is a small menu in the Agents table.
-- Change a stage's help cost without redeploying: the Pack tab has a new HELP COST column with a quick editor and a reset to the pack value. The cost is part of the exported and imported config, and players who already used a help keep what they were charged.
-- Auto-scroll has a fourth speed, **Turbo** (96 px/s), after Slow, Normal and Fast. The speed is now picked from a small menu like the help setting of the Agents table, which also shows each speed in pixels per second.
-- Time spent held by the operator no longer counts against a player: how long each player waited at an admin gate or under the lunch lock is recorded from the moment the game stops them to the moment you unlock or resume.
-- Scoreboard cards show the playing time plus the help penalties, which is the time players are ranked on, not the raw elapsed time: the clock stops while a player is held. An orange `paused` chip means a gate, a violet `lunch` chip the lunch lock, and a cyan `idle` chip means nothing was attempted for over a minute (it restarts at the unlock). The help badge is now red, with an icon, and sits to the left of the playing time. The mock previews show these states too, with presets for 5, 12, 21, 32, 40 and 50 agents.
-- NIG Central statistics now carry the playing time of each stage and of the whole run (the wall-clock time minus the time the operator held the player at a gate or under the lunch lock), the help displayed with its penalties, and a new `help_used` event. The existing `wallMs` and `totalMs` are unchanged, and nothing identifies a player.
+- NKP Fundamentals bootcamp with 26 stages, interactive demos, chapter navigation, auto-play and learner cleanup.
+- Illustrated step-by-step help with configurable time penalties and per-player controls.
+- Copyable instruction values and zoomable screenshots.
+- Scoreboard projection controls, scrolling and previews for large events.
+- Deployment-only blueprint for installing either game on shared clusters.
 
 ### Changed
 
-- Step-by-step help opens in a large modal reader with zoomable screenshots, copyable values and preserved reading position. Closing it returns focus to the terminal; rereading does not add another penalty.
-- Help defaults to enabled in mock mode, while explicit global and per-player settings still take precedence.
-
-- Target PC/AOS 7.5 for the NCP game: restore project creation and category instructions in all five languages without the 7.6 identity-source sharing or category Owner Project requirement. Preserve the project-category investigation separately on branch `7.7`; future compatibility remains unconfirmed.
-
-- The bootcamp now prints the real ingress addresses of the cluster you are on,
-  so a step reads `wordpress07.10.54.93.18.sslip.io` instead of asking you to
-  substitute a placeholder. If an address cannot be read, the original wording
-  is used.
-- The contents menu now opens folded and unfolds only as far as where you are,
-  so a bootcamp does not greet a learner with every step at once.
-- The contents menu no longer carries a "back to where you are" button: reading
-  a step opens a panel, so the run behind it never moves.
-- The two games are called NCP and NKP in `/admin` and on the launch screen.
-- The blueprint's two application profiles now carry the games' names, `NCP` and
-  `NKPFundamentals`, instead of `DefaultProfile` and `NkpProfile`.
-- Installing the NKP bootcamp no longer asks for the console URL or the
-  bootstrap VM address: the install finds the `nkp-boot` VM on Prism Central,
-  and the game builds the console link from the address it already reads off the
-  fleet. Both fields stay on the screen for anyone who wants to pin them.
-- The game's name in the browser tab and header now comes from the pack, so each
-  game carries its own.
-- Screenshots in the terminal are wider and centred, so the detail a step points
-  at is readable without enlarging.
-- Each game now carries its own settings, its own cluster questions and its own
-  Kubernetes access instead of the server holding both games' at once; the
-  kubeconfig setting is named `KUBECONFIG_PATH`, with the old `NKP_KUBECONFIG`
-  still accepted.
-- The bootcamp no longer serves the infiltration game's ops console at `/ssh`.
-- The operator guide now covers both games, including what the NKP bootcamp
-  needs on the cluster and what changes in `/admin`.
-- The Pack tab now opens with the whole run in play order, colour-coded by what
-  each stage will do, and the stage list can be filtered and searched.
-- The prerequisites runbook now asks which project to use instead of assuming
-  one named `lab`, and says so plainly when that project does not exist.
-
-- Scoreboard layout adapts to the screen and participant count, including 50 players at 1920×1080. Progress fills each card's background, and display controls live in Admin to keep the projected view clean.
-- The scoreboard display settings in Admin use the same text sizes as the rest of the console: the option titles were larger than the panel title.
-- The ranking now compares playing time instead of the absolute finish time: finish minus start, minus the time held at gates and by the lunch lock, plus help penalties. A late start or a long wait at a gate no longer costs a place, and players still playing are ordered as before.
-- Help penalties are shown in the same compact format as the clocks (`+4m30`, `+45s`) everywhere they appear instead of `+4 min 30 s`: on the scoreboard cards, in the Agents table, in the HELP COST column and in what the player sees (the help button, the confirmation and the help block). The penalty is red in the player's help block, like the scoreboard badge.
-- The report stage accepts a 03:00 schedule regardless of the report timezone.
-- In `test` and `mock` modes, text now appears instantly and `<pause>` beats are skipped by default. The dev panel's speed slider and "no pauses" box still override this, and `live` keeps the pack's pacing.
+- Rankings use playing time plus help penalties, excluding operator holds and lunch breaks.
+- Help opens in a modal reader; mock mode enables it by default.
+- Clearer NCP 7.5 instructions and updated operator guides.
+- NKP setup discovers cluster addresses and displays them directly in the instructions.
+- NIG Central statistics include the game, playing time and help usage.
 
 ### Fixed
 
-- Return focus to the terminal prompt when copying an instruction value or code block, so Enter can validate the stage without another click and without scrolling the page.
-
-- Highlight the instruction to start the VM on its own line before stage validation, in all five languages.
-
-- Use VLAN/Subnet in the project infrastructure instructions in all five languages.
-
-- Remove the copy affordance from the narrative reminder of the logged-in account before project creation.
-
-- Keep the local-account warning as plain highlighted text; the login username remains copyable in the credentials line.
-
-- Use the familiar hand cursor for copyable instruction values instead of the platform-specific copy cursor.
-
-- Auto-play now waits for microsegmentation and protection policy tasks and reports failures instead of returning success. Missing categories and microsegmentation visibility timeouts also fail explicitly.
-- Correct “Catagories” in the English category instructions.
-
-- Show numbered bootcamp learners by their user identity on the scoreboard instead of "anonymous".
-
-- Restore blueprint CI and publication by pinning the Python 3.9 jobs to Ubuntu 24.04.
-
-- Monitor the selected application’s latest action, including Refresh Kubeconfig and Switch Mode.
-
-- Resolve the game URL from the service variable populated during installation on both supported Calm profiles.
-
-- Restart the game when refreshing its kubeconfig or updating a pinned image, while preserving sessions.
-
-- Capture the deployed VM address for application links on both NCP and NKP, including older Prism Central versions.
-- Keep shared deployments free of cluster discovery actions and scope deployment monitoring to the selected application.
-
-- The NKP blueprint selects the `nkp` image and uses its own VM address for telemetry, with the same SSH user validation as NCP.
-
-- Turning off a stage in the Pack tab now also turns off the stages whose
-  cluster resources it creates, in the infiltration game too: disabling the VM
-  stage takes the six stages that act on that VM with it.
-- Asking to switch player in the bootcamp no longer jumps straight to the end
-  screen: it puts you back at the question, with the previous answer cleared.
-- The terminal now offers to switch player in the words of the game you are
-  playing, "user" in the bootcamp rather than "agent".
-- The NKP app you deploy from the terminal now lands on the cluster whose
-  address its Ingress carries, so `https://user09.<ingress>.sslip.io` really
-  serves NGINX instead of returning a 404.
-- Running the whole bootcamp from the operator endpoints no longer reports every
-  step as failed on a cluster where every step actually worked.
-- Replaying the bootcamp for a learner who already reached the dynamic
-  assignment lab no longer sends the second cluster back out of their project.
-- Usage stats now identify a deployment by the machine it runs on, instead of
-  reporting the same container address from every install.
-- Usage stats say which game they come from, so the two are no longer counted
-  as one.
-- The bootcamp's learners now appear in `/admin` Users: each pack says which
-  captured value names a player, so a user number counts as an identity.
-- When a bootcamp check fails, `/admin` now says what it found, like the
-  infiltration game does.
-- Turning off a bootcamp stage in the Pack tab now also turns off the stages
-  whose cluster resources it creates.
-- Placeholders such as `<any_node_IP>` now show as written, in the text and in
-  the YAML you copy, instead of appearing as `&lt;`.
-- The NKP NodePort step now follows the bootcamp's own wording and its full
-  command sequence, including the `NODE_PORT` variable it relies on.
-- The NKP contents menu now nests like the bootcamp's own: one Optional Labs
-  chapter, with Expose app on production inside Deploy and expose an app.
-- The NKP bootcamp's takeaways, both chapter recaps and the conclusion, now
-  carry the wording of the original instead of a summary of it.
-- The NKP bootcamp puts back ten steps and notes that had been summarised away,
-  including the warning not to break a shared environment, and how to find the
-  MetalLB pool, the node IPs and the Traefik address.
-- A screenshot with a long caption no longer sits off to the left of it.
-- The install no longer stops when the cluster serves an older v4 API than
-  expected, or when erasure coding has to be turned off on an Objects container.
-- The install no longer stops on clusters running NCM Self-Service 4.4.0, which
-  rejected one of the two blueprints the game uploads for later stages.
-
-- Central telemetry uses the game VM address supplied by the blueprint instead of the Docker bridge IP, distinguishing VMs first started on the same day. Update Game also sets this address for existing installations.
-- If telemetry initialization fails, statistics are disabled for that process so the game can still start.
+- Restore terminal focus after copying and clarify VM startup instructions.
+- Report policy task failures accurately during auto-play.
+- Correct NKP player switching, stage dependencies, validation and application links.
+- Improve deployment compatibility, day-2 actions and kubeconfig refresh while preserving sessions.
+- Keep the game available if telemetry initialization fails.
 
 ## [1.1.0] - 2026-09-13
 
