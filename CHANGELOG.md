@@ -25,7 +25,7 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
-- NKP Fundamentals bootcamp with 26 stages, interactive demos, chapter navigation, auto-play and learner cleanup.
+- NKP Fundamentals bootcamp: experimental, work in progress.
 - Illustrated step-by-step help with configurable time penalties and per-player controls.
 - Copyable instruction values and zoomable screenshots.
 - Scoreboard projection controls, scrolling and previews for large events.
@@ -36,14 +36,12 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 - Rankings use playing time plus help penalties, excluding operator holds and lunch breaks.
 - Help opens in a modal reader; mock mode enables it by default.
 - Clearer NCP 7.5 instructions and updated operator guides.
-- NKP setup discovers cluster addresses and displays them directly in the instructions.
 - NIG Central statistics include the game, playing time and help usage.
 
 ### Fixed
 
 - Restore terminal focus after copying and clarify VM startup instructions.
 - Report policy task failures accurately during auto-play.
-- Correct NKP player switching, stage dependencies, validation and application links.
 - Improve deployment compatibility, day-2 actions and kubeconfig refresh while preserving sessions.
 - Keep the game available if telemetry initialization fails.
 
