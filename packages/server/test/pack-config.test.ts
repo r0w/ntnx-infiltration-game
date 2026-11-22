@@ -3,6 +3,7 @@ import { deflateRawSync } from 'node:zlib';
 import {
   decodePackConfig,
   encodePackConfig,
+  meaningfulOverrides,
   planPackConfigImport,
   PackConfigError,
   PACK_CONFIG_PREFIX,
@@ -14,7 +15,7 @@ const STAGE_NAMES = ['login', 'intro', 'outro'];
 
 /** The pack as its files declare it: everything on, nothing gated. */
 function defaults(names: readonly string[] = STAGE_NAMES) {
-  return names.map((name) => ({ name, active: true, adminGate: false }));
+  return names.map((name) => ({ name, active: true, adminGate: false, helpPenaltySec: null }));
 }
 const STAGES = defaults();
 
@@ -22,8 +23,9 @@ function row(
   stageName: string,
   active: boolean | null,
   adminGate: boolean | null,
+  helpPenaltySec: number | null = null,
 ): PackOverlayRow {
-  return { stageName, active, adminGate };
+  return { stageName, active, adminGate, helpPenaltySec };
 }
 
 /** Hand-build a config string so tests can forge payloads the encoder
@@ -192,8 +194,8 @@ describe('planPackConfigImport', () => {
     );
     const plan = planPackConfigImport(cfg, PACK, STAGE_NAMES);
     expect(plan.applied).toEqual([
-      { stageName: 'intro', active: false, adminGate: null },
-      { stageName: 'outro', active: null, adminGate: true },
+      { stageName: 'intro', active: false, adminGate: null, helpPenaltySec: null },
+      { stageName: 'outro', active: null, adminGate: true, helpPenaltySec: null },
     ]);
     expect(plan.missingStages).toEqual([]);
     expect(plan.newStages).toEqual([]);
@@ -247,5 +249,63 @@ describe('planPackConfigImport', () => {
     const plan = planPackConfigImport(cfg, PACK, [...STAGE_NAMES, 'brand-new']);
     expect(plan.newStages).toEqual([]);
     expect(plan.applied.map((a) => a.stageName)).toEqual(['intro']);
+  });
+});
+
+// ─── step-by-step help penalty ───────────────────────────────────────
+
+describe('help penalty overrides', () => {
+  /** `intro` ships a help block costing 120 s; the other stages have none. */
+  const WITH_HELP = [
+    { name: 'login', active: true, adminGate: false, helpPenaltySec: null },
+    { name: 'intro', active: true, adminGate: false, helpPenaltySec: 120 },
+    { name: 'outro', active: true, adminGate: false, helpPenaltySec: null },
+  ];
+
+  test('round-trips a penalty that differs from the pack file', () => {
+    const decoded = decodePackConfig(encodePackConfig(PACK, WITH_HELP, [row('intro', null, null, 300)]));
+    expect(decoded.overrides).toEqual({ intro: { helpPenaltySec: 300 } });
+  });
+
+  test('a free help (0 s) is a real override of a costly one', () => {
+    const decoded = decodePackConfig(encodePackConfig(PACK, WITH_HELP, [row('intro', null, null, 0)]));
+    expect(decoded.overrides).toEqual({ intro: { helpPenaltySec: 0 } });
+  });
+
+  test('a penalty equal to the pack file says nothing and is dropped', () => {
+    expect(meaningfulOverrides([row('intro', null, null, 120)], WITH_HELP)).toEqual([]);
+    expect(decodePackConfig(encodePackConfig(PACK, WITH_HELP, [row('intro', null, null, 120)])).overrides).toEqual({});
+  });
+
+  test('a penalty on a stage without help says nothing and is dropped', () => {
+    expect(meaningfulOverrides([row('outro', null, null, 60)], WITH_HELP)).toEqual([]);
+  });
+
+  test('it rides along with the other overrides of the same stage', () => {
+    const decoded = decodePackConfig(encodePackConfig(PACK, WITH_HELP, [row('intro', false, true, 45)]));
+    expect(decoded.overrides).toEqual({ intro: { active: false, adminGate: true, helpPenaltySec: 45 } });
+  });
+
+  test('import carries it into the plan', () => {
+    const cfg = decodePackConfig(encodePackConfig(PACK, WITH_HELP, [row('intro', null, null, 300)]));
+    const plan = planPackConfigImport(cfg, PACK, STAGE_NAMES);
+    expect(plan.applied).toEqual([
+      { stageName: 'intro', active: null, adminGate: null, helpPenaltySec: 300 },
+    ]);
+  });
+
+  test.each([
+    ['negative', -1],
+    ['fractional', 1.5],
+    ['over the maximum', 3601],
+    ['a string', '120'],
+  ])('rejects a penalty that is %s', (_label, value) => {
+    const forged = forge({ v: 1, p: PACK, s: STAGE_NAMES, o: { intro: { helpPenaltySec: value } } });
+    expect(() => decodePackConfig(forged)).toThrow(/helpPenaltySec/);
+  });
+
+  test('a config written before penalties existed still imports', () => {
+    const forged = forge({ v: 1, p: PACK, s: STAGE_NAMES, o: { intro: { active: false } } });
+    expect(decodePackConfig(forged).overrides).toEqual({ intro: { active: false } });
   });
 });

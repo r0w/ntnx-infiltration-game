@@ -1,0 +1,13 @@
+{
+  "id": "nkp-020",
+  "name": "ndk",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.ndk.demo"
+  ],
+  "needs": [
+    "UserNum"
+  ]
+}

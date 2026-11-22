@@ -368,7 +368,9 @@
           "spec": {
             "$objectType": "microseg.v4.config.ApplicationRuleSpec",
             "securedGroupCategoryAssociatedEntityType": "VM",
-            "securedGroupCategoryReferences": ["cat-{Trigram}-critical"],
+            "securedGroupCategoryReferences": [
+              "cat-{Trigram}-critical"
+            ],
             "destAllowSpec": "ALL",
             "isAllProtocolAllowed": true
           }
@@ -379,9 +381,19 @@
           "spec": {
             "$objectType": "microseg.v4.config.ApplicationRuleSpec",
             "securedGroupCategoryAssociatedEntityType": "VM",
-            "securedGroupCategoryReferences": ["cat-{Trigram}-critical"],
-            "srcSubnet": { "value": "{frontendHost}", "prefixLength": 32 },
-            "tcpServices": [{ "startPort": 22, "endPort": 22 }]
+            "securedGroupCategoryReferences": [
+              "cat-{Trigram}-critical"
+            ],
+            "srcSubnet": {
+              "value": "{frontendHost}",
+              "prefixLength": 32
+            },
+            "tcpServices": [
+              {
+                "startPort": 22,
+                "endPort": 22
+              }
+            ]
           }
         },
         {
@@ -390,12 +402,58 @@
           "spec": {
             "$objectType": "microseg.v4.config.ApplicationRuleSpec",
             "securedGroupCategoryAssociatedEntityType": "VM",
-            "securedGroupCategoryReferences": ["cat-{Trigram}-critical"],
+            "securedGroupCategoryReferences": [
+              "cat-{Trigram}-critical"
+            ],
             "srcAllowSpec": "ALL",
-            "icmpServices": [{ "type": 8, "code": 0 }]
+            "icmpServices": [
+              {
+                "type": 8,
+                "code": 0
+              }
+            ]
           }
         }
-      ]
+      ],
+      "type": "APPLICATION",
+      "isHitlogEnabled": true
+    },
+    "$mockStages": {
+      "create-microseg-policy": {
+        "data": {
+          "extId": "mseg-{Trigram}",
+          "name": "{Trigram}-mseg-policy",
+          "state": "ENFORCE",
+          "scope": "GLOBAL",
+          "rules": [
+            {
+              "description": "default outbound",
+              "type": "APPLICATION",
+              "spec": {
+                "$objectType": "microseg.v4.config.ApplicationRuleSpec",
+                "securedGroupCategoryAssociatedEntityType": "VM",
+                "securedGroupCategoryReferences": [
+                  "cat-{Trigram}-critical"
+                ],
+                "destAllowSpec": "ALL",
+                "isAllProtocolAllowed": true
+              }
+            },
+            {
+              "type": "APPLICATION",
+              "spec": {
+                "securedGroupCategoryAssociatedEntityType": "VM",
+                "securedGroupCategoryReferences": [
+                  "cat-{Trigram}-critical"
+                ],
+                "srcAllowSpec": "NONE"
+              }
+            }
+          ],
+          "type": "APPLICATION",
+          "isHitlogEnabled": true
+        }
+      }
     }
   },
   "GET /api/datapolicies/v4.2/config/protection-policies": {

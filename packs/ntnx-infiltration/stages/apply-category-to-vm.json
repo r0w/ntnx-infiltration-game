@@ -7,8 +7,7 @@
   "messages": [
     "stage-016.line-01",
     "stage-016.line-02",
-    "stage-016.line-03",
-    "stage-016.line-04"
+    "stage-016.line-03"
   ],
   "check": {
     "fn": "CheckCatVM"
@@ -19,5 +18,6 @@
   "dependsOn": [
     "create-vm",
     "create-category"
-  ]
+  ],
+  "checkMessagePrefix": "sentences.check-"
 }

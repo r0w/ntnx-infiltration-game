@@ -1,14 +1,16 @@
 import { Hono } from 'hono';
 import type { Database } from 'bun:sqlite';
-import type { CapabilityFlag, NutanixClient } from '@ntnx-game/engine';
+import type { CapabilityFlag, KubeClient, NutanixClient, StageDefinition } from '@ntnx-game/engine';
 import { readLcmUpdates } from '@ntnx-game/engine';
-import { probeCapabilities, type CapabilityProbeDetail } from '@ntnx-game/nutanix';
+import type { CapabilityProbeDetail } from '@ntnx-game/nutanix';
 import { HttpError, type SessionService } from '../session-service';
 import { AttemptQueries, SessionQueries, ScoreboardPeerQueries, type AdminSessionRow, type AttemptRow, type ScoreboardPeerRow } from '../db/queries';
 import type { LoadedPack } from '../pack-loader';
 import { analyzeDeps, cascadeDisable, type BrokenStage } from '../dep-analysis';
-import { probeClusterConfig } from '../cluster-config-probe';
+import { storeClusterFacts } from '../cluster-facts';
+import { makePackProbes } from '../pack-probes';
 import { readEnabledWipLocales, writeEnabledWipLocales } from '../effective-locales';
+import { resolveHelpEnabled } from '../help';
 import {
   decodePackConfig,
   encodePackConfig,
@@ -31,11 +33,14 @@ import {
   sendMailtrapEmail,
 } from '../email';
 import { EmailRosterQueries, type ClusterConfigQueries, type EmailRosterRow } from '../db/queries';
-import { EMAIL_RE, substituteSeat, substituteVars } from '@ntnx-game/shared';
+import { EMAIL_RE, HELP_PENALTY_MAX_SEC, substituteSeat, substituteVars, isScoreboardDisplaySettings } from '@ntnx-game/shared';
+import { SCOREBOARD_DISPLAY_KEY } from '../scoreboard-display';
 
 export interface AdminRoutesDeps {
   db: Database;
   pack: LoadedPack;
+  /** Handed to the pack's cluster-fact refresh, for a pack that reads k8s. */
+  kube?: KubeClient;
   /** Read from config; default `nutanix/4u`. See config.ts for rationale. */
   adminPassword: string;
   /**
@@ -162,6 +167,23 @@ export interface AdminUserEntry
    *  as the denominator in the "Progress" cell so a player who legitimately
    *  passed everything reachable shows N/N instead of N/39. */
   effectiveTotalStages: number;
+  /** Effective help flag: the player's override (`helpEnabled`) if set,
+   *  else the global flag. */
+  helpEffective: boolean;
+  /** Stages whose help the player displayed, with the penalty frozen at
+   *  the first display. `helpUses` / `helpPenaltySec` hold the totals. */
+  helpStages: Array<{ stage: string; penaltySec: number }>;
+}
+
+/** The penalty (seconds) a stage's pack file declares for its help, or `null`
+ *  when the stage ships no help at all. */
+function helpDefaultSec(s: StageDefinition): number | null {
+  return (s.help?.length ?? 0) > 0 ? Math.max(0, Math.floor(s.helpPenaltySec ?? 0)) : null;
+}
+
+export interface AdminHelpStatus {
+  /** Global switch. Off until the operator turns it on. */
+  enabled: boolean;
 }
 
 export interface AdminGateEntry {
@@ -218,6 +240,14 @@ export interface AdminPackStageEntry {
    *  with `reason: 'missing-capability'`. The admin UI uses this to render
    *  a `skipped (needs …)` status badge. */
   missingCapabilities: string[];
+  /** The stage ships a step-by-step help block. */
+  hasHelp: boolean;
+  /** Effective help penalty in seconds after overlay (0 when there is no help). */
+  helpPenaltySec: number;
+  /** The penalty its pack file declares, in seconds. */
+  helpPenaltyDefaultSec: number;
+  /** True iff the operator changed the penalty (vs the pack file). */
+  helpPenaltyOverridden: boolean;
 }
 
 export interface AdminPackPayload {
@@ -318,6 +348,15 @@ export interface AdminLunchStatus {
  * sessions" guard on a trusted LAN.
  */
 export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
+  /** The same context boot hands the pack, for the operator-triggered re-runs. */
+  const bootContext = () => ({
+    mode: deps.nutanix.mode,
+    env: process.env,
+    logger: consoleLogger,
+    transports: { nutanix: deps.nutanix, kube: deps.kube },
+    probes: makePackProbes(deps.nutanix, consoleLogger),
+  });
+
   const router = new Hono();
   // Local HttpError → JSON bridge so the sub-router behaves correctly in
   // isolation (used by tests). The top-level app.onError also catches these
@@ -365,14 +404,23 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     await next();
   });
 
+  // Which captured variable names a player, and what to call it on screen.
+  // The rows keep the field name `trigram` on the wire — renaming it would
+  // ripple through the scoreboard and the session table for no gain — but
+  // what fills it, and the word above it, come from the pack.
+  const identityVar = () => deps.pack.manifest.identity?.variable ?? 'Trigram';
+  const identityLabel = () => deps.pack.manifest.identity?.label ?? 'trigram';
+
   router.get('/users', (c) => {
     const effective = deps.service.listEffectiveStages();
-    const rows = sessions.listAdmin(deps.pack.manifest.id);
+    const rows = sessions.listAdmin(deps.pack.manifest.id, identityVar());
     // Compute once per request — same value for every row on this snapshot.
     const effectiveTotalStages = deps.service.effectivePlayableCount(
       deps.capabilities ?? [],
       deps.clusterProfile,
     );
+    const helpGlobal = deps.service.isHelpEnabledGlobally();
+    const helpByPlayer = deps.service.helpUsage.listByPack(deps.pack.manifest.id);
     const entries: AdminUserEntry[] = rows.map((row) => {
       const { lastFailStage, lastFailDetail, lastFailAt, ...rest } = row;
       let nextStageName: string | null = null;
@@ -398,11 +446,17 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
         lastFail,
         totalStages,
         effectiveTotalStages,
+        helpEffective: resolveHelpEnabled(row.helpEnabled, helpGlobal),
+        helpStages: (helpByPlayer.get(row.sessionId) ?? []).map((u) => ({
+          stage: u.stageName,
+          penaltySec: u.penaltySec,
+        })),
       };
     });
     return c.json({
       packId: deps.pack.manifest.id,
       packName: deps.pack.manifest.name,
+      identityLabel: identityLabel(),
       totalStages,
       entries,
     });
@@ -413,7 +467,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   router.get('/attempts', (c) => {
     const raw = Number(c.req.query('limit') ?? 200);
     const limit = Number.isFinite(raw) ? Math.min(Math.max(Math.trunc(raw), 1), 1000) : 200;
-    const entries: AttemptRow[] = attempts.listRecent(deps.pack.manifest.id, limit);
+    const entries: AttemptRow[] = attempts.listRecent(deps.pack.manifest.id, limit, identityVar());
     return c.json({ entries });
   });
 
@@ -471,7 +525,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   // check uses the effective adminGate value.
   router.get('/gates', (c) => {
     const unlocked = new Set(deps.service.listUnlockedGates());
-    const allSessions = sessions.listAdmin(deps.pack.manifest.id);
+    const allSessions = sessions.listAdmin(deps.pack.manifest.id, identityVar());
     const active = allSessions.filter((s) => s.finishedAt === null);
     const totalActive = active.length;
     const unlockedAtByName = new Map(
@@ -544,7 +598,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     const overlay = new Map(
       deps.service.packOverlay.list(deps.pack.manifest.id).map((r) => [r.stageName, r]),
     );
-    const analysis = analyzeDeps({ stages: effective });
+    const analysis = analyzeDeps({ stages: effective, envSeeded: deps.service.seededVariableNames });
     const brokenByName = new Map(analysis.broken.map((b) => [b.stageName, b]));
     const baseByName = new Map(baseStages.map((s) => [s.name, s]));
 
@@ -584,6 +638,14 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
         requires,
         requiresOnOther,
         missingCapabilities,
+        hasHelp: helpDefaultSec(s) !== null,
+        helpPenaltySec: helpDefaultSec(s) === null ? 0 : Math.max(0, Math.floor(s.helpPenaltySec ?? 0)),
+        helpPenaltyDefaultSec: base ? (helpDefaultSec(base) ?? 0) : 0,
+        helpPenaltyOverridden:
+          !!o &&
+          o.helpPenaltySec !== null &&
+          helpDefaultSec(s) !== null &&
+          o.helpPenaltySec !== (base ? (helpDefaultSec(base) ?? 0) : 0),
       };
     });
 
@@ -596,6 +658,35 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       mode: deps.serverMode,
     };
     return c.json(payload);
+  });
+
+  // PUT /pack/stages/:name/help-penalty
+  // Body: { seconds: number | null }  (null = clear override → JSON default)
+  // What showing the stage's step-by-step help for the first time adds to a
+  // player's finish time. Only the next first displays use the new value:
+  // a player who already used the help keeps the penalty frozen then.
+  router.put('/pack/stages/:name/help-penalty', async (c) => {
+    const stageName = c.req.param('name');
+    const baseStage = deps.pack.stages.find((s) => s.name === stageName);
+    if (!baseStage) throw new HttpError(404, 'stage not found');
+    const defaultSec = helpDefaultSec(baseStage);
+    if (defaultSec === null) throw new HttpError(400, 'stage has no help');
+    const body = (await c.req.json().catch(() => ({}))) as { seconds?: unknown };
+    const seconds = body.seconds;
+    if (
+      seconds !== null &&
+      (typeof seconds !== 'number' ||
+        !Number.isInteger(seconds) ||
+        seconds < 0 ||
+        seconds > HELP_PENALTY_MAX_SEC)
+    ) {
+      throw new HttpError(400, `seconds must be a whole number from 0 to ${HELP_PENALTY_MAX_SEC}, or null`);
+    }
+    // Storing the pack's own value would only leave a row saying nothing.
+    const stored = seconds === defaultSec ? null : seconds;
+    deps.service.packOverlay.setHelpPenalty(deps.pack.manifest.id, stageName, stored);
+    deps.service.applyEffectiveStages();
+    return c.json({ ok: true, stageName, seconds: seconds ?? defaultSec, overridden: stored !== null });
   });
 
   // POST /pack/stages/:name/toggle?field=active|adminGate
@@ -637,7 +728,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   router.get('/lunch', (c) => {
     const info = deps.service.globalPauseInfo();
     const active = sessions
-      .listAdmin(deps.pack.manifest.id)
+      .listAdmin(deps.pack.manifest.id, identityVar())
       .filter((s) => s.finishedAt === null);
     const status: AdminLunchStatus = {
       paused: info !== null,
@@ -657,6 +748,33 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     return c.json({ ok: true, paused: false });
   });
 
+  // ─── step-by-step help ─────────────────────────────────────────────
+  // Global switch (off until the operator turns it on) and a per-player
+  // override: `true` forces the help on, `false` off, `null` follows the
+  // global switch. The player-level value wins in both directions, and the
+  // server refuses help requests accordingly (the UI only mirrors it).
+  router.get('/help', (c) => {
+    const status: AdminHelpStatus = { enabled: deps.service.isHelpEnabledGlobally() };
+    return c.json(status);
+  });
+
+  router.put('/help', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { enabled?: unknown };
+    if (typeof body.enabled !== 'boolean') throw new HttpError(400, 'enabled must be a boolean');
+    deps.service.setHelpEnabledGlobally(body.enabled);
+    return c.json({ ok: true, enabled: body.enabled });
+  });
+
+  router.put('/users/:id/help', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { enabled?: unknown };
+    if (body.enabled !== null && typeof body.enabled !== 'boolean') {
+      throw new HttpError(400, 'enabled must be true, false or null');
+    }
+    const id = c.req.param('id');
+    deps.service.setSessionHelp(id, body.enabled);
+    return c.json({ ok: true, sessionId: id, enabled: body.enabled });
+  });
+
   // GET /pack/preview-disable/:name — returns the cascade closure of also
   // disabling this stage. Lets the UI show the operator a confirmation
   // modal listing what else would break before they commit.
@@ -665,7 +783,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     const stage = deps.pack.stages.find((s) => s.name === stageName);
     if (!stage) throw new HttpError(404, 'stage not found');
     const effective = deps.service.listEffectiveStages();
-    const r = cascadeDisable(effective, new Set([stageName]));
+    const r = cascadeDisable(effective, new Set([stageName]), undefined, deps.service.seededVariableNames);
     const preview: AdminPackTogglePreview = { requested: stageName, cascade: r.cascade };
     return c.json(preview);
   });
@@ -683,6 +801,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       name: s.name,
       active: s.active ?? true,
       adminGate: s.adminGate ?? false,
+      helpPenaltySec: helpDefaultSec(s),
     }));
 
   router.get('/pack/config', (c) => {
@@ -730,7 +849,10 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       missingStages: plan.missingStages,
       newStages: plan.newStages,
       clearedStages: [...before].filter((n) => !appliedSet.has(n)).sort(),
-      brokenStages: analyzeDeps({ stages: deps.service.listEffectiveStages() })
+      brokenStages: analyzeDeps({
+        stages: deps.service.listEffectiveStages(),
+        envSeeded: deps.service.seededVariableNames,
+      })
         .broken.map((b) => b.stageName)
         .sort(),
     };
@@ -834,13 +956,16 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     if (deps.nutanix.mode !== 'live') {
       throw new HttpError(400, `cluster-config refresh disabled in ${deps.nutanix.mode} mode`);
     }
-    // Force-refresh: drop existing rows so the probe re-populates from
-    // the cluster (the probe's setIfAbsent semantics protect operator
-    // edits, but here the operator explicitly asked to re-fetch).
-    deps.service.clusterConfig.delete('discoverable_node_serials');
-    deps.service.clusterConfig.delete('lcm_available_updates');
-    await probeClusterConfig({
-      nutanix: deps.nutanix,
+    if (!deps.pack.boot.clusterFacts) {
+      throw new HttpError(400, 'this game caches no cluster facts');
+    }
+    // Force-refresh: drop the rows the pack is about to re-read, so its
+    // `if-absent` facts re-populate too. The operator asked for it explicitly,
+    // which is the one case that outranks their own stored value.
+    const facts = await deps.pack.boot.clusterFacts(bootContext());
+    for (const f of facts) deps.service.clusterConfig.delete(f.key);
+    await storeClusterFacts({
+      facts,
       cfg: deps.service.clusterConfig,
       logger: consoleLogger,
     });
@@ -900,6 +1025,13 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   });
 
   // ─── scoreboard peers ───────────────────────────────────────────────
+  router.put('/scoreboard-display', async (c) => {
+    const body: unknown = await c.req.json().catch(() => null);
+    if (!isScoreboardDisplaySettings(body)) throw new HttpError(400, 'invalid scoreboard display settings');
+    deps.service.clusterConfig.set(SCOREBOARD_DISPLAY_KEY, body, 'admin');
+    return c.json(body);
+  });
+
   // Admin-curated list of peer instances whose `/api/scoreboard` is
   // merged into this server's `/api/scoreboard/combined`. baseUrl is the
   // peer game's HTTP base (e.g. `http://10.55.89.44:3000`); the combined
@@ -1370,10 +1502,12 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   // MultiNode / ApprovalPolicy).
   router.post('/capabilities/refresh', async (c) => {
     const before = new Set(deps.capabilities);
-    const probe = await probeCapabilities({
-      nutanix: deps.nutanix,
-      logger: consoleLogger,
-    });
+    if (!deps.pack.boot.capabilities) {
+      throw new HttpError(400, 'this game gates no stage on a cluster capability');
+    }
+    // Through the pack, like boot does: the operator re-asks the same questions
+    // this game asked at start-up, not a fixed Prism list the server owns.
+    const probe = await deps.pack.boot.capabilities(bootContext());
     // Mutate in place so the array reference shared by /pack + session
     // route immediately sees the new contents — no need to thread a
     // setter through every consumer.

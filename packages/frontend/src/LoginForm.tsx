@@ -7,6 +7,8 @@ export interface LoginFormProps {
   supportedLocales: readonly string[];
   /** Codes still work-in-progress — shown with a "(WIP)" suffix. */
   wipLocales?: readonly string[];
+  /** The game's own name, from the pack. */
+  title?: string;
   onSubmit: (input: { locale: string }) => void;
 }
 
@@ -32,6 +34,7 @@ export function LoginForm({
   defaultLocale,
   supportedLocales,
   wipLocales,
+  title = 'ntnx infiltration game',
   onSubmit,
 }: LoginFormProps) {
   const wip = useMemo(() => new Set(wipLocales ?? []), [wipLocales]);
@@ -44,7 +47,7 @@ export function LoginForm({
   return (
     <div className="login">
       <div className="login-card">
-        <h1 className="login-title">ntnx infiltration game</h1>
+        <h1 className="login-title">{title}</h1>
         <p className="login-subtitle">Pick a language.</p>
         <form
           onSubmit={(e) => {

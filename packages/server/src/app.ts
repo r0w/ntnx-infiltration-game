@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { Hono } from 'hono';
 import { serveStatic } from 'hono/bun';
 import type { Database } from 'bun:sqlite';
-import type { CapabilityFlag, ClusterProfile, NutanixClient } from '@ntnx-game/engine';
+import type { CapabilityFlag, ClusterProfile, KubeClient, NutanixClient } from '@ntnx-game/engine';
 import { StageRunner } from '@ntnx-game/engine';
 import type { CapabilityProbeDetail } from '@ntnx-game/nutanix';
 import type { LoadedPack } from './pack-loader';
@@ -22,6 +22,8 @@ export interface AppDeps {
   db: Database;
   pack: LoadedPack;
   nutanix: NutanixClient;
+  /** Read-only k8s transport, present only for packs that need it (NKP). */
+  kube?: KubeClient;
   /**
    * Operator-facing mode (`mock | test | live`). The engine's NutanixClient
    * is binary (`mock | live`) — `serverMode` carries the UI-only `test`
@@ -45,11 +47,16 @@ export interface AppDeps {
 }
 
 export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } {
-  const runner = new StageRunner(deps.pack.stages, deps.pack.checks, { logger: consoleLogger });
+  const runner = new StageRunner(deps.pack.stages, deps.pack.checks, {
+    logger: consoleLogger,
+    pauseAfterImages: deps.pack.manifest.pauseAfterImages === true,
+    speakers: deps.pack.manifest.speakers,
+  });
   const service = new SessionService({
     db: deps.db,
     runner,
     nutanix: deps.nutanix,
+    kube: deps.kube,
     actions: deps.pack.actions,
     logger: consoleLogger,
     packId: deps.pack.manifest.id,
@@ -99,9 +106,15 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
 
   app.get('/api/pack', (c) => {
     const locales = getEffectiveLocales();
+    const effectiveByName = new Map(service.listEffectiveStages().map((s) => [s.name, s]));
     return c.json({
       id: deps.pack.manifest.id,
       name: deps.pack.manifest.name,
+      title: deps.pack.manifest.title ?? 'ntnx infiltration game',
+      imageCaptions: deps.pack.manifest.imageCaptions === true,
+      // What this pack calls a player, so the terminal can offer to switch it
+      // in the pack's own words instead of the first pack's.
+      identity: deps.pack.manifest.identity,
       mode: serverMode,
       // Surfaced so the DevPanel can dim/highlight destructive stages
       // only on shared clusters (clusterProfile === 'other'); on hpoc
@@ -123,6 +136,13 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
         requires: s.requires ?? [],
         hasCheck: !!s.check,
         captures: s.captures ?? [],
+        // Step-by-step help: whether the stage has any, and what the first
+        // display costs (seconds, 0 = free). Whether the player may use it
+        // is per session: see `help` on GET /api/session/:id.
+        hasHelp: (s.help?.length ?? 0) > 0,
+        // The operator can change the cost live (Pack tab): read it from the
+        // effective stages, not from the pack file.
+        helpPenaltySec: effectiveByName.get(s.name)?.helpPenaltySec ?? s.helpPenaltySec ?? 0,
       })),
     });
   });
@@ -176,12 +196,18 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
       clusterProfile: deps.clusterProfile,
     }),
   );
-  app.route('/api/ssh', buildSshRoutes());
+  // The ops console belongs to the infiltration game, whose stage 19 has the
+  // player lock SSH down to one address. A pack that does not ship it should
+  // not serve endpoints that spawn `ping` on its behalf.
+  if (deps.pack.manifest.sshConsole === true) {
+    app.route('/api/ssh', buildSshRoutes());
+  }
   app.route(
     '/api/admin',
     buildAdminRoutes({
       db: deps.db,
       pack: deps.pack,
+      kube: deps.kube,
       adminPassword: deps.adminPassword,
       service,
       nutanix: deps.nutanix,
@@ -197,6 +223,7 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
     buildActRoutes({
       pack: deps.pack,
       nutanix: deps.nutanix,
+      kube: deps.kube,
       adminPassword: deps.adminPassword,
       clusterProfile: deps.clusterProfile,
       initialVariables: deps.initialVariables,

@@ -1,11 +1,17 @@
 export type MessageUnit =
-  | { kind: 'text'; text: string; color?: string; styles?: string[]; href?: string }
+  | { kind: 'text'; text: string; color?: string; styles?: string[]; href?: string; copyable?: boolean; copyText?: string }
   | { kind: 'pause'; ms: number }
   | { kind: 'await-input'; variable: string }
   | { kind: 'clear' }
   | { kind: 'page-break' }
   | { kind: 'code'; text: string; lang?: string }
-  | { kind: 'image'; src: string; alt?: string };
+  | { kind: 'image'; src: string; alt?: string }
+  /**
+   * An interactive demo the player opens rather than reads: a poster tile that
+   * launches an embedded sandbox (Storylane) in the lightbox. Distinct from
+   * `image` because the poster is a door, not the content.
+   */
+  | { kind: 'demo'; src: string; poster?: string; label?: string };
 
 export type StageStreamEvent =
   | { type: 'stage-start'; stageName: string; typingSpeedMs?: number }
@@ -24,7 +30,29 @@ export interface CreateSessionResponse {
   currentStage: string | null;
   clusterProfile: 'hpoc' | 'other';
   capabilities: string[];
+  help?: HelpSnapshot;
 }
+
+/** Longest step-by-step help penalty an operator can set, in seconds (1 hour). */
+export const HELP_PENALTY_MAX_SEC = 3600;
+
+/** Step-by-step help state of a session, carried on the session snapshot. */
+export interface HelpSnapshot {
+  /** Effective flag: the player's override if set, else the global flag. */
+  enabled: boolean;
+  /** Stages whose help was already displayed (free to show again). */
+  usedStages: string[];
+}
+
+/**
+ * Answer to `POST /api/session/:id/help`. `confirm-required`: the first
+ * display of this stage's help costs `penaltySec` and the player has not
+ * confirmed yet (nothing was recorded). `ok`: the rendered help units;
+ * `charged` is true when this call recorded the first display.
+ */
+export type HelpResponse =
+  | { status: 'confirm-required'; stageName: string; penaltySec: number }
+  | { status: 'ok'; stageName: string; units: MessageUnit[]; penaltySec: number; charged: boolean };
 
 export interface SubmitInputRequest {
   variable: string;

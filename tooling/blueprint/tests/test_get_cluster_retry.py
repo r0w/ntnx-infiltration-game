@@ -1,5 +1,5 @@
 """Guards the retry wiring on get_cluster.py — the FIRST install task, where a
-single transient blip (a ReadTimeout, à la issue #28) used to kill the whole
+single transient blip (a ReadTimeout, as in issue #28) used to kill the whole
 deploy before CLUSTERUUID was set.
 
 Retry is now urllib3's Retry adapter on `_SESS` (proven to work in the Calm

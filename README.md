@@ -6,7 +6,7 @@ A hands-on game that teaches the **Nutanix Cloud Platform** by playing it. Playe
 
 ![The live scoreboard on the event screen](docs/screenshots/scoreboard.png)
 
-39 stages, 25 live checks against the Nutanix v4 APIs, three languages (two more in progress), an operator console, and a live leaderboard. Deploys from a [Calm blueprint](./tooling/blueprint/) onto PC 7.3 or 7.5.
+39 stages, 25 live checks against the Nutanix v4 APIs, three languages (two more in progress), an operator console, and a live leaderboard. Deploys from a [Calm blueprint](./tooling/blueprint/) onto a dedicated AOS / PC 7.5.x lab.
 
 Based on the original [`ntnx-escape-game`](https://github.com/Golgautier/ntnx-escape-game) by Golgautier.
 
@@ -16,13 +16,19 @@ Before importing the runbook or blueprint, create a project named "lab" if it do
 
 You need an HPoC and two files. That's it.
 
-1. Book an HPoC with the **AOS + PC Demo - Latest (7.5.x)** runbook.
+1. Book one dedicated HPoC cluster using the custom runbook: **4 nodes for the full game**, or a single node with unsupported stages skipped. Use profile `hpoc` for either.
+    - AOS and Prism Central: **7.5.x**
+    - NCM Self-Service: **enabled**
+    - Flow Network Security (microsegmentation): **enabled**
+    - Enable Intelligent Operations before the session. See the [full prerequisites](docs/OPERATOR.md#before-you-start).
 2. Download the two assets from the [latest release](https://github.com/r0w/ntnx-infiltration-game/releases/latest): `nig-00-runbook-prerequisites.json` and `nig-01-blueprint.json`.
 3. **Run the runbook** (Self-Service > Runbooks): upload `nig-00...` and run it. It creates the AD endpoint the install needs.
 4. **Launch the blueprint** (Self-Service > Blueprints): upload `nig-01...`, set the `NUTANIX` credential to your PC admin password, then launch and fill the short form (PC IP + credentials, run mode). The install then runs on its own.
 5. When the app reaches `running`, its description shows the URLs: `/` for players, `/scoreboard` for the projector, `/admin` for you.
 
-Want to tune it (pick the run mode, gate stages, lock for lunch, wire a multi-cluster leaderboard, email your participants)? It's all in the [**operator guide**](docs/OPERATOR.md).
+Some stages offer illustrated **help**, disabled by default in `live` and `test` and enabled in `mock`. Switch it on for everyone or individual players in `/admin`; optional help penalties count toward the score.
+
+For launch settings, help, gates and the scoreboard, see the [**operator guide**](docs/OPERATOR.md).
 
 ## Develop locally
 
@@ -68,14 +74,17 @@ For `test` / `live`, set `PC_ENDPOINT` / `PC_USER` / `PC_PASSWORD` in `.env`. Se
 
 ```
 packages/
-  engine/       state machine, parser, gating, locale resolution - zero I/O, fully unit-tested
-  server/       Hono + bun:sqlite, session service, routes, pack loader
-  nutanix/      NutanixClient facade - mock + live (REST + SDK-per-domain) + capability probe
-  frontend/     Vite + React faux terminal
-  shared/       wire types
-packs/
-  ntnx-infiltration/   39 stages, locales/ (en, fr, de, + es/it as WIP), checks, fixtures, scripts/
+  engine/         state machine, parser, gating, locale resolution - zero I/O, fully unit-tested
+  server/         Hono + bun:sqlite, session service, routes, pack loader
+  nutanix/        NutanixClient facade - mock + live (REST + SDK-per-domain) + capability probe
+  kube-transport/ KubeClient facade - mock (fixtures) + live multi-cluster fleet
+  frontend/       Vite + React faux terminal
+  shared/         wire types
+packs/                 one directory per game; a deployment runs one of them (GAME_PACK)
+  ntnx-infiltration/   39 stages, locales/ (en, fr, de, + es/it as WIP), checks, acts, boot, fixtures
+  nkp-bootcamp/        26 stages, locales/ (en, fr), checks, acts, boot, assets, fixtures
 tooling/
+  audit-stage-deps.ts   stage dependency audit, any pack
   blueprint/    Calm DSL Python blueprint + post-compile patcher
 docs/
   OPERATOR.md       host-it-at-an-event guide (quickstart + detailed operator)
@@ -100,9 +109,11 @@ docs/
    ```
 2. Add the keys to each `packs/<pack>/locales/<code>.json`. Missing keys fall back to the default locale, then to the key itself (a grep-able translator marker).
 3. Add the stage name to `pack.json.stages[]` at the position you want it played.
-4. Export the check function from `packs/<pack>/checks/index.ts`.
+4. Export the check function from `packs/<pack>/checks/index.ts`. Import types from `@ntnx-game/engine` freely, but never *values* - the runtime image ships no `node_modules`, so a value import works locally and kills the container on deploy. Put runtime helpers in the pack, or take them off the context.
 5. (For mock mode) Add a fixture to `packs/<pack>/fixtures.json` keyed by `"METHOD path"`.
 6. Tag with `"impact": "destructive"` if the stage mutates cluster-wide state - it then only runs when the cluster profile is `hpoc`. Tag `"requires": ["NCM"]` (or `IO`, `CalmDSL`, `NodeRemove`) if the stage depends on an optional feature.
+7. Declare `"dependsOn": ["create-vm"]` for each earlier stage whose *cluster state* this one consumes - `needs` only models variables, so without this the `/admin` cascade lets an operator disable a prerequisite and leave this stage looking fine. Then run `bun tooling/audit-stage-deps.ts <pack> --apply` to refresh the derived `needs` / `captures`.
+8. (Optional) Add a step-by-step help block shown on demand: `"help": ["my-stage.help-01", ...]` lists locale keys written in the same grammar as `messages` (`<code>` for copyable values, `<image src='my-stage-step-01.png' alt='Caption'/>` for screenshots kept in `packs/<pack>/assets/`). `"helpPenaltySec": 120` is the time added to the player's playing time the first time they display it; leave it out for a free help. The operator controls help in `/admin` (off by default in `live` / `test`, on in `mock`).
 
 The frontend `DevPanel` lets you jump to any stage without replaying the whole game. Captured variables and the cluster cache are preserved across jumps. Restart the backend after editing pack JSON - Bun caches the pack at boot.
 
@@ -114,14 +125,16 @@ Drop `packs/<pack>/locales/<code>.json` with every key from `en.json` translated
 
 ```bash
 bun test           # full suite across engine + server + nutanix + frontend
-bun run typecheck  # tsc --noEmit, all 4 workspace packages
+bun run typecheck  # tsc --noEmit, all 6 workspace packages + the packs' own TS
 ```
 
 CI runs both on every push and PR. No live cluster needed - everything is mock-backed.
 
 ## Telemetry
 
-Blueprint deployments report anonymous usage stats (session counts, per-stage timings, game version) to the team's NIG Central dashboard - never trigrams, names or credentials. Controlled by `NIG_CENTRAL_URL`; unset = off (the local-dev default).
+Blueprint deployments report anonymous usage stats (session counts, per-stage timings with the time the operator held players, help usage, game version) to the team's NIG Central dashboard - never trigrams, names or credentials. Controlled by `NIG_CENTRAL_URL`; unset = off (the local-dev default).
+
+`NIG_DEPLOYMENT_IP` identifies the game VM in Central; new blueprints supply the VM address at install and in Update Game. Existing apps retain their original Calm scripts: set this variable to the VM's IP in `/opt/ntnx-infiltration-game/.env` and recreate the container when upgrading them. Without it, telemetry falls back to the local network interface, which is usually a Docker bridge IP. Changing this address creates a new Central deployment entry; it does not repair historical entries or split merged data.
 
 ## Contributing
 

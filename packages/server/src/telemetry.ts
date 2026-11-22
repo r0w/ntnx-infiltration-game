@@ -20,12 +20,32 @@ export interface TelemetryDeps {
   url?: string;
   /** Optional bearer token sent as Authorization header. */
   token?: string;
+  /** VM address supplied by the deployment; container interfaces are only a fallback. */
+  deploymentIp?: string;
   packId: string;
   packVersion: string;
+  /** Operator-facing name of the game, so Central can label it without
+   *  keeping a table of pack ids. */
+  packTitle?: string;
   /** Operator-facing server mode — lets Central separate live events from
    *  mock/test validation runs. */
   serverMode: 'mock' | 'test' | 'live';
   clusterProfile: string;
+  /** The VM's own IPv4, from `GAME_FRONTEND_HOST`. See {@link hostIp}. */
+  hostIp?: string;
+}
+
+/**
+ * The address that identifies this deployment to Central. `GAME_FRONTEND_HOST`
+ * is computed on the VM at install (its egress IPv4) and handed to the
+ * container, so it is the one value that actually differs between deployments.
+ * Without it every containerised game reports the bridge address and separate
+ * deployments merge into one record at Central.
+ */
+function hostIp(configured?: string): string {
+  const given = (configured ?? '').trim();
+  if (given.length > 0) return given;
+  return localIp();
 }
 
 export interface TelemetryEvent {
@@ -33,17 +53,35 @@ export interface TelemetryEvent {
     | 'session_started'
     | 'stage_passed'
     | 'stage_failed'
-    | 'session_finished';
+    | 'session_finished'
+    | 'help_used';
   sessionId: string;
   stageId?: string;
   stageName?: string;
   stageIndex?: number;
-  /** Wall-clock ms the player spent on the stage (entry → pass). */
+  /** Wall-clock ms the player spent on the stage (entry → pass). Includes the
+   *  time the operator held the player: see `waitMs`. */
   wallMs?: number;
   /** Check execution ms (subset of wallMs). */
   checkMs?: number;
   /** session_finished: total ms from session start to finish. */
   totalMs?: number;
+  /** stage_passed / session_finished: ms of `wallMs` / `totalMs` the operator
+   *  held the player (admin gate, pack-wide pause). */
+  waitMs?: number;
+  /** stage_passed / session_finished: playing time, `wallMs` / `totalMs` minus
+   *  `waitMs`. */
+  netMs?: number;
+  /** stage_passed: the stage's step-by-step help was displayed. */
+  helpUsed?: boolean;
+  /** stage_passed: penalty billed on this stage. session_finished: total. */
+  helpPenaltySec?: number;
+  /** session_finished: stages whose help was displayed. */
+  helpUses?: number;
+  /** help_used: penalty billed by this first display. */
+  penaltySec?: number;
+  /** help_used: playing time between entering the stage and asking for help. */
+  afterMs?: number;
   locale?: string;
 }
 
@@ -52,7 +90,13 @@ const FLUSH_BATCH = 200;
 const SEND_TIMEOUT_MS = 5_000;
 const OUTBOX_CAP = 10_000;
 
-/** First non-internal IPv4 of the host, or 'unknown'. */
+/**
+ * First non-internal IPv4 this process can see, or 'unknown'.
+ *
+ * Inside a container that is the docker bridge address, which is the same on
+ * every deployment — so `hostIp` prefers the VM's own address when the deploy
+ * passed one, and only falls back here.
+ */
 function localIp(): string {
   for (const addrs of Object.values(networkInterfaces())) {
     for (const a of addrs ?? []) {
@@ -83,8 +127,20 @@ export class Telemetry {
     this.url = (deps.url ?? '').trim().replace(/\/+$/, '');
     this.token = deps.token || undefined;
     this.enabled = this.url.length > 0;
-    const ip = localIp();
-    const firstBootDate = this.enabled ? this.firstBootDate() : '';
+    let ip = 'unknown';
+    let firstBootDate = '';
+    if (this.enabled) {
+      try {
+        ip = deps.deploymentIp?.trim() || hostIp(deps.hostIp);
+        firstBootDate = this.firstBootDate();
+      } catch (err) {
+        // Optional statistics must never prevent the game from starting.
+        this.enabled = false;
+        this.log('warn', 'telemetry initialization failed; disabled for this process', {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     this.deploymentId = `${ip}-${firstBootDate}`;
     const version = getVersionInfo();
     this.deployment = {
@@ -93,6 +149,7 @@ export class Telemetry {
       firstBootDate,
       packId: deps.packId,
       packVersion: deps.packVersion,
+      packTitle: deps.packTitle ?? deps.packId,
       gameVersion: version.version,
       mode: deps.serverMode,
       clusterProfile: deps.clusterProfile,
@@ -107,7 +164,7 @@ export class Telemetry {
         .prepare('INSERT INTO telemetry_outbox (created_at, event_json) VALUES ($ts, $json)')
         .run({ $ts: Date.now(), $json: JSON.stringify({ ...event, ts: Date.now() }) });
     } catch (err) {
-      this.logger.debug('telemetry record failed', {
+      this.log('debug', 'telemetry record failed', {
         err: err instanceof Error ? err.message : String(err),
       });
     }
@@ -120,7 +177,7 @@ export class Telemetry {
     this.timer = setInterval(() => void this.flush(), FLUSH_INTERVAL_MS);
     // Don't hold the process open for telemetry.
     this.timer.unref?.();
-    this.logger.info('telemetry enabled', { central: this.url, deploymentId: this.deploymentId });
+    this.log('info', 'telemetry enabled', { central: this.url, deploymentId: this.deploymentId });
   }
 
   stop(): void {
@@ -167,13 +224,22 @@ export class Telemetry {
       // Warn once per outage, then stay quiet — an unreachable Central is a
       // normal condition (offline lab), not something to spam logs with.
       if (!this.warnedSendFailure) {
-        this.logger.warn('telemetry flush failed (will keep retrying quietly)', { err: msg });
+        this.log('warn', 'telemetry flush failed (will keep retrying quietly)', { err: msg });
         this.warnedSendFailure = true;
       } else {
-        this.logger.debug('telemetry flush failed', { err: msg });
+        this.log('debug', 'telemetry flush failed', { err: msg });
       }
     } finally {
       this.flushing = false;
+    }
+  }
+
+  /** A logging failure must not escape a telemetry error handler. */
+  private log(level: 'debug' | 'info' | 'warn', message: string, data?: Record<string, unknown>): void {
+    try {
+      this.logger[level](message, data);
+    } catch {
+      // Logging is optional too; keep the game running.
     }
   }
 

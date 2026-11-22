@@ -52,7 +52,11 @@ print(f'  generated run_container.sh ({len(rc)} chars)')
 "
 
 src="${1:-blueprint.py}"
-out="${2:-${src%.py}.json}"
+default_out="${src%.py}.json"
+if [[ "${NIG_DEPLOYMENT_ONLY:-0}" == "1" ]]; then
+  default_out="${src%.py}.shared.json"
+fi
+out="${2:-$default_out}"
 
 echo "compile: $src → $out"
 "$VENV/bin/calm" compile bp -f "$src" --out json 2>/dev/null > "$out"

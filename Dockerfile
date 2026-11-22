@@ -6,6 +6,7 @@ COPY package.json bun.lock* ./
 COPY packages/engine/package.json packages/engine/package.json
 COPY packages/server/package.json packages/server/package.json
 COPY packages/nutanix/package.json packages/nutanix/package.json
+COPY packages/kube-transport/package.json packages/kube-transport/package.json
 COPY packages/frontend/package.json packages/frontend/package.json
 COPY packages/shared/package.json packages/shared/package.json
 RUN bun install --frozen-lockfile

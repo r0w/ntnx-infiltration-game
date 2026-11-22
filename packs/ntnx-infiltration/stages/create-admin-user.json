@@ -13,13 +13,13 @@
     "stage-006.line-06",
     "stage-006.line-07",
     "stage-006.line-08",
-    "stage-006.line-09",
-    "stage-006.line-10"
+    "stage-006.line-09"
   ],
   "check": {
     "fn": "CheckUser"
   },
   "needs": [
     "Trigram"
-  ]
+  ],
+  "checkMessagePrefix": "sentences.check-"
 }

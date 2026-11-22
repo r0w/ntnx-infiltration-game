@@ -34,6 +34,13 @@
         "vite": "^5.4.10",
       },
     },
+    "packages/kube-transport": {
+      "name": "@ntnx-game/kube-transport",
+      "version": "0.0.0",
+      "dependencies": {
+        "@ntnx-game/engine": "workspace:*",
+      },
+    },
     "packages/nutanix": {
       "name": "@ntnx-game/nutanix",
       "version": "0.0.0",
@@ -166,6 +173,8 @@
     "@ntnx-game/engine": ["@ntnx-game/engine@workspace:packages/engine"],
 
     "@ntnx-game/frontend": ["@ntnx-game/frontend@workspace:packages/frontend"],
+
+    "@ntnx-game/kube-transport": ["@ntnx-game/kube-transport@workspace:packages/kube-transport"],
 
     "@ntnx-game/nutanix": ["@ntnx-game/nutanix@workspace:packages/nutanix"],
 

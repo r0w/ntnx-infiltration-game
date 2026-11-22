@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MessageUnit } from '@ntnx-game/shared';
-import { api, type AdvanceResponse, type DisabledStage } from './api';
+import { api, type AdvanceResponse, type DisabledStage, type HelpResponse, type HelpSnapshot } from './api';
 import { VERIFYING_LABELS } from './renderer';
 
 /** Sentinel variable name emitted by `<input/>` — press-Enter-to-continue. */
@@ -57,16 +57,27 @@ export function describeDisabled(d: DisabledStage): string {
 }
 
 export type RenderItem =
-  | { kind: 'text'; id: string; color?: string; styles?: string[]; text: string; href?: string }
+  | { kind: 'text'; id: string; color?: string; styles?: string[]; text: string; href?: string; copyable?: boolean; copyText?: string }
   | { kind: 'pause'; id: string; ms: number }
   | { kind: 'await-input'; id: string; variable: string }
   | { kind: 'code'; id: string; text: string; lang?: string }
   | { kind: 'image'; id: string; src: string; alt?: string }
+  | { kind: 'demo'; id: string; src: string; poster?: string; label?: string }
   | { kind: 'page-break'; id: string }
   | { kind: 'check-dwell'; id: string; ms: number; label: string }
   | { kind: 'check-result'; id: string; pass: boolean; neutral?: boolean; detail?: string; hint?: string; cheer?: string }
   | { kind: 'finished'; id: string }
-  | { kind: 'info'; id: string; text: string; color?: string };
+  | { kind: 'info'; id: string; text: string; color?: string }
+  // Step-by-step help the player asked for. `hidden` retires an earlier block
+  // of the same stage when it is shown again (kept in the list, not rendered).
+  | { kind: 'help'; id: string; stageName: string; units: MessageUnit[]; penaltySec: number; hidden?: boolean; openRequestId?: string };
+
+/** Outcome of {@link SessionHandle.askHelp}. */
+export type HelpOutcome =
+  | { status: 'shown' }
+  /** The first display costs time and needs the player's confirmation. */
+  | { status: 'confirm-required'; penaltySec: number }
+  | { status: 'error'; message: string };
 
 export interface GatedAt {
   /**
@@ -115,6 +126,15 @@ export interface SessionHandle {
    *  in FauxTerminal). Defaults to `'en'` until a session is created
    *  or hydrated. */
   locale: string;
+  /** Step-by-step help is allowed for this session (global switch or the
+   *  operator's per-player override; refreshed by the heartbeat). */
+  helpEnabled: boolean;
+  /** Stages whose help was already displayed (free to show again). */
+  helpUsedStages: string[];
+  /** Show the help of the stage being played. A first display that costs
+   *  time answers `confirm-required` until called again with `confirm`. */
+  /** `penaltySec` is the cost the player confirmed; the server refuses to bill another one. */
+  askHelp: (confirm: boolean, penaltySec?: number) => Promise<HelpOutcome>;
   createSession: (opts: { locale: string }) => Promise<void>;
   resume: (sessionId: string) => void;
   advance: () => Promise<void>;
@@ -137,7 +157,24 @@ const HEARTBEAT_MS = 5000;
  */
 const KICK_NOTICE = 'Your session was ended by the operator. Sign in to start a new one.';
 
-function appendUnits(
+function sameList(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/** Reopen an existing reader so its scroll position survives repeated requests. */
+function withHelpBlock(
+  prev: RenderItem[],
+  id: string,
+  r: Extract<HelpResponse, { status: 'ok' }>,
+): RenderItem[] {
+  const existing = prev.find(it => it.kind === 'help' && it.stageName === r.stageName && !it.hidden);
+  if (existing) return prev.map(it => it === existing
+    ? { ...it, units: r.units, penaltySec: r.penaltySec, openRequestId: id } as RenderItem
+    : it);
+  return [...prev, { kind: 'help', id, openRequestId: id, stageName: r.stageName, units: r.units, penaltySec: r.penaltySec }];
+}
+
+export function appendUnits(
   prev: RenderItem[],
   units: MessageUnit[],
   idPrefix: string,
@@ -148,7 +185,7 @@ function appendUnits(
   units.forEach((u, idx) => {
     const id = `${idPrefix}-${idx}-${out.length}`;
     if (u.kind === 'text') {
-      out.push({ kind: 'text', id, color: u.color, styles: u.styles, text: u.text, href: u.href });
+      out.push({ kind: 'text', id, color: u.color, styles: u.styles, text: u.text, href: u.href, copyable: u.copyable, copyText: u.copyText });
     } else if (u.kind === 'await-input') {
       out.push({ kind: 'await-input', id, variable: u.variable });
       awaiting = u.variable;
@@ -158,6 +195,8 @@ function appendUnits(
       out.push({ kind: 'code', id, text: u.text, lang: u.lang });
     } else if (u.kind === 'image') {
       out.push({ kind: 'image', id, src: u.src, alt: u.alt });
+    } else if (u.kind === 'demo') {
+      out.push({ kind: 'demo', id, src: u.src, poster: u.poster, label: u.label });
     } else if (u.kind === 'clear') {
       // `<clear/>` is destructive: wipe the scrollback so the next stage
       // starts on a fresh canvas. Gated on `allowClears` — during an
@@ -169,6 +208,11 @@ function appendUnits(
       // Non-destructive separator. Always fires — the player can always
       // scroll up to re-read the earlier stages.
       out.push({ kind: 'page-break', id });
+    } else {
+      // This chain whitelists kinds, so a unit added to the protocol but not
+      // here vanishes between the server and the screen with nothing to show
+      // for it. Say so instead of dropping it in silence.
+      console.warn('[terminal] dropped an unhandled message unit', (u as { kind: string }).kind);
     }
   });
   return { next: out, awaiting };
@@ -193,6 +237,8 @@ export function useSession(): SessionHandle {
   const [error, setError] = useState<string | null>(null);
   const [typingSpeedMs, setTypingSpeedMs] = useState(15);
   const [currentStage, setCurrentStage] = useState<string | null>(null);
+  const [helpEnabled, setHelpEnabled] = useState(false);
+  const [helpUsedStages, setHelpUsedStages] = useState<string[]>([]);
   const advanceCounterRef = useRef(0);
   const inFlightRef = useRef(false);
   const awaitingRef = useRef<string | null>(null);
@@ -210,6 +256,11 @@ export function useSession(): SessionHandle {
   finishedRef.current = finished;
   gatedRef.current = gatedAt;
   localeRef.current = locale;
+
+  const applyHelp = useCallback((snap: HelpSnapshot) => {
+    setHelpEnabled(snap.enabled);
+    setHelpUsedStages((prev) => (sameList(prev, snap.usedStages) ? prev : snap.usedStages));
+  }, []);
 
   const handleResponse = useCallback((r: AdvanceResponse, opts?: { verifyLatencyMs?: number }) => {
     if (r.kind === 'switch-session' && r.switchSessionId) {
@@ -376,13 +427,14 @@ export function useSession(): SessionHandle {
         setAwaitingStageName(null);
         setFinished(false);
         setLocale(createLocale);
+        applyHelp(r.help ?? { enabled: false, usedStages: [] });
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         setBusy(false);
       }
     },
-    [],
+    [applyHelp],
   );
 
   const resume = useCallback((id: string) => {
@@ -400,6 +452,8 @@ export function useSession(): SessionHandle {
     setAwaitingStageName(null);
     setFinished(false);
     setGatedAt(null);
+    setHelpEnabled(false);
+    setHelpUsedStages([]);
     // Surface a reason on the login screen (it renders `error`). null leaves
     // any prior error untouched — callers that want a clean drop pass nothing.
     if (notice !== undefined) setError(notice);
@@ -415,6 +469,7 @@ export function useSession(): SessionHandle {
       const snap = await api.getSession(id);
       setCurrentStage(snap.currentStage);
       setLocale(snap.locale);
+      if (snap.help) applyHelp(snap.help);
       if (snap.finishedAt) {
         finishedRef.current = true;
         setFinished(true);
@@ -496,7 +551,7 @@ export function useSession(): SessionHandle {
     } finally {
       hydratingRef.current = null;
     }
-  }, [dropStaleSession, resolveAndApply]);
+  }, [dropStaleSession, resolveAndApply, applyHelp]);
 
   useEffect(() => {
     if (sessionId && hydrated.current !== sessionId) {
@@ -550,7 +605,10 @@ export function useSession(): SessionHandle {
       // don't 404 on a localStorage id mid-hydrate (hydrate handles that path).
       if (cancelled || inFlightRef.current || hydrated.current !== sessionId) return;
       try {
-        await api.getSession(sessionId);
+        const snap = await api.getSession(sessionId);
+        // The snapshot also carries the help flag: an operator toggle reaches
+        // the player within one beat, without a reload.
+        if (!cancelled && snap.help) applyHelp(snap.help);
       } catch (err) {
         if (cancelled) return;
         const msg = err instanceof Error ? err.message : String(err);
@@ -563,7 +621,7 @@ export function useSession(): SessionHandle {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [sessionId, finished, gatedAt, dropStaleSession]);
+  }, [sessionId, finished, gatedAt, dropStaleSession, applyHelp]);
 
   const advance = useCallback(async () => {
     if (!sessionId) return;
@@ -658,6 +716,28 @@ export function useSession(): SessionHandle {
     [sessionId, handleResponse, dropStaleSession, resolveAndApply],
   );
 
+  const askHelp = useCallback(
+    async (confirm: boolean, penaltySec?: number): Promise<HelpOutcome> => {
+      if (!sessionId) return { status: 'error', message: 'no session' };
+      try {
+        const r = await api.requestHelp(sessionId, confirm, penaltySec);
+        if (r.status === 'confirm-required') {
+          return { status: 'confirm-required', penaltySec: r.penaltySec };
+        }
+        setHelpUsedStages((prev) => (prev.includes(r.stageName) ? prev : [...prev, r.stageName]));
+        setItems((prev) => withHelpBlock(prev, `help-${advanceCounterRef.current++}`, r));
+        return { status: 'shown' };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.startsWith('404 Session not found')) dropStaleSession(KICK_NOTICE);
+        // The operator may have switched the help off since the last beat.
+        if (msg.startsWith('403')) setHelpEnabled(false);
+        return { status: 'error', message: msg };
+      }
+    },
+    [sessionId, dropStaleSession],
+  );
+
   const gotoStage = useCallback(
     async (stageName: string) => {
       if (!sessionId) return;
@@ -734,6 +814,8 @@ export function useSession(): SessionHandle {
     setAwaitingStageName(null);
     setFinished(false);
     setGatedAt(null);
+    setHelpEnabled(false);
+    setHelpUsedStages([]);
     setError(null);
   }, []);
 
@@ -750,6 +832,9 @@ export function useSession(): SessionHandle {
     typingSpeedMs,
     currentStage,
     locale,
+    helpEnabled,
+    helpUsedStages,
+    askHelp,
     createSession,
     resume,
     advance,

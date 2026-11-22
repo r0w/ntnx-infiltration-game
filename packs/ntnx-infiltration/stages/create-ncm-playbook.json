@@ -15,13 +15,23 @@
     "stage-033.line-08",
     "stage-033.line-09",
     "stage-033.line-10",
-    "stage-033.line-11",
-    "stage-033.line-12"
+    "stage-033.line-11"
   ],
   "check": {
     "fn": "CheckPlaybook"
   },
   "needs": [
     "Trigram"
-  ]
+  ],
+  "help": [
+    "stage-033.help-01",
+    "stage-033.help-02",
+    "stage-033.help-03",
+    "stage-033.help-04",
+    "stage-033.help-05",
+    "stage-033.help-06",
+    "stage-033.help-07"
+  ],
+  "helpPenaltySec": 150,
+  "checkMessagePrefix": "sentences.check-"
 }

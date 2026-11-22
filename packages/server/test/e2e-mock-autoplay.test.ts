@@ -17,7 +17,7 @@
  * this test validates the offline fixture-backed path that CI runs on every
  * push. A live HPoC end-to-end remains a manual deploy.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { createMockAdapter } from '@ntnx-game/nutanix';
 import { buildApp } from '../src/app';
 import { loadPack } from '../src/pack-loader';
+import { Telemetry } from '../src/telemetry';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCHEMA = readFileSync(resolve(HERE, '../src/db/schema.sql'), 'utf8');
@@ -60,7 +61,7 @@ interface AutoPlayResponse {
   results: AutoPlayResult[];
 }
 
-async function bootApp() {
+async function bootApp(withBrokenTelemetry = false) {
   const pack = await loadPack(PACKS_DIR, 'ntnx-infiltration');
   // Auto-play goes through `act.ts:makeContext` which wraps the boot
   // client with `withVariableInterpolation` per-call against its own
@@ -73,6 +74,17 @@ async function bootApp() {
 
   const db = new Database(':memory:');
   db.exec(SCHEMA);
+  const failLog = () => { throw new Error('log output unavailable'); };
+  const telemetry = withBrokenTelemetry ? new Telemetry({
+    db, logger: { debug: failLog, info: failLog, warn: failLog, error: failLog },
+    url: 'http://central.invalid', packId: pack.manifest.id, packVersion: pack.manifest.version,
+    serverMode: 'test', clusterProfile: 'hpoc', deploymentIp: '10.0.0.5',
+  }) : undefined;
+  if (telemetry) {
+    db.exec('DROP TABLE telemetry_outbox');
+    telemetry.start();
+    telemetry.stop();
+  }
   const { app } = buildApp({
     db,
     pack,
@@ -95,8 +107,9 @@ async function bootApp() {
       frontendHost: '10.0.0.5',
     },
     serverMode: 'mock',
+    telemetry,
   });
-  return { app };
+  return { app, db, telemetry };
 }
 
 describe('e2e — mock auto-play (full pack)', () => {
@@ -190,4 +203,39 @@ describe('e2e — mock auto-play (full pack)', () => {
     }
     expect(body.summary.passed).toBeGreaterThanOrEqual(20);
   }, 120_000); // generous deadline — full walk is ~5-10 s in mock, retries can stretch
+
+  test('player creation and login work despite broken telemetry storage and logging', async () => {
+    const { app, db, telemetry } = await bootApp(true);
+    const record = spyOn(telemetry!, 'record');
+    try {
+      const created = await app.request('/api/session', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ locale: 'en' }),
+      });
+      expect(created.status).toBe(200);
+      const { sessionId } = await created.json();
+      const post = async (path: string, body?: unknown) => {
+        const response = await app.request(`/api/session/${sessionId}/${path}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        expect(response.status).toBe(200);
+        return response.json();
+      };
+      await post('advance');
+      const login = await post('advance');
+      expect(login.awaitingVariable).toBe('Trigram');
+      await post('input', { variable: 'Trigram', value: TRIGRAM });
+      const pending = await post('input', { variable: 'PIN', value: '4242' });
+      expect(pending.checkPending).toBe(true);
+      const checked = await post('resolve-check');
+      expect(checked.kind).toBe('units');
+      const resumed = await app.request(`/api/session/${sessionId}`);
+      expect(resumed.status).toBe(200);
+      expect((await resumed.json()).currentStage).toBe('login');
+      expect(record.mock.calls.some(([event]) => event.type === 'session_started')).toBe(true);
+      expect(record.mock.calls.some(([event]) => event.type === 'stage_passed' && event.stageName === 'login')).toBe(true);
+    } finally {
+      record.mockRestore(); db.close();
+    }
+  });
 });

@@ -15,7 +15,7 @@
  */
 import type { ActContext } from '@ntnx-game/engine';
 import { restoreRecoveryVm } from './recovery';
-import { refreshAction, dailyScheduleError, nextReportTime, reportRunsAtThree, reportWriteBody } from '../schedule';
+import { refreshAction, dailyScheduleError, nextReportTime, reportWriteBody } from '../schedule';
 import { assignVmOwnership } from './vm-ownership';
 import type { NutanixSdk } from '@ntnx-game/nutanix';
 import {
@@ -1053,10 +1053,9 @@ async function actCreateMicrosegPolicy(ctx: ActContext): Promise<void> {
   const cats = await listAllSdk<AnyRec>(($p) => sdk(ctx).prism.categories.listCategories($p));
   const critical = cats.find((c) => c.key === `${trigram}-cat` && c.value === 'Critical');
   if (!critical?.extId) {
-    ctx.logger.warn(`actCreateMicrosegPolicy: {trigram}-cat:Critical missing, run create-category first`);
-    return;
+    throw new Error(`${trigram}-cat:Critical missing, run create-category first`);
   }
-  await ensure<AnyRec>({
+  const result = await ensure<AnyRec>({
     name: `microseg-policy ${name}`,
     logger: ctx.logger,
     list: async () => listAllSdk(($p) => sdk(ctx).microseg.policies.listNetworkSecurityPolicies($p)),
@@ -1070,6 +1069,7 @@ async function actCreateMicrosegPolicy(ctx: ActContext): Promise<void> {
         name,
         type: 'APPLICATION',
         state: 'ENFORCE',
+        isHitlogEnabled: true,
         scope: 'GLOBAL',
         rules: [
           {
@@ -1097,6 +1097,9 @@ async function actCreateMicrosegPolicy(ctx: ActContext): Promise<void> {
         ],
       })).data,
   });
+  if (result?.$objectType?.includes('TaskReference') && result.extId) {
+    await waitForTask(ctx, result.extId);
+  }
   // Poll until the policy is queryable with state=ENFORCE. Microseg POST
   // is task-tracked: the policy lands in the list immediately but the
   // GET-by-id (which CheckSecurityPolicy uses to read rules) lags a few
@@ -1121,7 +1124,7 @@ async function actCreateMicrosegPolicy(ctx: ActContext): Promise<void> {
       });
     }
   }
-  ctx.logger.warn('actCreateMicrosegPolicy: policy not ENFORCE-visible within 20 s');
+  throw new Error('Microseg policy not ENFORCE-visible within 20 s');
 }
 
 /** Stage 19 allow-ssh-in-microseg: adds inbound-SSH rule to the existing microseg policy. */
@@ -1155,9 +1158,10 @@ async function actAllowSshInMicroseg(ctx: ActContext): Promise<void> {
     const s = r.spec;
     if (!s || s.destAllowSpec) return false;
     if (s.srcAllowSpec === 'ALL') return false;
-    return coversSsh(s) && Boolean(s.srcSubnet?.value);
+    return coversSsh(s) && s.srcSubnet?.value === frontendHost && s.srcSubnet?.prefixLength === 32;
   });
-  const hasIcmp = rules.some((r) => (r.spec?.icmpServices ?? []).length > 0);
+  const hasIcmp = rules.some((r) => !r.spec?.destAllowSpec && r.spec?.srcAllowSpec === 'ALL' &&
+    (r.spec?.icmpServices ?? []).some((i: AnyRec) => i.type === 8 && i.code === 0 && !i.isAllAllowed));
   if (hasSsh && hasIcmp) return;
   // `securedGroupCategoryAssociatedEntityType` + `securedGroupCategoryReferences`
   // must match the existing rules so the new rule binds to the same VMs.
@@ -1233,10 +1237,9 @@ async function actCreateProtectionPolicy(ctx: ActContext): Promise<void> {
   const cats = await listAllSdk<AnyRec>(($p) => sdk(ctx).prism.categories.listCategories($p));
   const criticalCat = cats.find((c) => c.key === `${trigram}-cat` && c.value === 'Critical');
   if (!criticalCat?.extId) {
-    ctx.logger.warn(`actCreateProtectionPolicy: ${trigram}-cat:Critical missing, run create-category first`);
-    return;
+    throw new Error(`${trigram}-cat:Critical missing, run create-category first`);
   }
-  await ensure<AnyRec>({
+  const result = await ensure<AnyRec>({
     name: `protection-policy ${name}`,
     logger: ctx.logger,
     list: async () => listAllSdk(($p) => sdk(ctx).datapolicies.protection.listProtectionPolicies($p)),
@@ -1278,6 +1281,9 @@ async function actCreateProtectionPolicy(ctx: ActContext): Promise<void> {
         },
       )).data,
   });
+  if (result?.$objectType?.includes('TaskReference') && result.extId) {
+    await waitForTask(ctx, result.extId);
+  }
 }
 
 /**
@@ -1418,8 +1424,7 @@ async function actCreateReport(ctx: ActContext): Promise<void> {
   const reports = await listAllSdk<AnyRec>(p => sdk(ctx).opsmgmt.reportConfigs.listReportConfigs(p));
   const existing = reports.find(r => r.name === name);
   if (existing?.extId) {
-    if (existing.schedule?.scheduleInterval === 'DAILY' && existing.schedule?.frequency === 1 &&
-        reportRunsAtThree(existing.schedule?.startTime, existing.timezone)) return;
+    if (existing.schedule?.scheduleInterval === 'DAILY' && existing.schedule?.frequency === 1) return;
     const path = `/api/opsmgmt/v4.0/config/report-configs/${existing.extId}`;
     const current = await getV4WithEtag<{ data?: AnyRec }>(ctx, path);
     if (!current?.etag || !current.body.data) throw new Error('Report revision unavailable; retry');

@@ -11,8 +11,7 @@
     "stage-015.line-05",
     "stage-015.line-06",
     "stage-015.line-07",
-    "stage-015.line-08",
-    "stage-015.line-09"
+    "stage-015.line-08"
   ],
   "check": {
     "fn": "CheckCat"
@@ -22,5 +21,6 @@
   ],
   "dependsOn": [
     "create-project"
-  ]
+  ],
+  "checkMessagePrefix": "sentences.check-"
 }

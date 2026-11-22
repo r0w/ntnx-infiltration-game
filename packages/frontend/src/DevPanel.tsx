@@ -32,7 +32,7 @@ export interface DevPanelProps {
   typingSpeedDefaultMs?: number;
   /** Sets a speed override (ms/char). 0 = instant. */
   onTypingSpeedChange?: (ms: number) => void;
-  /** Clears the override (double-click) → back to the default speed. */
+  /** Clears the override (double-click) → back to the mode default (instant in test/mock). */
   onTypingSpeedReset?: () => void;
   /** Whether <pause/> beats + check dwells are skipped. */
   skipPauses?: boolean;

@@ -18,13 +18,13 @@
     "stage-035.line-13",
     "stage-035.line-14",
     "stage-035.line-15",
-    "stage-035.line-16",
-    "stage-035.line-17"
+    "stage-035.line-16"
   ],
   "check": {
     "fn": "CheckCloneApp"
   },
   "needs": [
     "Trigram"
-  ]
+  ],
+  "checkMessagePrefix": "sentences.check-"
 }

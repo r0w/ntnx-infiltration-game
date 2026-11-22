@@ -1,0 +1,14 @@
+{
+  "id": "nkp-021",
+  "name": "web-ide",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.ide.intro",
+    "nkp.ide.terminal"
+  ],
+  "needs": [
+    "UserNum"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "id": "nkp-022",
+  "name": "deploy-app",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.deploy.intro",
+    "nkp.deploy.cmd",
+    "nkp.deploy.prompt"
+  ],
+  "check": {
+    "fn": "CheckSimpleApp"
+  },
+  "needs": [
+    "UserNum"
+  ]
+}

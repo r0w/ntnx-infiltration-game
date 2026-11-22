@@ -1,0 +1,21 @@
+{
+  "id": "nkp-025",
+  "name": "ingress",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.ingress.intro",
+    "nkp.ingress.yaml",
+    "nkp.ingress.prompt"
+  ],
+  "check": {
+    "fn": "CheckSimpleAppIngress"
+  },
+  "needs": [
+    "UserNum"
+  ],
+  "dependsOn": [
+    "expose-service"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "nkp-018",
+  "name": "dynamic-gitops",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.dyn.intro",
+    "nkp.dyn.edit",
+    "nkp.dyn.prompt"
+  ],
+  "check": {
+    "fn": "CheckDynamicProject"
+  },
+  "needs": [
+    "UserNum"
+  ],
+  "dependsOn": [
+    "gitops-app"
+  ]
+}

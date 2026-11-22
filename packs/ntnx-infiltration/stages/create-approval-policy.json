@@ -14,8 +14,7 @@
     "stage-021.line-07",
     "stage-021.line-08",
     "stage-021.line-09",
-    "stage-021.line-10",
-    "stage-021.line-11"
+    "stage-021.line-10"
   ],
   "requiresOnOther": [
     "ApprovalPolicy"
@@ -28,5 +27,6 @@
   ],
   "dependsOn": [
     "create-protection-policy"
-  ]
+  ],
+  "checkMessagePrefix": "sentences.check-"
 }

@@ -1,3 +1,4 @@
+import { copyTerminalText } from './clipboard';
 import { useEffect, useRef, useState } from 'react';
 
 export interface CodeBlockProps {
@@ -27,30 +28,9 @@ export function CodeBlock({ text, lang, isActive, onDone }: CodeBlockProps) {
     if (isActive) onDoneRef.current();
   }, [isActive]);
 
-  const copy = async () => {
+  const copy = async (trigger: HTMLButtonElement) => {
     try {
-      // navigator.clipboard requires a secure context (https or localhost).
-      // Game is served at http://<vm>:3000 on HPoCs → clipboard API is
-      // undefined and the optional chain falls through to the textarea
-      // + execCommand fallback (deprecated but still universally
-      // implemented; the only available path in insecure contexts).
-      if (window.isSecureContext && navigator.clipboard) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        ta.setAttribute('readonly', '');
-        ta.style.position = 'fixed';
-        ta.style.top = '0';
-        ta.style.left = '0';
-        ta.style.opacity = '0';
-        ta.style.pointerEvents = 'none';
-        document.body.appendChild(ta);
-        ta.select();
-        const ok = document.execCommand('copy');
-        document.body.removeChild(ta);
-        if (!ok) throw new Error('execCommand("copy") returned false');
-      }
+      await copyTerminalText(text, trigger);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch (err) {
@@ -66,7 +46,7 @@ export function CodeBlock({ text, lang, isActive, onDone }: CodeBlockProps) {
         // Don't bubble to the terminal's click-to-focus, which scrolls the input into view.
         onClick={(e) => {
           e.stopPropagation();
-          void copy();
+          void copy(e.currentTarget);
         }}
         aria-label={copied ? 'Copied' : 'Copy to clipboard'}
         title={copied ? 'Copied' : 'Copy'}

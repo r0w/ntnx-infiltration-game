@@ -1,0 +1,14 @@
+{
+  "id": "nkp-004",
+  "name": "workspaces",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.ws.intro",
+    "nkp.ws.explore"
+  ],
+  "needs": [
+    "UserNum"
+  ]
+}

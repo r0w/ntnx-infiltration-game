@@ -1,9 +1,15 @@
+import { helpLabels } from './helpLabels';
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
-import { api, ApiError, type PackInfo } from './api';
+import type { MessageUnit } from '@ntnx-game/shared';
+import { api, ApiError, type PackInfo, type PackNavChapter } from './api';
 import { DevPanel } from './DevPanel';
-import { FauxTerminal } from './FauxTerminal';
+import { FauxTerminal, type FauxTerminalHelp } from './FauxTerminal';
+import { StageRail } from './StageRail';
+import { StageReader } from './StageReader';
+import { LightboxProvider } from './Lightbox';
 import { LoginForm } from './LoginForm';
 import { ConfirmModal } from './Modal';
+import { effectiveSkipPauses, effectiveTypingSpeed } from './replay-defaults';
 import { useSession, CONTINUE_VAR, AUTOFILLABLE_VARS } from './useSession';
 
 type MaxWidth = '80ch' | '100ch' | '120ch' | 'none';
@@ -18,8 +24,9 @@ function readStoredMaxWidth(): MaxWidth {
   return '120ch';
 }
 
-// Dev override for the typewriter speed (ms/char). null = use the server's
-// pack value. Lets the operator speed up / skip the effect on the 20th replay.
+// Dev override for the typewriter speed (ms/char). null = mode default
+// (instant in test/mock, the pack value in live). Lets the operator pick a
+// speed on the 20th replay.
 const TYPING_SPEED_KEY = 'terminal-typing-speed';
 
 function readStoredTypingSpeed(): number | null {
@@ -34,11 +41,53 @@ function readStoredTypingSpeed(): number | null {
 }
 
 // Dev toggle: skip <pause/> beats + check-result dwells (independent of
-// text speed) for fast replays.
-const SKIP_PAUSES_KEY = 'terminal-skip-pauses';
+// text speed) for fast replays. null = mode default (skipped in test/mock).
+// Only an explicit click is stored. The previous key was written on every
+// load, so a '0' there is no real choice: it is dropped, not migrated.
+const SKIP_PAUSES_KEY = 'terminal-skip-pauses-override';
+const LEGACY_SKIP_PAUSES_KEY = 'terminal-skip-pauses';
 
-function readStoredSkipPauses(): boolean {
-  try { return localStorage.getItem(SKIP_PAUSES_KEY) === '1'; } catch { return false; }
+function readStoredSkipPauses(): boolean | null {
+  try {
+    localStorage.removeItem(LEGACY_SKIP_PAUSES_KEY);
+    const v = localStorage.getItem(SKIP_PAUSES_KEY);
+    return v === '1' ? true : v === '0' ? false : null;
+  } catch { return null; }
+}
+
+/**
+ * Where the player is in the run, for the reading menu.
+ *
+ * The session reports two different things and neither is "where I am" on its
+ * own: `currentStage` is the last stage *completed*, and `awaitingStageName`
+ * is set only while a prompt is on screen. Parked at a prompt the second one
+ * is the answer; mid-stream it is null and the answer is one past the first.
+ */
+export function readerPosition(
+  order: string[],
+  currentStage: string | null,
+  awaitingStageName: string | null,
+  finished: boolean,
+): { index: number; stage: string | null } {
+  if (finished) return { index: order.length, stage: null };
+  if (awaitingStageName) {
+    const i = order.indexOf(awaitingStageName);
+    if (i >= 0) return { index: i, stage: awaitingStageName };
+  }
+  if (currentStage === null) return { index: 0, stage: order[0] ?? null };
+  const done = order.indexOf(currentStage);
+  if (done < 0) return { index: 0, stage: order[0] ?? null };
+  const next = done + 1;
+  return { index: next, stage: order[next] ?? null };
+}
+
+/** A step opened from the contents menu, while its text is on its way. */
+interface ReadingState {
+  stage: string;
+  title: string;
+  units: MessageUnit[];
+  loading: boolean;
+  error: string | null;
 }
 
 export function GameApp() {
@@ -48,11 +97,15 @@ export function GameApp() {
   const [typingSpeedOverride, setTypingSpeedOverride] = useState<number | null>(
     readStoredTypingSpeed,
   );
-  const [skipPauses, setSkipPauses] = useState<boolean>(readStoredSkipPauses);
+  const [skipPausesOverride, setSkipPausesOverride] = useState<boolean | null>(
+    readStoredSkipPauses,
+  );
   const [autoPlay, setAutoPlay] = useState(false);
   const [autoPlayActing, setAutoPlayActing] = useState(false);
   const [autoPlayError, setAutoPlayError] = useState<string | null>(null);
   const [logoutPrompt, setLogoutPrompt] = useState(false);
+  const [nav, setNav] = useState<PackNavChapter[]>([]);
+  const [reading, setReading] = useState<ReadingState | null>(null);
   const awaitingRef = session.awaitingVariable;
   const submitInput = session.submitInput;
   const advance = session.advance;
@@ -70,15 +123,44 @@ export function GameApp() {
   }, [typingSpeedOverride]);
 
   useEffect(() => {
-    try { localStorage.setItem(SKIP_PAUSES_KEY, skipPauses ? '1' : '0'); } catch { /* ignore */ }
-  }, [skipPauses]);
+    try {
+      if (skipPausesOverride === null) localStorage.removeItem(SKIP_PAUSES_KEY);
+      else localStorage.setItem(SKIP_PAUSES_KEY, skipPausesOverride ? '1' : '0');
+    } catch { /* ignore */ }
+  }, [skipPausesOverride]);
 
-  // null override → follow the server's pack speed.
-  const typingSpeedMs = typingSpeedOverride ?? session.typingSpeedMs;
+  // null overrides → follow the mode default: instant text and no pauses in
+  // test/mock, the pack's pacing in live.
+  const typingSpeedMs = effectiveTypingSpeed(typingSpeedOverride, session.typingSpeedMs, pack?.mode);
+  const skipPauses = effectiveSkipPauses(skipPausesOverride, pack?.mode);
+
+  // Re-read a step. The server re-renders it from the pack; nothing about the
+  // run moves, so this is safe to fire mid-stage.
+  const sessionId = session.sessionId;
+  const closeReader = useCallback(() => setReading(null), []);
+  const handleRead = useCallback(
+    (stage: string, title: string) => {
+      if (!sessionId) return;
+      setReading({ stage, title, units: [], loading: true, error: null });
+      api.readStage(sessionId, stage).then(
+        (r) => setReading((cur) => (cur?.stage === stage ? { ...cur, units: r.units, loading: false } : cur)),
+        (err: unknown) =>
+          setReading((cur) =>
+            cur?.stage === stage
+              ? { ...cur, loading: false, error: err instanceof Error ? err.message : String(err) }
+              : cur,
+          ),
+      );
+    },
+    [sessionId],
+  );
+
+  // The pack names the game, so a second pack is not branded as the first.
+  const gameTitle = pack?.title ?? 'ntnx infiltration game';
 
   useEffect(() => {
-    document.title = 'ntnx infiltration game';
-  }, []);
+    document.title = gameTitle;
+  }, [gameTitle]);
 
   useEffect(() => {
     let cancelled = false;
@@ -88,6 +170,21 @@ export function GameApp() {
     );
     return () => { cancelled = true; };
   }, []);
+
+  // The reading menu. Session-scoped because its titles are translated, so it
+  // is refetched when the player signs in again in another language.
+  useEffect(() => {
+    if (!session.sessionId) {
+      setNav([]);
+      return;
+    }
+    let cancelled = false;
+    api.nav(session.sessionId).then(
+      (p) => { if (!cancelled) setNav(p.chapters); },
+      () => { /* no menu is a fine outcome — the terminal is the game */ },
+    );
+    return () => { cancelled = true; };
+  }, [session.sessionId, session.locale]);
 
   const handleSubmit = useCallback(
     (v: string) => {
@@ -215,6 +312,19 @@ export function GameApp() {
     !['lore', 'login', 'recovery-gate'].includes(session.currentStage);
   const autoPlayVisible = devToolsAllowed && identityCaptured;
 
+  // Step-by-step help for the stage being played: usable when it is switched
+  // on for this player (global switch, or the operator's per-player override)
+  // and the stage ships a help block. The server enforces both anyway.
+  const helpStage = session.awaitingStageName
+    ? pack?.stages.find((s) => s.name === session.awaitingStageName)
+    : undefined;
+  const help: FauxTerminalHelp = {
+    available: session.helpEnabled && !!helpStage?.hasHelp,
+    penaltySec: helpStage?.helpPenaltySec ?? 0,
+    used: !!session.awaitingStageName && session.helpUsedStages.includes(session.awaitingStageName),
+    onRequest: session.askHelp,
+  };
+
   // Force autoplay off whenever the toggle isn't visible — mode flipped to
   // live, identity reset (logout / switch agent), etc. should never leave a
   // stale "armed" state behind.
@@ -235,18 +345,27 @@ export function GameApp() {
         defaultLocale={pack?.defaultLocale ?? 'en'}
         supportedLocales={pack?.supportedLocales ?? ['en']}
         wipLocales={pack?.wipLocales ?? []}
+        title={gameTitle}
         onSubmit={session.createSession}
       />
     );
   }
 
   const appStyle = { '--terminal-max-width': maxWidth } as CSSProperties;
+  const stageOrder = pack?.stages.map((s) => s.name) ?? [];
+  const position = readerPosition(
+    stageOrder,
+    session.currentStage,
+    session.awaitingStageName,
+    session.finished,
+  );
 
   return (
+    <LightboxProvider>
     <div className="app" style={appStyle}>
       <header className="app-header">
         <div className="app-header-side app-header-left">
-          <span className="app-title">ntnx infiltration game</span>
+          <span className="app-title">{gameTitle}</span>
         </div>
         <div className="app-header-side app-header-right">
           <WidthToggle value={maxWidth} onChange={setMaxWidth} />
@@ -259,6 +378,15 @@ export function GameApp() {
           </button>
         </div>
       </header>
+      <div className="app-body">
+      {nav.length > 0 && (
+        <StageRail
+          chapters={nav}
+          currentIndex={position.index}
+          activeStage={position.stage}
+          onRead={handleRead}
+        />
+      )}
       <FauxTerminal
         items={session.items}
         awaitingVariable={session.awaitingVariable}
@@ -267,6 +395,8 @@ export function GameApp() {
         finished={session.finished}
         typingSpeedMs={typingSpeedMs}
         skipPauses={skipPauses}
+        imageCaptions={pack?.imageCaptions ?? false}
+        helpTitle={pack?.id === 'ntnx-infiltration' ? helpLabels(session.locale).guideTitle('Tank') : undefined}
         gatedAt={session.gatedAt}
         locale={session.locale}
         autoPlay={autoPlay}
@@ -274,7 +404,10 @@ export function GameApp() {
         onAutoPlayOk={handleAutoPlayOk}
         onAdvance={handleAdvance}
         onSwitchIdentity={inIdentityCapture ? handleSwitchIdentity : undefined}
+        identityLabel={pack?.identity?.label}
+        help={help}
       />
+      </div>
       {session.error && <div className="app-error">{session.error}</div>}
       {autoPlayError && <div className="app-error">{autoPlayError}</div>}
       {devToolsAllowed && (
@@ -293,9 +426,18 @@ export function GameApp() {
           onTypingSpeedChange={setTypingSpeedOverride}
           onTypingSpeedReset={() => setTypingSpeedOverride(null)}
           skipPauses={skipPauses}
-          onSkipPausesChange={setSkipPauses}
+          onSkipPausesChange={setSkipPausesOverride}
           mode={pack?.mode === 'live' ? undefined : pack?.mode}
           onGoto={handleGoto}
+        />
+      )}
+      {reading && (
+        <StageReader
+          title={reading.title}
+          units={reading.units}
+          loading={reading.loading}
+          error={reading.error}
+          onClose={closeReader}
         />
       )}
       {logoutPrompt && (
@@ -313,6 +455,7 @@ export function GameApp() {
         </ConfirmModal>
       )}
     </div>
+    </LightboxProvider>
   );
 }
 

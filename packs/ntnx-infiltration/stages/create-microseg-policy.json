@@ -16,8 +16,7 @@
     "stage-018.line-09",
     "stage-018.line-10",
     "stage-018.line-11",
-    "stage-018.line-12",
-    "stage-018.line-13"
+    "stage-018.line-12"
   ],
   "check": {
     "fn": "CheckSecurityPolicy"
@@ -27,5 +26,15 @@
   ],
   "dependsOn": [
     "apply-category-to-vm"
-  ]
+  ],
+  "help": [
+    "stage-018.help-01",
+    "stage-018.help-02",
+    "stage-018.help-03",
+    "stage-018.help-04",
+    "stage-018.help-05",
+    "stage-018.help-06"
+  ],
+  "helpPenaltySec": 120,
+  "checkMessagePrefix": "sentences.check-"
 }

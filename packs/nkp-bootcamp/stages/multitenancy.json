@@ -1,0 +1,14 @@
+{
+  "id": "nkp-003",
+  "name": "multitenancy",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.mt.intro",
+    "nkp.mt.diagram"
+  ],
+  "needs": [
+    "UserNum"
+  ]
+}

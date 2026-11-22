@@ -79,9 +79,16 @@ function mapId(id: number | null): string | null {
   return NTNX_INFILTRATION_OLD_IDS[id] ?? null;
 }
 
+/** Step-by-step help: operator override of a stage's penalty (NULL = the JSON value). */
+function addOverlayPenaltyColumn(db: Database): void {
+  if (columnType(db, 'pack_overlay', 'pack_id') === null) return; // no table yet
+  addColumnIfMissing(db, 'pack_overlay', 'help_penalty_sec', 'INTEGER');
+}
+
 export function migrate(db: Database): void {
   // Additive columns, applied before schema.sql's CREATE IF NOT EXISTS pass so
   // they land on both old- and new-schema DBs.
+  addOverlayPenaltyColumn(db);
   const hasSessionsTable = columnType(db, 'sessions', 'id') !== null;
   if (hasSessionsTable) {
     // Phase 10: auto-play session mode.
@@ -92,6 +99,8 @@ export function migrate(db: Database): void {
     addColumnIfMissing(db, 'sessions', 'pending_check_retry_offset', 'INTEGER');
     // 2026-07-07: per-stage wall-clock timing (NIG Central telemetry).
     addColumnIfMissing(db, 'sessions', 'stage_entered_at', 'INTEGER');
+    // Step-by-step help: per-session override (NULL = follow the global flag).
+    addColumnIfMissing(db, 'sessions', 'help_enabled', 'INTEGER');
   }
 
   // 2026-04-27: cluster_profile values renamed for clarity.
@@ -260,4 +269,6 @@ export function migrate(db: Database): void {
     }
     db.exec(`DROP TABLE pack_overlay_old`);
   })();
+  // The rebuild above recreates pack_overlay without the newer columns.
+  addOverlayPenaltyColumn(db);
 }

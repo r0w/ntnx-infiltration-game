@@ -3,7 +3,7 @@ import type { PackOverlayRow } from './db/queries';
 
 /**
  * Apply operator overlay rows on top of the JSON-loaded stages. Each row
- * overrides specific fields (active, adminGate); a NULL field on the row
+ * overrides specific fields (active, adminGate, helpPenaltySec); a NULL field on the row
  * means "use the JSON value". The result is what the StageRunner uses for
  * gating decisions and rendering. Stages without an overlay row pass
  * through unchanged.
@@ -19,6 +19,7 @@ export function applyOverlay(
     const out: StageDefinition = { ...stage };
     if (o.active !== null) out.active = o.active;
     if (o.adminGate !== null) out.adminGate = o.adminGate;
+    if (o.helpPenaltySec !== null) out.helpPenaltySec = o.helpPenaltySec;
     return out;
   });
 }

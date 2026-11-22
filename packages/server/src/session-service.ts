@@ -6,6 +6,7 @@ import type {
   ActFunction,
   CheckContext,
   ClusterProfile,
+  KubeClient,
   Locale,
   LocaleBundle,
   Logger,
@@ -13,23 +14,27 @@ import type {
   SessionDirectory,
   StageDefinition,
 } from '@ntnx-game/engine';
-import { ActionRegistry, StageRunner, resolveKey } from '@ntnx-game/engine';
+import { ActionRegistry, StageRunner, resolveKey, parseMessage } from '@ntnx-game/engine';
 import { withMockOverlay, withVariableInterpolation } from '@ntnx-game/nutanix';
-import type { DisabledStage, MessageUnit } from '@ntnx-game/shared';
+import { withVariableInterpolation as withKubeInterpolation } from '@ntnx-game/kube-transport';
+import type { DisabledStage, HelpResponse, HelpSnapshot, MessageUnit } from '@ntnx-game/shared';
 import {
   AttemptQueries,
   ClusterCacheQueries,
   ClusterConfigQueries,
   GateUnlockQueries,
+  HelpUsageQueries,
   HistoryQueries,
   MockOverlayQueries,
   PackOverlayQueries,
   PackPauseQueries,
   SessionQueries,
+  SessionWaitQueries,
   VariableQueries,
   type SessionRecord,
 } from './db/queries';
 import { applyOverlay } from './pack-overlay';
+import { readHelpEnabledGlobally, resolveHelpEnabled, writeHelpEnabledGlobally } from './help';
 import type { Telemetry } from './telemetry';
 import {
   clusterCacheForSession,
@@ -70,6 +75,7 @@ export interface SessionServiceDeps {
   db: Database;
   runner: StageRunner;
   nutanix: NutanixClient;
+  kube?: KubeClient;
   actions?: ActionRegistry;
   logger: Logger;
   packId: string;
@@ -145,6 +151,8 @@ export class SessionService {
   readonly variables: VariableQueries;
   readonly history: HistoryQueries;
   readonly attempts: AttemptQueries;
+  readonly helpUsage: HelpUsageQueries;
+  readonly waits: SessionWaitQueries;
   readonly clusterCache: ClusterCacheQueries;
   readonly clusterConfig: ClusterConfigQueries;
   readonly mockOverlay: MockOverlayQueries;
@@ -160,12 +168,18 @@ export class SessionService {
    */
   private readonly baseStages: readonly StageDefinition[];
   private readonly nutanix: NutanixClient;
+  private readonly kube?: KubeClient;
   readonly actions: ActionRegistry;
   private readonly logger: Logger;
   readonly packId: string;
   private readonly bundle: LocaleBundle;
   private readonly globalTypingSpeedMs?: number;
   private readonly initialVariables: Record<string, unknown>;
+  /**
+   * Variables that exist before the first stage plays. Read by the Pack tab's
+   * dependency analysis so a stage needing one of them is not called broken.
+   */
+  readonly seededVariableNames: ReadonlySet<string>;
   private readonly sessionDirectory: SessionDirectory;
   private readonly telemetry?: Telemetry;
   /**
@@ -189,6 +203,8 @@ export class SessionService {
     this.variables = new VariableQueries(deps.db);
     this.history = new HistoryQueries(deps.db);
     this.attempts = new AttemptQueries(deps.db);
+    this.helpUsage = new HelpUsageQueries(deps.db);
+    this.waits = new SessionWaitQueries(deps.db);
     this.clusterCache = new ClusterCacheQueries(deps.db);
     this.clusterConfig = new ClusterConfigQueries(deps.db);
     this.mockOverlay = new MockOverlayQueries(deps.db);
@@ -199,12 +215,18 @@ export class SessionService {
     this.runner = deps.runner;
     this.baseStages = [...deps.runner.listStages()];
     this.nutanix = deps.nutanix;
+    this.kube = deps.kube;
     this.actions = deps.actions ?? new ActionRegistry();
     this.logger = deps.logger;
     this.packId = deps.packId;
     this.bundle = deps.bundle;
     this.globalTypingSpeedMs = deps.globalTypingSpeedMs;
     this.initialVariables = deps.initialVariables ?? {};
+    // `Vlanid` is allocated per session rather than seeded, but it is present
+    // before any stage runs, so the dependency analysis must count it as
+    // available like the rest. Everything else here is whatever the server and
+    // the pack's boot module actually put in — no pack names in code.
+    this.seededVariableNames = new Set([...Object.keys(this.initialVariables), 'Vlanid']);
     this.telemetry = deps.telemetry;
     this.unlockedGateIds = this.rebuildUnlockedSet();
     this.globallyPausedAt = this.packPauses.get(this.packId)?.pausedAt ?? null;
@@ -263,6 +285,24 @@ export class SessionService {
     } else {
       this.packPauses.clear(this.packId);
       this.globallyPausedAt = null;
+      this.releaseWaits();
+    }
+  }
+
+  /**
+   * End the waits of sessions the operator no longer holds, at the instant of
+   * the unlock / resume (not when each player's next poll lands, which would
+   * credit a player who closed the tab). A session held by a pause stays held
+   * until the resume even if its gate opens first, and the other way round.
+   */
+  private releaseWaits(now = Date.now()): void {
+    const stages = this.runner.listStages();
+    for (const w of this.waits.listOpen()) {
+      const gateIdx = this.stageIndex(w.stageName);
+      const heldByGate =
+        gateIdx >= 0 && stages[gateIdx]!.adminGate === true && !this.unlockedGateIds.has(gateIdx);
+      if (this.isGloballyPaused() || heldByGate) continue;
+      this.waits.close(w.sessionId, now);
     }
   }
 
@@ -289,6 +329,8 @@ export class SessionService {
     const effective = applyOverlay(this.baseStages, overlay);
     this.runner.replaceStages(effective);
     this.unlockedGateIds = this.rebuildUnlockedSet();
+    // A stage the operator just un-gated frees the sessions parked on it.
+    this.releaseWaits();
   }
 
   /** Stage names currently unlocked by an admin (read-only snapshot). */
@@ -309,6 +351,7 @@ export class SessionService {
     if (unlocked) {
       this.gateUnlocks.unlock(this.packId, stageName);
       this.unlockedGateIds.add(idx);
+      this.releaseWaits();
     } else {
       this.gateUnlocks.lock(this.packId, stageName);
       this.unlockedGateIds.delete(idx);
@@ -512,6 +555,94 @@ export class SessionService {
     return typeof v === 'string' && v.length > 0 ? v : null;
   }
 
+  // ---------------- step-by-step help ----------------
+
+  /** Global help flag. Defaults on for mock transport; explicit operator choices win. */
+  isHelpEnabledGlobally(): boolean {
+    return readHelpEnabledGlobally(this.clusterConfig, this.nutanix.mode === 'mock');
+  }
+
+  setHelpEnabledGlobally(enabled: boolean): void {
+    writeHelpEnabledGlobally(this.clusterConfig, enabled);
+  }
+
+  /** Effective flag for one session: the player's override wins over the global flag. */
+  isHelpEnabledFor(session: SessionRecord): boolean {
+    return resolveHelpEnabled(session.helpEnabled, this.isHelpEnabledGlobally());
+  }
+
+  /** Force help on / off for one player, or clear the override with `null`. */
+  setSessionHelp(sessionId: string, enabled: boolean | null): void {
+    if (this.sessions.setHelpEnabled(sessionId, enabled) === 0) {
+      throw new HttpError(404, 'Session not found');
+    }
+  }
+
+  helpSnapshot(session: SessionRecord): HelpSnapshot {
+    return {
+      enabled: this.isHelpEnabledFor(session),
+      usedStages: this.helpUsage.list(session.id).map((r) => r.stageName),
+    };
+  }
+
+  /**
+   * Display the step-by-step help of the stage the player is awaiting input
+   * in. The first display is billed once per (session, stage): the stage's
+   * penalty is frozen in `help_usage` and added to the finish time by the
+   * ranking; showing it again is free. A first display that costs time must
+   * be confirmed explicitly, so a stray click never bills the player. The
+   * server enforces the on/off flags; the UI only hides what it cannot use.
+   * The operator can change a stage's penalty live: a confirmation that names
+   * an amount (`confirmedPenaltySec`) only counts if it is still the current
+   * cost, so a player never pays more than the figure they agreed to.
+   * Never touches the awaiting / pending-check state.
+   */
+  requestHelp(
+    sessionId: string,
+    opts: { confirm?: boolean; confirmedPenaltySec?: number } = {},
+  ): HelpResponse {
+    const session = this.getSession(sessionId);
+    if (session.finishedAt) throw new HttpError(409, 'Session already finished');
+    if (!this.isHelpEnabledFor(session)) throw new HttpError(403, 'Help is disabled');
+    if (!session.awaiting) throw new HttpError(409, 'Session is not awaiting input');
+    const stage = this.runner.stageByName(session.awaiting.stageName);
+    if (!stage || !stage.help || stage.help.length === 0) {
+      throw new HttpError(404, 'No help for this stage');
+    }
+
+    const used = this.helpUsage.get(session.id, stage.name);
+    const penaltySec = used?.penaltySec ?? Math.max(0, Math.floor(stage.helpPenaltySec ?? 0));
+    if (!used && penaltySec > 0) {
+      const confirmed =
+        opts.confirm === true &&
+        (opts.confirmedPenaltySec === undefined || opts.confirmedPenaltySec === penaltySec);
+      if (!confirmed) return { status: 'confirm-required', stageName: stage.name, penaltySec };
+    }
+    const charged = used ? false : this.helpUsage.record(session.id, stage.name, penaltySec);
+    const vars = variablesForSession(session.id, this.variables, this.initialVariables);
+    const units = this.runner.renderHelp(stage, vars, session.locale, this.bundle);
+    this.logger.info('help displayed', {
+      sessionId: session.id,
+      stage: stage.name,
+      penaltySec,
+      charged,
+    });
+    // Once per (session, stage), at the billed first display: showing it again
+    // is free and reports nothing.
+    if (charged) {
+      this.telemetry?.record({
+        type: 'help_used',
+        sessionId: session.id,
+        stageId: stage.id,
+        stageName: stage.name,
+        stageIndex: stage.index,
+        penaltySec,
+        afterMs: this.stageWindow(session, Date.now())?.netMs,
+      });
+    }
+    return { status: 'ok', stageName: stage.name, units, penaltySec, charged };
+  }
+
   /**
    * Fire the registered act handler for the stage the session is awaiting on,
    * reusing its live vars + cluster cache + nutanix client. Powers the auto-play
@@ -533,6 +664,8 @@ export class SessionService {
     const ctx = this.buildCheckContext(session);
     const actCtx: ActContext = {
       nutanix: ctx.nutanix,
+      // The check context narrows this to reads; an act needs the writer.
+      kube: this.kube,
       vars: ctx.vars,
       cache: ctx.cache,
       session: ctx.session,
@@ -564,6 +697,15 @@ export class SessionService {
    * resuming a session sees the same prompt text instead of a bare marker.
    * Returns null when the session is not awaiting anything.
    */
+  private awaitingOffset(units: MessageUnit[], awaiting: NonNullable<SessionRecord['awaiting']>): number {
+    const inputs = units.flatMap((unit, index) => unit.kind === 'await-input' ? [{ unit, index }] : []);
+    // A saved render offset can drift when an operator deploys revised text.
+    // A single input has an unambiguous identity; multi-input stages retain
+    // their saved position so repeated continue prompts are never skipped.
+    if (inputs.length === 1 && inputs[0]!.unit.variable === awaiting.variable) return inputs[0]!.index + 1;
+    return awaiting.renderOffset;
+  }
+
   replayAwaiting(session: SessionRecord): MessageUnit[] | null {
     if (!session.awaiting) return null;
     const stage = this.runner.stageByName(session.awaiting.stageName);
@@ -576,7 +718,46 @@ export class SessionService {
       this.bundle,
       this.globalTypingSpeedMs,
     );
-    return rendered.units.slice(0, session.awaiting.renderOffset);
+    return rendered.units.slice(0, this.awaitingOffset(rendered.units, session.awaiting));
+  }
+
+  /**
+   * Re-render a stage the player has already reached, for re-reading.
+   *
+   * Read-only in every sense: no check runs, no capture happens, no session
+   * field moves. It also refuses stages ahead of the player, because a
+   * contents menu that let you read the next lab's text would hand out the
+   * answers.
+   *
+   * The prompts, pauses and check beats are stripped. What comes back is the
+   * material — text, screenshots, demos — not a replayable turn.
+   */
+  readStage(sessionId: string, stageName: string): { stage: string; units: MessageUnit[] } {
+    const session = this.getSession(sessionId);
+    const stage = this.runner.stageByName(stageName);
+    if (!stage) throw new HttpError(404, `Stage '${stageName}' not in pack`);
+
+    // Furthest point the player has legitimately seen: the stage they are
+    // parked in, else the one after their last completed.
+    const reached = session.awaiting
+      ? this.stageIndex(session.awaiting.stageName)
+      : this.stageIndex(session.currentStage) + 1;
+    if (this.stageIndex(stageName) > reached) {
+      throw new HttpError(403, `Stage '${stageName}' is ahead of you`);
+    }
+
+    const vars = variablesForSession(session.id, this.variables, this.initialVariables);
+    const rendered = this.runner.render(
+      stage,
+      vars,
+      session.locale,
+      this.bundle,
+      this.globalTypingSpeedMs,
+    );
+    const units = rendered.units.filter(
+      (u) => u.kind !== 'await-input' && u.kind !== 'pause' && u.kind !== 'clear',
+    );
+    return { stage: stageName, units };
   }
 
   /**
@@ -632,7 +813,7 @@ export class SessionService {
     }
   }
 
-  private buildCheckContext(session: SessionRecord): CheckContext {
+  private buildCheckContext(session: SessionRecord, stageName?: string): CheckContext {
     const vars = variablesForSession(session.id, this.variables, this.initialVariables);
     const cache = clusterCacheForSession(session.id, this.clusterCache);
     const overlay = mockOverlayForSession(session.id, this.mockOverlay);
@@ -641,8 +822,11 @@ export class SessionService {
     // like `{Trigram}-adm` without hard-coding a trigram. Then apply the
     // per-session mock overlay so stage-fired actions (deleteVM, etc.) shadow
     // the fixture for subsequent queries. Real adapters are passthrough.
-    const interpolated = withVariableInterpolation(this.nutanix, () => vars.snapshot());
+    const interpolated = withVariableInterpolation(this.nutanix, () => vars.snapshot(), () => stageName ?? session.pendingCheck?.stageName ?? session.awaiting?.stageName);
     const nutanix = withMockOverlay(interpolated, () => overlay.list());
+    // Same per-session `{Var}` templating for the k8s transport (NKP pack), so a
+    // fixture named `user{UserNum}-...` matches the player's captured UserNum.
+    const kube = this.kube ? withKubeInterpolation(this.kube, () => vars.snapshot()) : undefined;
     // Snapshot the cluster_config table once per check call. Two rows
     // max (discoverable_node_serials, lcm_available_updates), so two cheap
     // SQLite reads — fine to do per check, no need for an in-memory
@@ -651,6 +835,7 @@ export class SessionService {
     const lcm = this.clusterConfig.get<unknown>('lcm_available_updates');
     return {
       nutanix,
+      kube,
       vars,
       cache,
       args: {},
@@ -747,6 +932,7 @@ export class SessionService {
     // the next transition. That matches the operator's mental model
     // ("everyone wraps up what they're doing, then we pause").
     if (this.isGloballyPaused()) {
+      this.waits.open(session.id, 'pause', null);
       return {
         kind: 'gated',
         gatedReason: 'global',
@@ -778,6 +964,10 @@ export class SessionService {
       },
       ctx.vars,
     );
+    // Safety net: a session that gets past the gates is no longer held, even
+    // when no unlock / resume ended its wait (a stage switched to ungated, say).
+    // Done before the finish below, so a finished session has no open wait.
+    if (next?.kind !== 'gated') this.waits.close(session.id);
     if (!next) {
       // Only emit on the first finish — advance() keeps returning 'finished'
       // on every poll after the last stage, and clearFinished/replays exist.
@@ -785,7 +975,7 @@ export class SessionService {
         this.telemetry?.record({
           type: 'session_finished',
           sessionId: session.id,
-          totalMs: Date.now() - session.startedAt,
+          ...this.finishFields(session, Date.now()),
         });
       }
       this.sessions.markFinished(session.id);
@@ -819,7 +1009,9 @@ export class SessionService {
       // the last completed stage, and the client polls advance() on a 3 s
       // cadence until the admin unlocks. No `<action/>` dispatch yet either —
       // those belong to the gated stage's own render, fired only once we let
-      // the player in.
+      // the player in. The only record is the wait, so the held time can be
+      // taken off the player's clock.
+      this.waits.open(session.id, 'gate', next.stage.name);
       return {
         kind: 'gated',
         gatedReason: 'stage',
@@ -913,7 +1105,7 @@ export class SessionService {
       this.bundle,
       this.globalTypingSpeedMs,
     );
-    const fromIdx = session.awaiting.renderOffset;
+    const fromIdx = this.awaitingOffset(rendered.units, session.awaiting);
     const nextInputIdx = this.runner.nextAwaitInputAfter(rendered.units, fromIdx);
 
     if (nextInputIdx >= 0) {
@@ -964,7 +1156,6 @@ export class SessionService {
       };
     }
 
-    const prevAwaiting = session.awaiting;
     this.sessions.setAwaiting(session.id, null);
 
     // finalizeStage defers a check (streams the "wait…" narrative, parks
@@ -978,7 +1169,7 @@ export class SessionService {
       rendered.actions,
       [],
       rendered.typingSpeedMs,
-      { variable, offset: prevAwaiting.renderOffset },
+      { variable, offset: fromIdx },
     );
   }
 
@@ -1051,29 +1242,45 @@ export class SessionService {
 
   /**
    * Reset the session's identity capture without starting from scratch:
-   * rewind to before the login prompts (so they replay), drop the
-   * Trigram / PIN / Username variables, keep everything else (locale,
-   * sessionId). Wired to the "switch agent" frontend affordance (↓ during
-   * login, header link) — cheaper than a full reset (which also forces the
-   * language picker), and avoids inventing a second sessionId.
+   * rewind to just before the stage that asks who the player is, so its
+   * prompts replay, and drop what the run had captured. Locale and sessionId
+   * survive — cheaper than a full reset (which also forces the language
+   * picker), and it avoids inventing a second sessionId.
+   *
+   * Which stage that is comes from the pack. The infiltration game opens on a
+   * prelude and asks for the trigram second; the bootcamp asks for the user
+   * number in its very first stage. Rewinding to "stage 0, already passed"
+   * suited the first and silently broke the second: the only stage that
+   * captures `UserNum` was marked done without ever capturing it, every later
+   * stage then gated off on the variable it needs, and the runner — finding
+   * nothing left to play — declared the run complete.
    */
   switchIdentity(sessionId: string): { currentStage: string | null } {
     const session = this.getSession(sessionId);
-    const firstStage = this.runner.listStages()[0];
-    const loreName = firstStage?.name ?? null;
-    // Delete every history row from the second stage onward (the lore stage
-    // stays passed so the runner jumps straight to the login prompt).
+    const stages = this.runner.listStages();
+    // The first stage that captures anything is the one that asks who the
+    // player is: `login` in the infiltration game, `welcome` in the bootcamp.
+    // Reading it off the stages needs no per-pack wiring and cannot drift.
+    const found = stages.findIndex((s) => (s.captures ?? []).length > 0);
+    const identityIdx = found >= 0 ? found : 1;
+    // Everything from the identity stage onward replays; the stage before it
+    // (if any) stays passed, so the run resumes exactly at the prompt.
     const names = this.stageNames();
-    if (names.length >= 2) {
-      this.history.deleteFrom(session.id, names[1]!, names);
-    }
+    const rewindTo = names[identityIdx];
+    if (rewindTo) this.history.deleteFrom(session.id, rewindTo, names);
+    const resumeAt = identityIdx > 0 ? (names[identityIdx - 1] ?? null) : null;
+
     this.clearFlowState(session.id);
     this.sessions.clearFinished(session.id);
-    this.sessions.updateCurrentStage(session.id, loreName);
-    for (const name of ['Trigram', 'PIN', 'Username']) {
-      this.variables.delete(session.id, name);
+    this.sessions.updateCurrentStage(session.id, resumeAt);
+    // Whatever the replayed part of the run had learned, read off the stages
+    // rather than named here: a second pack identifies its players by a
+    // different variable (`UserNum`, not `Trigram`), and a hardcoded list left
+    // it behind — the prompt replayed while the old identity still applied.
+    for (const stage of stages.slice(identityIdx)) {
+      for (const name of stage.captures ?? []) this.variables.delete(session.id, name);
     }
-    return { currentStage: loreName };
+    return { currentStage: resumeAt };
   }
 
   /**
@@ -1117,7 +1324,7 @@ export class SessionService {
       if (stage.index <= currentIdx) continue;
       if (stage.index > targetIdx) break;
       const start = Date.now();
-      const result = await this.runner.rehydrate(stage, ctx);
+      const result = await this.runner.rehydrate(stage, this.buildCheckContext(session, stage.name));
       this.history.record(
         session.id,
         stage.name,
@@ -1163,6 +1370,25 @@ export class SessionService {
     pendingRetry?: { variable: string; offset: number },
   ): Promise<AdvanceResult> {
     if (stage.check) {
+      if (stage.checkMessagePrefix) {
+        const prefix = stage.checkMessagePrefix;
+        const local = this.bundle.catalogs[session.locale];
+        const fallback = this.bundle.catalogs[this.bundle.defaultLocale];
+        const entries = (catalog: typeof local) => Object.entries(catalog ?? {})
+          .filter(([key, value]) => key.startsWith(prefix) && typeof value === 'string' && value.trim());
+        const localized = entries(local);
+        const pool = localized.length ? localized : entries(fallback);
+        const stateKey = `__lastCheckPhrase:${prefix}`;
+        const previous = ctx.vars.get(stateKey);
+        const alternatives = pool.filter(([key]) => key !== previous);
+        const choices = alternatives.length ? alternatives : pool;
+        const selected = choices[Math.floor(Math.random() * choices.length)];
+        if (selected) {
+          ctx.vars.set(stateKey, selected[0], stage.name);
+          const phrase = parseMessage(selected[1], ctx.vars, stage.defaultColor);
+          units = [...units, ...phrase.units];
+        }
+      }
       this.sessions.setPendingCheck(session.id, {
         stageName: stage.name,
         retryVariable: pendingRetry?.variable ?? '',
@@ -1190,7 +1416,7 @@ export class SessionService {
       stageId: stage.id,
       stageName: stage.name,
       stageIndex: stage.index,
-      wallMs: session.stageEnteredAt !== null ? Date.now() - session.stageEnteredAt : undefined,
+      ...this.passFields(session, stage.name),
     });
     this.sessions.updateCurrentStage(session.id, stage.name);
     return { kind: 'units', stageName: stage.name, units, actions, disabledStages, typingSpeedMs };
@@ -1262,13 +1488,51 @@ export class SessionService {
       stageName: stage.name,
       stageIndex: stage.index,
       checkMs: Date.now() - start,
-      wallMs:
-        r.pass && session.stageEnteredAt !== null
-          ? Date.now() - session.stageEnteredAt
-          : undefined,
+      ...(r.pass ? this.passFields(session, stage.name) : {}),
     });
     if (r.pass) this.sessions.updateCurrentStage(session.id, stage.name);
     return { kind: 'units', stageName: stage.name, units, actions, check: checkResult, disabledStages, typingSpeedMs };
+  }
+
+  /**
+   * Time the player has spent on the stage they are in, as telemetry reports
+   * it: wall-clock since the previous transition (`stage_entered_at`), the part
+   * of that window the operator held them (an admin gate or the pause), and what
+   * is left. `undefined` for a session with no entry stamp, which predates the
+   * column.
+   */
+  private stageWindow(
+    session: SessionRecord,
+    now: number,
+  ): { wallMs: number; waitMs: number; netMs: number } | undefined {
+    if (session.stageEnteredAt === null) return undefined;
+    const wallMs = now - session.stageEnteredAt;
+    const waitMs = this.waits.overlapMs(session.id, session.stageEnteredAt, now);
+    return { wallMs, waitMs, netMs: wallMs - waitMs };
+  }
+
+  /** Timing and help fields of a `stage_passed` event. */
+  private passFields(session: SessionRecord, stageName: string) {
+    const help = this.helpUsage.get(session.id, stageName);
+    return {
+      ...this.stageWindow(session, Date.now()),
+      helpUsed: help !== null,
+      helpPenaltySec: help?.penaltySec ?? 0,
+    };
+  }
+
+  /** Totals of a `session_finished` event. */
+  private finishFields(session: SessionRecord, now: number) {
+    const totalMs = now - session.startedAt;
+    const waitMs = this.waits.totalBlockedMs(session.id, now);
+    const help = this.helpUsage.list(session.id);
+    return {
+      totalMs,
+      waitMs,
+      netMs: Math.max(0, totalMs - waitMs),
+      helpUses: help.length,
+      helpPenaltySec: help.reduce((sum, h) => sum + h.penaltySec, 0),
+    };
   }
 }
 

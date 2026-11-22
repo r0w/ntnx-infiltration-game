@@ -1,0 +1,22 @@
+{
+  "id": "nkp-009",
+  "name": "file-storage",
+  "active": true,
+  "prompt": "tank",
+  "defaultColor": "magenta",
+  "messages": [
+    "nkp.file.intro",
+    "nkp.file.manifest",
+    "nkp.file.apply",
+    "nkp.file.prompt"
+  ],
+  "check": {
+    "fn": "CheckFileStorage"
+  },
+  "needs": [
+    "UserNum"
+  ],
+  "dependsOn": [
+    "block-storage"
+  ]
+}

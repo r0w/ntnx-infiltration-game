@@ -20,6 +20,10 @@ import {
   type AdminUserEntry,
 } from './api';
 import { EMAIL_RE } from '@ntnx-game/shared';
+import { HelpCostCell } from './HelpCostCell';
+import { HelpMenu } from './HelpMenu';
+import { ScoreboardDisplayOptions } from './ScoreboardDisplayOptions';
+import { fmtPenaltyShort } from './duration';
 import { ConfirmModal, Modal } from './Modal';
 import { stageState, stateNote, STATE_ORDER, type StageState } from './pack-state';
 
@@ -30,6 +34,21 @@ import { VersionFooter } from './VersionFooter';
 type AdminTab = 'users' | 'logs' | 'pack' | 'cluster' | 'emails' | 'scoreboard';
 
 const STORAGE_KEY = 'ntnx-infiltration-admin-pw';
+
+/**
+ * Why a stage would break if the operator went ahead. Two different losses read
+ * differently: a variable nothing produces any more, and the cluster state a
+ * prerequisite stage left behind. Most stages have only the second, so naming
+ * just the variables printed a bare "missing".
+ */
+function cascadeReason(b: { missingVars: string[]; missingStages?: string[] }): string {
+  const parts: string[] = [];
+  if (b.missingVars.length > 0) parts.push(`missing ${b.missingVars.join(', ')}`);
+  if (b.missingStages && b.missingStages.length > 0) {
+    parts.push(`needs ${b.missingStages.join(', ')} to have run`);
+  }
+  return parts.join(' · ') || 'no longer satisfiable';
+}
 
 export function AdminPage() {
   const [password, setPassword] = useState<string | null>(() => {
@@ -72,6 +91,24 @@ function AdminLogin({ onLoggedIn }: { onLoggedIn: (pw: string) => void }) {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // /api/pack needs no admin password, so the operator sees which game this
+  // console belongs to before signing in.
+  const [title, setTitle] = useState('ntnx infiltration game');
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .pack()
+      .then((p) => {
+        if (!cancelled) setTitle(p.title);
+      })
+      .catch(() => {
+        /* keep the fallback title */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,7 +129,7 @@ function AdminLogin({ onLoggedIn }: { onLoggedIn: (pw: string) => void }) {
   return (
     <div className="login">
       <div className="login-card">
-        <h1 className="login-title">admin · ntnx infiltration game</h1>
+        <h1 className="login-title">admin · {title}</h1>
         <p className="login-subtitle">Event-day operator tools.</p>
         <form onSubmit={submit}>
           <label className="login-field">
@@ -157,9 +194,15 @@ function AdminDashboard({
     : 'users';
   const setTab = (next: AdminTab) => navigate(`/admin/${next}`);
   const [entries, setEntries] = useState<AdminUserEntry[] | null>(null);
+  // What this pack calls a player — 'trigram' for NCP, 'user' for the bootcamp.
+  const [identityLabel, setIdentityLabel] = useState('trigram');
   const [gates, setGates] = useState<AdminGateEntry[] | null>(null);
   const [lunch, setLunch] = useState<AdminLunchStatus | null>(null);
   const [lunchBusy, setLunchBusy] = useState(false);
+  // Global switch of the step-by-step help (off until the operator turns it
+  // on). A player's own override, set from the table, wins over it.
+  const [helpGlobal, setHelpGlobal] = useState<boolean | null>(null);
+  const [helpBusy, setHelpBusy] = useState(false);
   // Intelligent Ops state, page-wide: create-report hard-depends on it and
   // enabling is a manual Prism step, so the operator must see the warning
   // from any tab (same idea as the lunch strip), not just Cluster.
@@ -231,20 +274,23 @@ function AdminDashboard({
 
   const refresh = useCallback(async () => {
     try {
-      const [usersPayload, gatesPayload, packPayload, lunchPayload, selfPayload, peersPayload] = await Promise.all([
+      const [usersPayload, gatesPayload, packPayload, lunchPayload, selfPayload, peersPayload, helpPayload] = await Promise.all([
         api.adminUsers(password),
         api.adminGates(password),
         api.adminPack(password),
         api.adminLunchStatus(password),
         api.adminSelfLabel(password),
         api.adminPeers(password),
+        api.adminHelpStatus(password),
       ]);
       setEntries(usersPayload.entries);
+      setIdentityLabel(usersPayload.identityLabel ?? 'trigram');
       setGates(gatesPayload.entries);
       setPackStages(packPayload.stages);
       setPackBrokenCount(packPayload.brokenCount);
       setPackMeta({ clusterProfile: packPayload.clusterProfile, mode: packPayload.mode });
       setLunch(lunchPayload);
+      setHelpGlobal(helpPayload.enabled);
       setSelfLabel(selfPayload.label);
       setHasPeers(peersPayload.entries.length > 0);
       setError(null);
@@ -329,13 +375,64 @@ function AdminDashboard({
     }
   };
 
+  const toggleHelp = async () => {
+    if (helpGlobal === null) return;
+    setHelpBusy(true);
+    try {
+      const next = !helpGlobal;
+      await api.adminHelpSet(password, next);
+      setHelpGlobal(next);
+      void refresh();
+    } catch (err) {
+      setError(`help toggle failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setHelpBusy(false);
+    }
+  };
+
+  // `null` clears the player's override: they follow the global switch again.
+  const setUserHelp = async (entry: AdminUserEntry, value: boolean | null) => {
+    try {
+      await api.adminUserHelpSet(password, entry.sessionId, value);
+      setEntries((prev) =>
+        (prev ?? []).map((e) =>
+          e.sessionId === entry.sessionId
+            ? { ...e, helpEnabled: value, helpEffective: value ?? helpGlobal ?? false }
+            : e,
+        ),
+      );
+      void refresh();
+    } catch (err) {
+      setError(`help override failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
   // Stages whose live value differs from what their pack file declares.
   // Counts real drift, not overlay rows: an override that happens to match
   // the default is invisible to the operator, so it must not raise a flag.
   const packDriftCount =
     packStages === null
       ? null
-      : packStages.filter((s) => s.activeOverridden || s.adminGateOverridden).length;
+      : packStages.filter(
+          (s) => s.activeOverridden || s.adminGateOverridden || s.helpPenaltyOverridden,
+        ).length;
+
+  // Resolves true once the server took the new cost, so the editor can close.
+  // `null` goes back to the cost declared in the pack files.
+  const setHelpPenalty = async (stage: AdminPackStageEntry, seconds: number | null) => {
+    setPackBusyId(stage.stageName);
+    try {
+      await api.adminHelpPenaltySet(password, stage.stageName, seconds);
+      void refresh();
+      return true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`pack help cost failed: ${msg}`);
+      return false;
+    } finally {
+      setPackBusyId(null);
+    }
+  };
 
   const togglePackField = async (
     stage: AdminPackStageEntry,
@@ -572,6 +669,25 @@ function AdminDashboard({
           </div>
         )}
 
+        {helpGlobal !== null && (
+          <div className="admin-header-group admin-header-group-actions">
+            <button
+              type="button"
+              className={`admin-lunch-btn ${helpGlobal ? 'admin-help-btn-on' : ''}`}
+              disabled={helpBusy}
+              onClick={() => void toggleHelp()}
+              title={
+                helpGlobal
+                  ? 'step-by-step help is ON for every player not forced off — click to switch it off'
+                  : 'step-by-step help is OFF for every player not forced on — click to switch it on'
+              }
+            >
+              <span className="admin-lunch-icon" aria-hidden="true">💡</span>
+              {helpBusy ? '…' : helpGlobal ? 'help: on' : 'help: off'}
+            </button>
+          </div>
+        )}
+
         <div className="admin-header-group admin-header-group-links">
           <Link to="/" className="admin-header-link" target="_blank" rel="noreferrer">
             game<span className="admin-header-link-arrow" aria-hidden="true">↗</span>
@@ -730,6 +846,9 @@ function AdminDashboard({
           const filtered = showAnonymousUsers
             ? entries
             : entries.filter((e) => e.trigram !== null);
+          // Agent and PIN belong to the infiltration game. A pack that never
+          // captures them would otherwise show two columns of dashes.
+          const hasAgentCols = entries.some((e) => e.username !== null || e.pin !== null);
           // Stuck players first, longest-stuck on top — the triage order.
           // The rest keeps the server's newest-session-first order.
           const visible = [...filtered].sort((a, b) => {
@@ -768,11 +887,13 @@ function AdminDashboard({
           <table className="admin-table">
             <thead>
               <tr>
-                <th>Trigram</th>
-                <th>Agent</th>
-                <th>PIN</th>
+                <th>{identityLabel}</th>
+                {hasAgentCols && <th>Agent</th>}
+                {hasAgentCols && <th>PIN</th>}
                 <th>Stage</th>
                 <th>Progress</th>
+                <th>Help</th>
+                <th>Penalties</th>
                 <th>Started</th>
                 <th>Session</th>
                 <th aria-label="actions" />
@@ -795,8 +916,10 @@ function AdminDashboard({
                       <span className="c-dim">—</span>
                     )}
                   </td>
-                  <td>{e.username ?? <span className="c-dim">—</span>}</td>
-                  <td className="admin-td-pin">{e.pin ?? <span className="c-dim">—</span>}</td>
+                  {hasAgentCols && <td>{e.username ?? <span className="c-dim">—</span>}</td>}
+                  {hasAgentCols && (
+                    <td className="admin-td-pin">{e.pin ?? <span className="c-dim">—</span>}</td>
+                  )}
                   <td>
                     {e.finishedAt !== null ? (
                       <span className="c-green">finished</span>
@@ -829,6 +952,34 @@ function AdminDashboard({
                       : `${e.stagesPassed} passed / ${e.totalStages} total`
                   }>
                     {e.stagesPassed} / {e.effectiveTotalStages}
+                  </td>
+                  <td>
+                    <HelpMenu
+                      value={e.helpEnabled}
+                      globalOn={helpGlobal ?? false}
+                      label={`help for ${e.trigram ?? e.sessionId.slice(0, 8)}`}
+                      onChange={(value) => void setUserHelp(e, value)}
+                    />
+                  </td>
+                  <td>
+                    {e.helpUses > 0 ? (
+                      <span
+                        className="admin-penalties c-yellow"
+                        title={e.helpStages
+                          .map((h) => `${h.stage}${h.penaltySec > 0 ? ` (${fmtPenaltyShort(h.penaltySec)})` : ''}`)
+                          .join(', ')}
+                      >
+                        {e.helpUses}
+                        {e.helpPenaltySec > 0 && (
+                          <>
+                            <span className="c-dim"> | </span>
+                            {fmtPenaltyShort(e.helpPenaltySec)}
+                          </>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="c-dim">—</span>
+                    )}
                   </td>
                   <td className="c-dim">{fmtAge(e.startedAt)}</td>
                   <td className="admin-td-sid c-dim" title={e.sessionId}>
@@ -914,6 +1065,7 @@ function AdminDashboard({
             busyId={packBusyId}
             onTogglePackField={togglePackField}
             onRequestDisable={requestDisable}
+            onSetHelpPenalty={setHelpPenalty}
           />
         </section>
       )}
@@ -927,7 +1079,12 @@ function AdminDashboard({
         />
       )}
       {tab === 'emails' && <EmailsTab password={password} />}
-      {tab === 'scoreboard' && <PeersEditor password={password} />}
+      {tab === 'scoreboard' && (
+        <>
+          <ScoreboardDisplayOptions password={password} />
+          <PeersEditor password={password} />
+        </>
+      )}
       {packDisableTarget && (
         <ConfirmModal
           title={<><span className="c-yellow">!</span> disable stage?</>}
@@ -950,7 +1107,7 @@ function AdminDashboard({
             {packDisableTarget.preview.cascade.map((b) => (
               <li key={b.stageName}>
                 <strong>{b.stageName}</strong>{' '}
-                <span className="c-dim">requires {[...(b.missingStages ?? []), ...b.missingVars].join(', ')}</span>
+                <span className="c-dim">{cascadeReason(b)}</span>
               </li>
             ))}
           </ul>
@@ -986,7 +1143,7 @@ function AdminDashboard({
           <dl className="modal-meta">
             <dt>agent</dt>
             <dd>{confirmTarget.username ?? <span className="c-dim">—</span>}</dd>
-            <dt>trigram</dt>
+            <dt>{identityLabel}</dt>
             <dd className="modal-trigram">{confirmTarget.trigram ?? <span className="c-dim">—</span>}</dd>
             <dt>session</dt>
             <dd className="c-dim">{confirmTarget.sessionId.slice(0, 8)}</dd>
@@ -1038,7 +1195,7 @@ function AdminDashboard({
           <dl className="modal-meta">
             <dt>agent</dt>
             <dd>{skipTarget.username ?? <span className="c-dim">—</span>}</dd>
-            <dt>trigram</dt>
+            <dt>{identityLabel}</dt>
             <dd className="modal-trigram">{skipTarget.trigram ?? <span className="c-dim">—</span>}</dd>
             <dt>stage to skip</dt>
             <dd className="modal-trigram">{skipTarget.nextStageName}</dd>
@@ -1072,7 +1229,7 @@ function AdminDashboard({
                 <dl className="modal-meta">
                   <dt>agent</dt>
                   <dd>{failTarget.username ?? <span className="c-dim">—</span>}</dd>
-                  <dt>trigram</dt>
+                  <dt>{identityLabel}</dt>
                   <dd className="modal-trigram">
                     {failTarget.trigram ?? <span className="c-dim">—</span>}
                   </dd>
@@ -1463,6 +1620,7 @@ function PackEditor({
   busyId,
   onTogglePackField,
   onRequestDisable,
+  onSetHelpPenalty,
 }: {
   stages: AdminPackStageEntry[] | null;
   meta: { clusterProfile: 'hpoc' | 'other'; mode: 'mock' | 'test' | 'live' } | null;
@@ -1473,6 +1631,7 @@ function PackEditor({
     value: boolean,
   ) => void;
   onRequestDisable: (s: AdminPackStageEntry) => void;
+  onSetHelpPenalty: (s: AdminPackStageEntry, seconds: number | null) => Promise<boolean>;
 }) {
   const [filter, setFilter] = useState<StageState | 'all'>('all');
   const [query, setQuery] = useState('');
@@ -1601,6 +1760,7 @@ function PackEditor({
               <th>stage</th>
               <th>active</th>
               <th>gate</th>
+              <th>help cost</th>
               <th>vars</th>
               <th>requires stages</th>
             </tr>
@@ -1671,6 +1831,13 @@ function PackEditor({
                       {s.adminGateOverridden && <span className="pack-toggle-mark">·</span>}
                     </button>
                   </td>
+                  <td>
+                    <HelpCostCell
+                      stage={s}
+                      busy={busy}
+                      onSave={(seconds) => onSetHelpPenalty(s, seconds)}
+                    />
+                  </td>
                   <td className="pack-vars c-dim">
                     {s.needs.length === 0 && s.captures.length === 0 ? (
                       <span className="pack-vars-none">—</span>
@@ -1712,7 +1879,7 @@ function PackEditor({
             })}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={6} className="pack-empty">
+                <td colSpan={7} className="pack-empty">
                   no stage matches. <button type="button" className="app-reset" onClick={() => { setFilter('all'); setQuery(''); }}>show all {rows.length}</button>
                 </td>
               </tr>

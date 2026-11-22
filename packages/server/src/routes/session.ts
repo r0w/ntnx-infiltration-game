@@ -39,6 +39,7 @@ export function buildSessionRoutes(deps: SessionRoutesDeps): Hono {
       capabilities: session.capabilities,
       awaiting: session.awaiting,
       locale: session.locale,
+      help: deps.service.helpSnapshot(session),
     });
   });
 
@@ -59,6 +60,9 @@ export function buildSessionRoutes(deps: SessionRoutesDeps): Hono {
       pendingCheck: session.pendingCheck ? { stageName: session.pendingCheck.stageName } : null,
       locale: session.locale,
       finishedAt: session.finishedAt,
+      // Polled by the client heartbeat: an operator toggle reaches the player
+      // within a few seconds without a reload.
+      help: deps.service.helpSnapshot(session),
       replay,
     });
   });

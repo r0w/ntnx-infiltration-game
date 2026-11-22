@@ -158,4 +158,58 @@ describe('parseMessage', () => {
       { kind: 'code', text: '{not-a-var} <red>not a tag</red>' },
     ]);
   });
+  test('&lt; and &gt; decode to literal angle brackets in prose', () => {
+    const r = parseMessage('Replace &lt;any_node_IP&gt; with a node IP.', new VariableStore());
+    expect(r.units).toEqual([
+      { kind: 'text', text: 'Replace <any_node_IP> with a node IP.', color: 'default' },
+    ]);
+  });
+
+  test('a decoded &lt; does not start a tag', () => {
+    const r = parseMessage('&lt;red&gt;stays text&lt;/red&gt;', new VariableStore());
+    expect(r.units).toEqual([
+      { kind: 'text', text: '<red>stays text</red>', color: 'default' },
+    ]);
+  });
+
+  test('entities decode inside <code> too — the learner copies the real YAML', () => {
+    const r = parseMessage('<code lang=\'yaml\'>host: user01.&lt;ingress_lb_ip&gt;.sslip.io</code>', new VariableStore());
+    expect(r.units).toEqual([
+      { kind: 'code', text: 'host: user01.<ingress_lb_ip>.sslip.io', lang: 'yaml' },
+    ]);
+  });
+
+  test('&amp; decodes, and a bare & is left alone', () => {
+    const r = parseMessage('a &amp; b, x=1&y=2', new VariableStore());
+    expect(r.units).toEqual([
+      { kind: 'text', text: 'a & b, x=1&y=2', color: 'default' },
+    ]);
+  });
+});
+
+test('inline copy substitutes values and keeps IP pool endpoints separate', () => {
+  const vars = new VariableStore({ Trigram: 'rbo', Vlanid: 198 });
+  const parsed = parseMessage("<white><copy>{Trigram}-subnet</copy></white>: <copy>192.168.{Vlanid}.50</copy> - <copy>192.168.{Vlanid}.115</copy> <white>Enter</white>", vars);
+  const values = parsed.units.filter(u => u.kind === 'text' && u.copyable);
+  expect(values.map(u => u.kind === 'text' && u.text)).toEqual(['rbo-subnet', '192.168.198.50', '192.168.198.115']);
+  expect(parsed.units.at(-1)).toEqual({ kind: 'text', text: 'Enter', color: 'white' });
+});
+
+test('inline copy treats substituted markup as text and decodes entities', () => {
+  const parsed = parseMessage('<copy>{Secret}&amp;</copy> plain', new VariableStore({ Secret: '<input/>$x' }));
+  expect(parsed.units).toEqual([
+    { kind: 'text', text: '<input/>$x&', color: 'default', copyable: true },
+    { kind: 'text', text: ' plain', color: 'default' },
+  ]);
+});
+
+
+test('lowercase copy preserves display names and leaves ordinary copy unchanged', () => {
+  const parsed = parseMessage("<white><copy transform='lowercase'>Charlie</copy>, <copy transform='lowercase'>{Approver}</copy>, <copy>William</copy></white>", new VariableStore({ Approver: 'Thom' }));
+  const names = parsed.units.filter(u => u.kind === 'text' && u.copyable);
+  expect(names).toEqual([
+    { kind: 'text', text: 'Charlie', color: 'white', copyable: true, copyText: 'charlie' },
+    { kind: 'text', text: 'Thom', color: 'white', copyable: true, copyText: 'thom' },
+    { kind: 'text', text: 'William', color: 'white', copyable: true },
+  ]);
 });

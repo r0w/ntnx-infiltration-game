@@ -4,10 +4,12 @@ import type {
   ClusterCache,
   ClusterCacheEntry,
   ClusterProfile,
+  KubeClient,
   NutanixClient,
   Variables,
 } from '@ntnx-game/engine';
 import { withVariableInterpolation } from '@ntnx-game/nutanix';
+import { withVariableInterpolation as withKubeInterpolation } from '@ntnx-game/kube-transport';
 import { HttpError } from '../session-service';
 import type { LoadedPack } from '../pack-loader';
 import { consoleLogger } from '../logger';
@@ -15,6 +17,8 @@ import { consoleLogger } from '../logger';
 export interface ActRoutesDeps {
   pack: LoadedPack;
   nutanix: NutanixClient;
+  /** Kubernetes transport, for packs whose acts and cleanups write to k8s. */
+  kube?: KubeClient;
   adminPassword: string;
   clusterProfile: ClusterProfile;
   /**
@@ -61,35 +65,40 @@ export function buildActRoutes(deps: ActRoutesDeps): Hono {
   // request's lifetime) so operator-run acts don't pollute the sessions
   // table with synthetic rows.
   /**
-   * Heuristic: the pure-input stages each have a known variable name the
-   * player would normally submit. When the auto-play caller has pre-seeded
-   * that variable in `body.vars`, we treat the stage as runnable and let
-   * the check validate. List kept small — extend if new pure-input stages
-   * land in the pack.
+   * Does this pure-input stage have something to validate?
+   *
+   * A stage the player types into declares what it takes in `captures`, so the
+   * question is simply whether the synthetic context already holds one of
+   * those values — seeded from the path segment, or pre-populated by the
+   * caller in `body.vars`. Reading it off the stage means a second pack, and
+   * the next one after it, need no entry anywhere: the old hand-written map
+   * still listed `switch-to-admin-user`, a stage that has had no check for a
+   * long time.
    */
   function isInputCaptured(
-    stage: { name: string },
+    stage: { captures?: string[] },
     ctx: ActContext,
   ): boolean {
-    const byStage: Record<string, string> = {
-      login: 'Trigram',
-      'switch-to-admin-user': 'Username',
-      'expand-cluster': 'NodeSerial',
-      'lcm-check-updates': 'NumberUpdates',
-      'capacity-runway': 'Runway',
-    };
-    const varName = byStage[stage.name];
-    if (!varName) return false;
-    const val = ctx.vars.get(varName);
-    if (typeof val === 'string') return val.length > 0;
-    if (typeof val === 'number') return Number.isFinite(val);
-    return false;
+    return (stage.captures ?? []).some((name) => {
+      const val = ctx.vars.get(name);
+      if (typeof val === 'string') return val.length > 0;
+      if (typeof val === 'number') return Number.isFinite(val);
+      return false;
+    });
   }
 
-  function makeContext(trigram: string, extraVars: Record<string, unknown> = {}): ActContext {
+  function makeContext(trigram: string, extraVars: Record<string, unknown> = {}, getStage?: () => string | undefined): ActContext {
     const varStore = new Map<string, unknown>();
     for (const [k, v] of Object.entries(deps.initialVariables ?? {})) varStore.set(k, v);
     varStore.set('Trigram', trigram);
+    // The path segment is "who to act for", and each pack spells that
+    // differently: the infiltration game scopes its objects by trigram, the
+    // bootcamp by user number. The pack's boot module turns the segment into
+    // whatever its own handlers read; a pack without one gets the trigram
+    // above and nothing else.
+    for (const [k, v] of Object.entries(deps.pack.boot.identityFromPath?.(trigram) ?? {})) {
+      varStore.set(k, v);
+    }
     for (const [k, v] of Object.entries(extraVars)) varStore.set(k, v);
     const vars: Variables = {
       get: (name) => varStore.get(name),
@@ -111,12 +120,16 @@ export function buildActRoutes(deps: ActRoutesDeps): Hono {
       all: () => [...cacheStore.values()],
     };
     return {
+      // Same interpolation the session path applies, for the same reason: mock
+      // fixtures are keyed `user{UserNum}` and only resolve once the operator's
+      // identifier is in scope. No-op on a live cluster.
+      kube: deps.kube ? withKubeInterpolation(deps.kube, () => Object.fromEntries(varStore)) : undefined,
       // Wrap with variable interpolation so mock fixtures keyed
       // `/.../{Trigram}-vm` continue to match after the act resolves
       // `Trigram` in its requests. No-op on non-mock transports
       // (withVariableInterpolation early-returns when mode !== 'mock').
       nutanix: withVariableInterpolation(deps.nutanix, () =>
-        Object.fromEntries(varStore),
+        Object.fromEntries(varStore), getStage,
       ),
       vars,
       cache,
@@ -155,7 +168,7 @@ export function buildActRoutes(deps: ActRoutesDeps): Hono {
     };
     const fn = deps.pack.acts.get(stage);
     if (!fn) throw new HttpError(404, `no act registered for stage "${stage}"`);
-    const ctx = makeContext(trigram, body.vars ?? {});
+    const ctx = makeContext(trigram, body.vars ?? {}, () => stage);
     const startedAt = Date.now();
     try {
       await fn(ctx);
@@ -227,7 +240,8 @@ export function buildActRoutes(deps: ActRoutesDeps): Hono {
     // worst-case.
     const maxRetries = Math.max(0, body.maxRetries ?? 10);
     const retryDelayMs = Math.max(0, body.retryDelayMs ?? 3000);
-    const ctx = makeContext(trigram, body.vars ?? {});
+    let activeStage: string | undefined;
+    const ctx = makeContext(trigram, body.vars ?? {}, () => activeStage);
 
     const results: Array<{
       stage: string;
@@ -239,6 +253,7 @@ export function buildActRoutes(deps: ActRoutesDeps): Hono {
     }> = [];
 
     for (const stage of deps.pack.stages) {
+      activeStage = stage.name;
       const started = Date.now();
       const actFn = deps.pack.acts.get(stage.name);
       const checkFn = stage.check ? deps.pack.checks.get(stage.check.fn) : undefined;
@@ -277,6 +292,11 @@ export function buildActRoutes(deps: ActRoutesDeps): Hono {
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
           const res = await checkFn({
             nutanix: ctx.nutanix,
+            // A CheckContext is not an ActContext, so it has to be spelled out
+            // — and the k8s transport was the field that got forgotten. Without
+            // it every NKP check fails "transport unavailable" while the acts
+            // beside them are writing to the cluster perfectly well.
+            kube: ctx.kube,
             vars: ctx.vars,
             cache: ctx.cache,
             args: stage.check?.args ?? {},

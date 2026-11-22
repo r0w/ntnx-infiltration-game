@@ -207,6 +207,7 @@ function loadFixturesFromFile(path: string): MockFixtures {
 export function withVariableInterpolation(
   client: NutanixClient,
   getVars: () => Record<string, unknown>,
+  getStage?: () => string | undefined,
 ): NutanixClient {
   if (client.mode !== 'mock') return client;
   const wrappedRequest = async <T>(
@@ -221,7 +222,11 @@ export function withVariableInterpolation(
     const vars = getVars();
     const lookupPath = deinterpolatePath(path, vars);
     const raw = await client.request<unknown>(method, lookupPath, body, headers);
-    return interpolate(raw, vars) as T;
+    // Some exercises require opposite states of the same resource in consecutive stages.
+    const stage = getStage?.();
+    const variants = (raw as { $mockStages?: Record<string, unknown> })?.$mockStages;
+    const selected = stage && variants && Object.hasOwn(variants, stage) ? variants[stage] : raw;
+    return interpolate(selected, vars) as T;
   };
   return {
     mode: client.mode,
