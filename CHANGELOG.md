@@ -15,6 +15,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- Summary email: NAI (Nutanix Enterprise AI) in "What we didn't cover today" (EN/FR/DE).
+
 ### Changed
 
 ### Fixed
