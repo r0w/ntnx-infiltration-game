@@ -36,7 +36,7 @@ export type CapabilityFlag =
   | 'ApprovalPolicy'
   // Secondary PC ("Planner") is wired with non-empty host + user +
   // password. Config-driven (no HTTP probe) — gating stages 31
-  // (capacity-runway, live runway query against the OldPC) + 32
+  // (capacity-runway, player-entered reading from AIOps) + 32
   // (resource-optimization, narrative continuation on the same
   // Planner cluster). When unwired, both stages auto-skip via the
   // capability gate instead of leaving the player with a broken

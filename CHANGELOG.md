@@ -19,6 +19,12 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+## [1.2.2] - 2026-11-24
+
+### Fixed
+
+- Accept any valid Runway day count in every mode without querying the legacy Planner cluster, including during auto-fill.
+
 ## [1.2.1] - 2026-11-24
 
 ### Added
@@ -259,7 +265,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 Baseline release. See the git history for changes up to this point.
 
-[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.4...v1.1.0

@@ -1369,13 +1369,7 @@ async function CheckUpdates(ctx: CheckContext): Promise<CheckResult> {
   };
 }
 
-/**
- * Stage 31 `capacity-runway` (CheckRunway). Player reads the runway
- * dashboard on a different cluster and types the number of days remaining
- * via `<input var='Runway'/>`. Pure input validation — we don't cross-check
- * against the cluster since the stage prose explicitly hands the player
- * into a secondary PC the check function has no connection to.
- */
+/** Stage 31 records the player's AIOps runway reading without querying a cluster. */
 async function CheckRunway(ctx: CheckContext): Promise<CheckResult> {
   const raw = ctx.vars.get('Runway');
   if (typeof raw !== 'string' && typeof raw !== 'number') {
@@ -1394,107 +1388,10 @@ async function CheckRunway(ctx: CheckContext): Promise<CheckResult> {
       retryFromVariable: 'Runway',
     };
   }
-  // Mock mode: skip the OldPC raw fetch (it bypasses the mock-adapter and
-  // hits a real secondary cluster, breaking offline play). Format-only
-  // validation; auto-fill returns a canned 120 for auto-play, manual
-  // typing accepts any non-negative integer.
-  if (ctx.nutanix.mode === 'mock') {
-    return {
-      pass: true,
-      detail: `${submitted} days recorded (mock mode, format-only validation).`,
-    };
-  }
-  // Original `CheckRunway` queries a SECOND cluster (`OldPC`) via the v3
-  // groups endpoint with a `capacity.runway` group_member_attribute. Stage
-  // 31 prose explicitly hands the player to the secondary cluster's
-  // capacity dashboard. If the runtime hasn't been wired with `OldPC` /
-  // `OldPCUsername` / `OldPCPassword` (no secondary cluster available
-  // for this event), fall back to format-only validation — the player's
-  // typed value is the only signal we have.
-  const oldPc = ctx.vars.get('OldPC');
-  const oldUser = ctx.vars.get('OldPCUsername');
-  const oldPass = ctx.vars.get('OldPCPassword');
-  if (
-    typeof oldPc !== 'string' ||
-    typeof oldUser !== 'string' ||
-    typeof oldPass !== 'string' ||
-    !oldPc ||
-    !oldUser ||
-    !oldPass
-  ) {
-    return {
-      pass: true,
-      detail: `${submitted} days recorded (no secondary cluster wired, format-only validation).`,
-    };
-  }
-  try {
-    // OldPC env may be just a host/IP (`10.55.82.39`) — add scheme + PC
-    // port. Or it may already be a full URL (`https://…:9440`) from a
-    // hand-rolled deployment — strip trailing `/`. Detect by leading scheme.
-    const stripped = oldPc.replace(/\/+$/, '');
-    const base = /^https?:\/\//.test(stripped) ? stripped : `https://${stripped}:9440`;
-    const url = `${base}/api/nutanix/v3/groups`;
-    const auth = `Basic ${btoa(`${oldUser}:${oldPass}`)}`;
-    const now = Date.now();
-    const body = {
-      entity_type: 'cluster',
-      group_member_attributes: [{ attribute: 'capacity.runway' }],
-      query_name: 'prism:RunwayInfoQueryModel',
-      interval_start_ms: now - 3 * 86400 * 1000,
-      interval_end_ms: now,
-      downsampling_interval: 86400,
-    };
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: auth,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify(body),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tls: { rejectUnauthorized: false } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any);
-    if (!res.ok) {
-      return {
-        pass: true,
-        detail: `${submitted} days recorded (secondary cluster ${oldPc} returned ${res.status}, format-only validation).`,
-      };
-    }
-    const data = (await res.json()) as {
-      group_results?: Array<{
-        entity_results?: Array<{
-          data?: Array<{ name?: string; values?: Array<{ values?: unknown[] }> }>;
-        }>;
-      }>;
-    };
-    const entry = data.group_results?.[0]?.entity_results?.[0]?.data?.find(
-      (d) => d.name === 'capacity.runway',
-    );
-    const actual = entry?.values?.[0]?.values?.[0];
-    const actualNum =
-      typeof actual === 'number' ? actual : Number.parseInt(String(actual ?? ''), 10);
-    if (!Number.isFinite(actualNum)) {
-      return {
-        pass: true,
-        detail: `${submitted} days recorded (secondary cluster runway unparseable, format-only validation).`,
-      };
-    }
-    if (actualNum !== submitted) {
-      return {
-        pass: false,
-        detail: `Cluster runway is ${actualNum} days, you typed ${submitted}.`,
-        retryFromVariable: 'Runway',
-      };
-    }
-    return { pass: true, detail: `${submitted} days — matches secondary cluster capacity.` };
-  } catch (err) {
-    return {
-      pass: true,
-      detail: `${submitted} days recorded (runway query failed: ${nutanixErrorDetail(err)}, format-only validation).`,
-    };
-  }
+  return {
+    pass: true,
+    detail: `${submitted} days recorded (format-only validation).`,
+  };
 }
 
 /**
