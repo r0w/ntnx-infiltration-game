@@ -21,6 +21,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- Make the browser-tab icon easier to recognize with a high-contrast terminal prompt.
+
 ### Fixed
 
 - Rank tied players by time to their latest validated stage, excluding organizer waits and including help penalties, consistently across local and combined scoreboards.
