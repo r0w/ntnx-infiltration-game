@@ -2728,8 +2728,8 @@ function EmailsTab({ password }: { password: string }) {
   const htmlRef = useRef('');
   // Set by EmailStudio: synchronously exports the canvas into updateHtml.
   const studioFlushRef = useRef<(() => void) | null>(null);
-  // Subject/html as loaded from the template — the dirty-draft baseline.
-  const loadedDraftRef = useRef<{ subject: string; html: string } | null>(null);
+  // Loaded template and variables form the dirty-draft baseline.
+  const loadedDraftRef = useRef<{ subject: string; html: string; vars: Record<string, string> } | null>(null);
   const [pendingSwitch, setPendingSwitch] = useState<{ key: string; thenSend: boolean } | null>(
     null,
   );
@@ -2864,7 +2864,6 @@ function EmailsTab({ password }: { password: string }) {
       if (!t) return;
       setSubject(t.subject);
       updateHtml(t.html);
-      loadedDraftRef.current = { subject: t.subject, html: t.html };
       // Priority: last-used value for this deployment, then the template
       // default, then the derived ones — GAME_URL = this deployment's own
       // origin, CLUSTER = the probed PE cluster name, PASSWORD = the PC
@@ -2880,6 +2879,7 @@ function EmailsTab({ password }: { password: string }) {
           saved[k]?.trim() ? saved[k] : t.variables[k] || derived[k] || '',
         ]),
       );
+      loadedDraftRef.current = { subject: t.subject, html: t.html, vars: resolved };
       setVars(resolved);
       setStudioNonce((n) => n + 1);
       setSendReport(null);
@@ -2913,13 +2913,14 @@ function EmailsTab({ password }: { password: string }) {
     selTemplate !== null &&
     loadedDraftRef.current !== null &&
     (subject.trim() !== loadedDraftRef.current.subject ||
-      html !== loadedDraftRef.current.html);
+      html !== loadedDraftRef.current.html ||
+      Object.keys(vars).some((key) => vars[key] !== loadedDraftRef.current!.vars[key]));
   const pendingFor = (tplType: string) =>
     (roster ?? []).filter((r) => r.sent[tplType] === undefined);
   const pending = selTemplate ? pendingFor(selTemplate.id) : [];
 
   // Loading a template overwrites the draft; edits persist server-side
-  // only on send, so a dirty draft gets a discard confirmation first.
+  // on save or send, so a dirty draft gets a discard confirmation first.
   const requestTemplateChange = (key: string, thenSend = false) => {
     if (!key || key === selKey) {
       if (thenSend) setConfirmSend(true);
@@ -2930,7 +2931,8 @@ function EmailsTab({ password }: { password: string }) {
     const dirty =
       selKey !== '' &&
       loaded !== null &&
-      (subject !== loaded.subject || htmlRef.current !== loaded.html);
+      (subject !== loaded.subject || htmlRef.current !== loaded.html ||
+        Object.keys(vars).some((key) => vars[key] !== loaded.vars[key]));
     if (dirty) {
       setPendingSwitch({ key, thenSend });
       return;
@@ -3044,9 +3046,10 @@ function EmailsTab({ password }: { password: string }) {
         password,
         selTemplate.id,
         selTemplate.locale,
-        draft,
+        { ...draft, vars },
       );
-      loadedDraftRef.current = draft;
+      loadedDraftRef.current = { ...draft, vars };
+      setSavedVars(r.vars);
       setTemplates(
         (prev) =>
           prev?.map((t) =>

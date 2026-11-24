@@ -1295,21 +1295,33 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     const { id, locale } = c.req.param();
     const template = findTemplate(id, locale);
     if (!template) throw new HttpError(404, `unknown template ${id}.${locale}`);
-    const body = (await c.req.json().catch(() => ({}))) as { subject?: unknown; html?: unknown };
+    const body = (await c.req.json().catch(() => ({}))) as { subject?: unknown; html?: unknown; vars?: unknown };
     if (typeof body.subject !== 'string' || !body.subject.trim()) {
       throw new HttpError(400, 'subject is required');
     }
     if (typeof body.html !== 'string' || !body.html.trim()) {
       throw new HttpError(400, 'html body is required');
     }
+    if (body.vars !== undefined && (body.vars === null || typeof body.vars !== 'object' ||
+        Array.isArray(body.vars) || !Object.values(body.vars).every((value) => typeof value === 'string'))) {
+      throw new HttpError(400, 'vars must be an object of strings');
+    }
     const cfg = deps.service.clusterConfig;
     const overridden = body.html !== template.html || body.subject.trim() !== template.subject;
-    if (overridden) {
-      cfg.set(emailTplKey(id, locale), { subject: body.subject.trim(), html: body.html }, 'admin');
-    } else {
-      cfg.delete(emailTplKey(id, locale));
-    }
-    return c.json({ ok: true, overridden });
+    const subject = body.subject.trim();
+    const html = body.html;
+    const vars = deps.db.transaction(() => {
+      if (overridden) {
+        cfg.set(emailTplKey(id, locale), { subject, html }, 'admin');
+      } else {
+        cfg.delete(emailTplKey(id, locale));
+      }
+      const merged = { ...(cfg.get<Record<string, string>>('email_vars') ?? {}),
+        ...(body.vars as Record<string, string> | undefined) };
+      if (body.vars !== undefined) cfg.set('email_vars', merged, 'admin');
+      return merged;
+    }).immediate();
+    return c.json({ ok: true, overridden, vars });
   });
 
   // Reset a template to its bundled default.

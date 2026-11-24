@@ -728,13 +728,13 @@ export const api = {
     password: string,
     id: string,
     locale: string,
-    body: { subject: string; html: string },
+    body: { subject: string; html: string; vars: Record<string, string> },
   ) =>
     fetch(`/api/admin/email-templates/${id}/${locale}`, {
       method: 'PUT',
       headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    }).then((res) => handle<{ ok: true; overridden: boolean }>(res)),
+    }).then((res) => handle<{ ok: true; overridden: boolean; vars: Record<string, string> }>(res)),
   adminEmailTemplateReset: (password: string, id: string, locale: string) =>
     adminDel<{ ok: true }>(`/admin/email-templates/${id}/${locale}`, password),
   adminEmailRoster: (password: string) =>
