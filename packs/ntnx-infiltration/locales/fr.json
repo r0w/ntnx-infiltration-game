@@ -169,7 +169,7 @@
   "stage-031.line-04": "Ce n'est pas une grosse prise, mais il semble que cela soit le compte de la personne qui surveille la capacité des clusters et l'approvisionnement en noeuds.<pause sec='2'/>\n\n",
   "stage-031.line-05": "Pouvez-vous vous connecter rapidement sur ce cluster, vérifier les informations d'autonomie (Runway) et me donner le nombre de jours restants avant d'atteindre la capacité maximale ce cluster ?<pause sec='3'/>\n",
   "stage-031.line-06": "Voici les informations de connexion :\n",
-  "stage-031.line-07": " - Prism Central : <a href='https://{OldPC}:9440'>{OldPC}</a>\n",
+  "stage-031.line-07": " - Nutanix Central AIOps : <a href='https://nc.ntnxlab.org/services/aiops/'>nc.ntnxlab.org/services/aiops/</a>\n",
   "stage-031.line-08": " - Utilisateur: <white><copy>{OldPCUsername}</copy></white> <red>(c'est un utilisateur local)</red>\n",
   "stage-031.line-09": " - Mot de passe: <white><copy>{OldPCPassword}</copy></white>\n\n",
   "stage-031.line-10": "Vous devriez trouver des informations dans la page <white>Intelligent Operations</white>. Envoyez-moi simplement <white>le nombre de jours</white> ici quand vous l'avez <red>(juste un nombre, rien d'autre)</red> : <input var='Runway'/>",

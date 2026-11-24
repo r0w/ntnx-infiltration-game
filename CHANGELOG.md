@@ -19,6 +19,16 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+## [1.2.1] - 2026-11-24
+
+### Added
+
+- Introduce Nutanix Enterprise AI and Agent Gateway in the English, French and German summary emails.
+
+### Changed
+
+- Open Planner directly in Nutanix Central AIOps from the capacity runway instructions.
+
 ## [1.2.0] - 2026-11-22
 
 **Reverted the NCP game to PC/AOS 7.5. Version 7.6 will not be supported.**
@@ -249,7 +259,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 Baseline release. See the git history for changes up to this point.
 
-[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.4...v1.1.0
 [1.0.4]: https://github.com/r0w/ntnx-infiltration-game/compare/v1.0.3...v1.0.4
