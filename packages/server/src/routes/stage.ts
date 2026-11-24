@@ -189,7 +189,7 @@ export function buildStageRoutes(deps: StageRoutesDeps): Hono {
     // shouldn't skip steps in front of an audience). `test` and `mock`
     // both allow it: `test` looks up against the real PC, `mock` against
     // the fixtures (rackable-units + lifecycle/entities) and returns a
-    // canned value for Runway (the lookup hits the OldPC raw, no fixture).
+    // example value for Runway in both modes (no external lookup).
     if (serverMode === 'live') {
       throw new HttpError(403, `auto-fill disabled in ${serverMode} mode`);
     }

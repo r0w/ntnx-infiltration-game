@@ -38,14 +38,7 @@ export interface ServerConfig {
    * only`). Operator-supplied per deployment (matches Python `FRONTENDHOST`).
    */
   gameFrontendHost: string;
-  /**
-   * Secondary Prism Central used by the capacity-runway stage (#31). The
-   * prompt sends the player to a *different* cluster's runway dashboard;
-   * `CheckRunway` queries `OldPC/v3/groups` directly to validate the
-   * value the player typed. All three optional — when unset the check
-   * falls back to format-only validation. Match Python `OLDPC` /
-   * `OLDPCUSERNAME` / `OLDPCPASSWORD`.
-   */
+  /** Planner settings seed stage credentials and the PlannerCluster capability. */
   gameOldPc: string;
   gameOldPcUsername: string;
   gameOldPcPassword: string;
