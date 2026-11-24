@@ -84,7 +84,7 @@ describe('e2e — mock forward goto', () => {
     expect(r.disabledStages).toEqual([]);
   }, 60_000);
 
-  test('backward gotoStage to the first stage (lore) resets to the pre-game state and re-prompts identity', async () => {
+  test('backward goto before login preserves the confirmed game and requires switching agent', async () => {
     const { service } = await boot();
     const session = await service.create({
       locale: 'en',
@@ -108,37 +108,12 @@ describe('e2e — mock forward goto', () => {
     }
     expect(service.getSession(id).currentStage).toBe('intro-mission');
 
-    // Jump all the way back to the very first stage. Used to 400 with
-    // "not a valid goto target"; now it parks the playhead on the pre-game
-    // NULL state a fresh session starts in.
-    const g = service.gotoStage(id, 'lore');
-    expect(g.currentStage).toBeNull();
-    expect(service.getSession(id).currentStage).toBeNull();
-
-    // The next advance re-renders lore, and identity inputs are offered again
-    // even though Trigram/PIN/Username are still set — so the player can
-    // re-enter them. Re-submitting the same trigram doesn't collide with the
-    // session's own directory entry.
-    const r: any = await service.advance(id);
-    expect(r.disabledStages).toEqual([]);
-    const reprompted: string[] = [];
-    let s: any = service.getSession(id);
-    for (let i = 0; i < 40 && s.currentStage !== 'intro-mission'; i++) {
-      if (s.pendingCheck) {
-        await service.resolvePendingCheck(id);
-      } else if (s.awaiting && s.awaiting.variable) {
-        if (s.awaiting.variable !== '$continue') reprompted.push(s.awaiting.variable);
-        await service.submitInput(id, s.awaiting.variable, INPUTS[s.awaiting.variable] ?? 'Ok');
-      } else {
-        await service.advance(id);
-      }
-      s = service.getSession(id);
-    }
-    // Identity was re-prompted on the replay (proves the jump-back reopens the
-    // capture), and we cleanly walked all the way back to intro-mission.
-    expect(reprompted).toContain('Trigram');
-    expect(reprompted).toContain('PIN');
-    expect(reprompted).toContain('Username');
-    expect(service.getSession(id).currentStage).toBe('intro-mission');
+    const before = service.getSession(id);
+    expect(() => service.gotoStage(id, 'lore')).toThrow('Switch agent');
+    expect(service.getSession(id)).toEqual(before);
+    const switched = await service.switchIdentity(id);
+    expect(switched.switchSessionId).toBeString();
+    expect(switched.switchSessionId).not.toBe(id);
+    expect(service.getSession(id)).toEqual(before);
   }, 60_000);
 });

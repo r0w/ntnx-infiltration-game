@@ -28,21 +28,24 @@ export function buildStageRoutes(deps: StageRoutesDeps): Hono {
 
   router.post('/:id/advance', async (c) => {
     const r = await service.advance(c.req.param('id'));
-    return c.json(r);
+    return c.json({ ...r, identityRevision: service.identityRevision(c.req.param('id')) });
   });
 
   router.post('/:id/input', async (c) => {
     const body = (await c.req.json()) as SubmitInputRequest;
     if (!body.variable) throw new HttpError(400, 'missing variable');
     if (body.value === undefined) throw new HttpError(400, 'missing value');
-    const r = await service.submitInput(c.req.param('id'), body.variable, String(body.value));
-    return c.json(r);
+    service.requireIdentityRevision(c.req.param('id'), body.identityRevision);
+    const r = await service.submitInput(c.req.param('id'), body.variable, String(body.value), body.identityRevision);
+    return c.json({ ...r, identityRevision: service.identityRevision(c.req.param('id')) });
   });
 
   // Phase 2 of the two-phase check: run the check deferred by /input.
   router.post('/:id/resolve-check', async (c) => {
-    const r = await service.resolvePendingCheck(c.req.param('id'));
-    return c.json(r);
+    const body = await c.req.json().catch(() => ({})) as { identityRevision?: number; stageName?: string };
+    service.requireIdentityRevision(c.req.param('id'), body.identityRevision);
+    const r = await service.resolvePendingCheck(c.req.param('id'), body.identityRevision, body.stageName);
+    return c.json({ ...r, identityRevision: service.identityRevision(c.req.param('id')) });
   });
 
   // Step-by-step help for the stage the player is awaiting input in. A first
@@ -90,8 +93,8 @@ export function buildStageRoutes(deps: StageRoutesDeps): Hono {
     return c.json(service.readStage(c.req.param('id'), stageName));
   });
 
-  router.post('/:id/switch-identity', (c) => {
-    const r = service.switchIdentity(c.req.param('id'));
+  router.post('/:id/switch-identity', async (c) => {
+    const r = await service.switchIdentity(c.req.param('id'));
     return c.json(r);
   });
 

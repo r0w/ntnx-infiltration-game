@@ -183,6 +183,7 @@ async function main() {
 
   // NIG Central stats emitter — inert unless NIG_CENTRAL_URL is set.
   const { Telemetry } = await import('./telemetry');
+  const { probeSoftwareVersions } = await import('./cluster-status-probe');
   const telemetry = new Telemetry({
     db,
     logger: consoleLogger,
@@ -195,6 +196,7 @@ async function main() {
     serverMode: cfg.mode,
     clusterProfile,
     hostIp: cfg.gameFrontendHost,
+    probeVersions: () => probeSoftwareVersions({ nutanix, logger: consoleLogger }),
   });
   telemetry.start();
 

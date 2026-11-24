@@ -242,5 +242,10 @@
   "sentences.check-03": "Controllo subito…<pause sec='2'/>\n",
   "sentences.check-04": "Perfetto. Aspetta due nanosecondi…<pause sec='2'/>\n",
   "sentences.check-05": "Vediamo…<pause sec='2'/>\n",
-  "stage-033.help-05": "<white>Passo 5 · L’email.</white> Recipient (1):<code>{Trigram}{EmailReport}</code><white>Subject (2):</white> Scegli un oggetto per l’email.\n\n<white>Message (3):</white> Includi l’ID della VM. Clicca su <white>Parameters</white> sotto il campo e inserisci <white>Event: Source Entity UUID</white>.\n\nClicca su <white>Save & Close</white> (4). Il banner blu SMTP è informativo.<image src='stage-033-step-05.png' alt='Email'/>"
+  "stage-033.help-05": "<white>Passo 5 · L’email.</white> Recipient (1):<code>{Trigram}{EmailReport}</code><white>Subject (2):</white> Scegli un oggetto per l’email.\n\n<white>Message (3):</white> Includi l’ID della VM. Clicca su <white>Parameters</white> sotto il campo e inserisci <white>Event: Source Entity UUID</white>.\n\nClicca su <white>Save & Close</white> (4). Il banner blu SMTP è informativo.<image src='stage-033-step-05.png' alt='Email'/>",
+  "identity.invalid-code": "Il codice agente deve contenere esattamente 3 lettere o cifre.",
+  "identity.code-taken": "Un altro giocatore ha appena scelto questo codice. Scegline un altro.",
+  "identity.target-gone": "Questa partita non è più disponibile. Scegli di nuovo un codice agente.",
+  "identity.wrong-pin": "PIN errato. Riprova oppure premi ↓ per scegliere un altro codice agente.",
+  "identity.invalid-pin": "Il PIN deve contenere esattamente 4 cifre."
 }

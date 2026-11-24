@@ -3,6 +3,7 @@ import { networkInterfaces } from 'node:os';
 import type { Logger } from '@ntnx-game/engine';
 import { ClusterConfigQueries } from './db/queries';
 import { getVersionInfo } from './version';
+import type { SoftwareVersionsProbeResult } from './cluster-status-probe';
 
 /**
  * Fire-and-forget stats emitter for NIG Central. Strictly opt-in: when
@@ -33,6 +34,8 @@ export interface TelemetryDeps {
   clusterProfile: string;
   /** The VM's own IPv4, from `GAME_FRONTEND_HOST`. See {@link hostIp}. */
   hostIp?: string;
+  /** Optional background probe; never awaited by startup or event delivery. */
+  probeVersions?: () => Promise<SoftwareVersionsProbeResult>;
 }
 
 /**
@@ -51,6 +54,7 @@ function hostIp(configured?: string): string {
 export interface TelemetryEvent {
   type:
     | 'session_started'
+    | 'session_deleted'
     | 'stage_passed'
     | 'stage_failed'
     | 'session_finished'
@@ -120,6 +124,9 @@ export class Telemetry {
   private timer: ReturnType<typeof setInterval> | null = null;
   private flushing = false;
   private warnedSendFailure = false;
+  private readonly probeVersions?: () => Promise<SoftwareVersionsProbeResult>;
+  private probingVersions = false;
+  private versionsComplete = false;
 
   constructor(deps: TelemetryDeps) {
     this.db = deps.db;
@@ -127,6 +134,7 @@ export class Telemetry {
     this.url = (deps.url ?? '').trim().replace(/\/+$/, '');
     this.token = deps.token || undefined;
     this.enabled = this.url.length > 0;
+    this.probeVersions = deps.serverMode === 'mock' ? undefined : deps.probeVersions;
     let ip = 'unknown';
     let firstBootDate = '';
     if (this.enabled) {
@@ -191,6 +199,7 @@ export class Telemetry {
   async flush(): Promise<void> {
     if (!this.enabled || this.flushing) return;
     this.flushing = true;
+    this.refreshVersions();
     try {
       this.prune();
       const rows = this.db
@@ -232,6 +241,28 @@ export class Telemetry {
     } finally {
       this.flushing = false;
     }
+  }
+
+  private refreshVersions(): void {
+    if (!this.probeVersions || this.probingVersions || this.versionsComplete) return;
+    this.probingVersions = true;
+    void Promise.resolve().then(() => this.probeVersions!()).then(({ rows }) => {
+      for (const [field, component] of [['pcVersion', 'Prism Central'], ['aosVersion', 'AOS']] as const) {
+        const versions = [...new Set(rows
+          .filter((row) => row.component === component)
+          .map((row) => row.version.trim())
+          .filter(Boolean))].sort();
+        // A PC can manage clusters on different AOS versions; keep all of them.
+        if (versions.length > 0) this.deployment[field] = versions.join(', ');
+      }
+      this.versionsComplete = !!this.deployment.pcVersion && !!this.deployment.aosVersion;
+    }).catch((err) => {
+      this.log('debug', 'telemetry versions probe failed', {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }).finally(() => {
+      this.probingVersions = false;
+    });
   }
 
   /** A logging failure must not escape a telemetry error handler. */

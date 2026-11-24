@@ -13,6 +13,7 @@ export interface DbConfig {
 
 export function openDatabase({ path }: DbConfig): Database {
   const db = new Database(path, { create: true });
+  db.exec("PRAGMA busy_timeout = 10000");
   // Migrate FIRST so legacy INTEGER stage columns are rewritten to TEXT before
   // schema.sql's CREATE IF NOT EXISTS statements see a mismatched shape. Safe
   // on fresh DBs (no tables yet → migrator exits early).

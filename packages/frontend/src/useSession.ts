@@ -226,6 +226,9 @@ export function useSession(): SessionHandle {
       return null;
     }
   });
+  const activeSessionRef = useRef(sessionId);
+  const identityRevisionRef = useRef<number | undefined>(undefined);
+  const requestEpochRef = useRef(0);
   const [items, setItems] = useState<RenderItem[]>([]);
   const [awaitingVariable, setAwaitingVariable] = useState<string | null>(null);
   const [awaitingStageName, setAwaitingStageName] = useState<string | null>(null);
@@ -257,12 +260,22 @@ export function useSession(): SessionHandle {
   gatedRef.current = gatedAt;
   localeRef.current = locale;
 
+  const isCurrent = useCallback((epoch: number, id: string | null) =>
+    requestEpochRef.current === epoch && activeSessionRef.current === id, []);
+
+  const clearFlight = useCallback(() => {
+    inFlightRef.current = false;
+    setBusy(false);
+    setCheckPending(false);
+  }, []);
+
   const applyHelp = useCallback((snap: HelpSnapshot) => {
     setHelpEnabled(snap.enabled);
     setHelpUsedStages((prev) => (sameList(prev, snap.usedStages) ? prev : snap.usedStages));
   }, []);
 
   const handleResponse = useCallback((r: AdvanceResponse, opts?: { verifyLatencyMs?: number }) => {
+    if (r.identityRevision !== undefined) identityRevisionRef.current = r.identityRevision;
     if (r.kind === 'switch-session' && r.switchSessionId) {
       // Server closed the current session and handed us a new sessionId —
       // happens on returning-agent re-auth (trigram collision + PIN match
@@ -270,6 +283,13 @@ export function useSession(): SessionHandle {
       // and let the sessionId-change effect re-hydrate at the other
       // session's currentStage.
       const newId = r.switchSessionId;
+      activeSessionRef.current = newId;
+      identityRevisionRef.current = undefined;
+      requestEpochRef.current++;
+      clearFlight();
+      gatedRef.current = null;
+      setGatedAt(null);
+      setError(null);
       try { localStorage.setItem(STORAGE_KEY, newId); } catch { /* ignore */ }
       hydrated.current = null;
       finishedRef.current = false;
@@ -390,30 +410,37 @@ export function useSession(): SessionHandle {
     if (allowClears && r.units.some((u) => u.kind === 'clear')) {
       userActedSinceClearRef.current = false;
     }
-  }, []);
+  }, [clearFlight]);
 
   // Phase 2: run the parked check behind the verifying spinner, then show the
   // verdict. Shared by inline submit and resume-after-reload so they pace alike.
   const resolveAndApply = useCallback(
-    async (id: string) => {
+    async (id: string, stageName?: string) => {
+      const epoch = requestEpochRef.current;
       setCheckPending(true);
       try {
         const t0 = performance.now();
-        const verdict = await api.resolveCheck(id);
+        const verdict = await api.resolveCheck(id, identityRevisionRef.current, stageName);
+        if (epoch !== requestEpochRef.current || activeSessionRef.current !== id) return;
         handleResponse(verdict, { verifyLatencyMs: performance.now() - t0 });
       } finally {
-        setCheckPending(false);
+        if (isCurrent(epoch, id)) setCheckPending(false);
       }
     },
-    [handleResponse],
+    [handleResponse, isCurrent],
   );
 
   const createSession = useCallback(
     async ({ locale: createLocale }: { locale: string }) => {
+      const epoch = ++requestEpochRef.current;
+      clearFlight();
       setError(null);
       setBusy(true);
       try {
         const r = await api.createSession({ locale: createLocale });
+        if (epoch !== requestEpochRef.current) return;
+        activeSessionRef.current = r.sessionId;
+        identityRevisionRef.current = undefined;
         localStorage.setItem(STORAGE_KEY, r.sessionId);
         // A freshly created session has nothing to hydrate — mark it ready so
         // the terminal's auto-advance effect can fire without waiting for a
@@ -429,23 +456,35 @@ export function useSession(): SessionHandle {
         setLocale(createLocale);
         applyHelp(r.help ?? { enabled: false, usedStages: [] });
       } catch (err) {
+        if (epoch !== requestEpochRef.current) return;
         setError(err instanceof Error ? err.message : String(err));
       } finally {
-        setBusy(false);
+        if (epoch === requestEpochRef.current) setBusy(false);
       }
     },
-    [applyHelp],
+    [applyHelp, clearFlight],
   );
 
   const resume = useCallback((id: string) => {
     localStorage.setItem(STORAGE_KEY, id);
+    requestEpochRef.current++;
+    clearFlight();
+    activeSessionRef.current = id;
+    identityRevisionRef.current = undefined;
+    hydrated.current = null;
     setSessionId(id);
-  }, []);
+  }, [clearFlight]);
 
   const dropStaleSession = useCallback((notice?: string) => {
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+    hydrated.current = null;
+    awaitingRef.current = null;
     finishedRef.current = false;
     gatedRef.current = null;
+    requestEpochRef.current++;
+    clearFlight();
+    activeSessionRef.current = null;
+    identityRevisionRef.current = undefined;
     setSessionId(null);
     setItems([]);
     setAwaitingVariable(null);
@@ -457,16 +496,24 @@ export function useSession(): SessionHandle {
     // Surface a reason on the login screen (it renders `error`). null leaves
     // any prior error untouched — callers that want a clean drop pass nothing.
     if (notice !== undefined) setError(notice);
-  }, []);
+  }, [clearFlight]);
 
   const hydrated = useRef<string | null>(null);
-  const hydratingRef = useRef<string | null>(null);
+  const hydratingRef = useRef<{ id: string; epoch: number } | null>(null);
 
   const hydrate = useCallback(async (id: string) => {
-    if (hydrated.current === id || hydratingRef.current === id) return;
-    hydratingRef.current = id;
+    const epoch = requestEpochRef.current;
+    if (hydrated.current === id || (hydratingRef.current?.id === id && hydratingRef.current.epoch === epoch)) return;
+    const request = { id, epoch };
+    hydratingRef.current = request;
     try {
       const snap = await api.getSession(id);
+      if (epoch !== requestEpochRef.current || activeSessionRef.current !== id) return;
+      if (snap.switchSessionId) {
+        handleResponse({ kind: 'switch-session', switchSessionId: snap.switchSessionId, units: [], actions: [], disabledStages: [] });
+        return;
+      }
+      identityRevisionRef.current = snap.identityRevision;
       setCurrentStage(snap.currentStage);
       setLocale(snap.locale);
       if (snap.help) applyHelp(snap.help);
@@ -492,14 +539,16 @@ export function useSession(): SessionHandle {
             : prev,
         );
         try {
-          await resolveAndApply(id);
+          await resolveAndApply(id, stageName);
         } catch (err) {
+          if (!isCurrent(epoch, id)) return;
           // Transient resolve failure: surface it, leave the check parked and
           // retryable. Don't mark finished — that would strand the game.
           const msg = err instanceof Error ? err.message : String(err);
           if (msg.startsWith('404')) dropStaleSession(KICK_NOTICE);
           else setError(msg);
         }
+        if (!isCurrent(epoch, id)) return;
         hydrated.current = id;
         return;
       } else if (snap.awaiting) {
@@ -540,6 +589,7 @@ export function useSession(): SessionHandle {
       }
       hydrated.current = id;
     } catch (err) {
+      if (!isCurrent(epoch, id)) return;
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.startsWith('404')) {
         dropStaleSession(KICK_NOTICE);
@@ -549,9 +599,9 @@ export function useSession(): SessionHandle {
         setFinished(true);
       }
     } finally {
-      hydratingRef.current = null;
+      if (hydratingRef.current === request) hydratingRef.current = null;
     }
-  }, [dropStaleSession, resolveAndApply, applyHelp]);
+  }, [dropStaleSession, resolveAndApply, applyHelp, handleResponse, isCurrent]);
 
   useEffect(() => {
     if (sessionId && hydrated.current !== sessionId) {
@@ -570,17 +620,18 @@ export function useSession(): SessionHandle {
     let cancelled = false;
     const tick = async () => {
       if (cancelled || inFlightRef.current) return;
+      const epoch = requestEpochRef.current;
       inFlightRef.current = true;
       try {
         const r = await api.advance(sessionId);
-        if (!cancelled) handleResponse(r);
+        if (!cancelled && isCurrent(epoch, sessionId)) handleResponse(r);
       } catch (err) {
         // A 404 here means the operator deleted the session while it sat at
         // the gate — kick to login. Anything else: swallow, next tick retries.
         const msg = err instanceof Error ? err.message : String(err);
-        if (!cancelled && msg.startsWith('404')) dropStaleSession(KICK_NOTICE);
+        if (!cancelled && isCurrent(epoch, sessionId) && msg.startsWith('404')) dropStaleSession(KICK_NOTICE);
       } finally {
-        inFlightRef.current = false;
+        if (isCurrent(epoch, sessionId)) inFlightRef.current = false;
       }
     };
     void tick();
@@ -589,7 +640,7 @@ export function useSession(): SessionHandle {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [sessionId, gatedAt, handleResponse, dropStaleSession]);
+  }, [sessionId, gatedAt, handleResponse, dropStaleSession, isCurrent]);
 
   // Heartbeat: detect an operator-side session delete even while the player is
   // idle. advance()/submitInput()/hydrate() already drop a 404'd session, but a
@@ -604,13 +655,19 @@ export function useSession(): SessionHandle {
       // Don't race a real action, and wait until the session is hydrated so we
       // don't 404 on a localStorage id mid-hydrate (hydrate handles that path).
       if (cancelled || inFlightRef.current || hydrated.current !== sessionId) return;
+      const epoch = requestEpochRef.current;
       try {
         const snap = await api.getSession(sessionId);
+        if (cancelled || !isCurrent(epoch, sessionId)) return;
+        if (snap.switchSessionId) {
+          handleResponse({ kind: 'switch-session', switchSessionId: snap.switchSessionId, units: [], actions: [], disabledStages: [] });
+          return;
+        }
         // The snapshot also carries the help flag: an operator toggle reaches
         // the player within one beat, without a reload.
         if (!cancelled && snap.help) applyHelp(snap.help);
       } catch (err) {
-        if (cancelled) return;
+        if (cancelled || !isCurrent(epoch, sessionId)) return;
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.startsWith('404')) dropStaleSession(KICK_NOTICE);
         // Any other error (network blip, 5xx) — ignore; next tick retries.
@@ -621,7 +678,7 @@ export function useSession(): SessionHandle {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [sessionId, finished, gatedAt, dropStaleSession, applyHelp]);
+  }, [sessionId, finished, gatedAt, dropStaleSession, applyHelp, handleResponse, isCurrent]);
 
   const advance = useCallback(async () => {
     if (!sessionId) return;
@@ -630,19 +687,22 @@ export function useSession(): SessionHandle {
     // only path that should hit the server while we're parked at a gate.
     if (gatedRef.current) return;
     if (hydrated.current !== sessionId) return;
+    const epoch = requestEpochRef.current;
     inFlightRef.current = true;
     setBusy(true);
     setError(null);
     let resolving = false;
     try {
       const r = await api.advance(sessionId);
+      if (!isCurrent(epoch, sessionId)) return;
       handleResponse(r);
       // An advance-reached check defers too — run it behind the verifying beat.
       if (r.checkPending) {
         resolving = true;
-        await resolveAndApply(sessionId);
+        await resolveAndApply(sessionId, r.stageName);
       }
     } catch (err) {
+      if (!isCurrent(epoch, sessionId)) return;
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
       if (msg.startsWith('404')) {
@@ -651,7 +711,7 @@ export function useSession(): SessionHandle {
         // Awaiting input or a parked check — re-hydrate to resume correctly.
         hydrated.current = null;
         await hydrate(sessionId);
-        setError(null);
+        if (isCurrent(epoch, sessionId)) setError(null);
       } else if (resolving) {
         // The deferred check failed; it stays parked server-side and retryable.
       } else {
@@ -659,14 +719,14 @@ export function useSession(): SessionHandle {
         setFinished(true);
       }
     } finally {
-      inFlightRef.current = false;
-      setBusy(false);
+      if (isCurrent(epoch, sessionId)) clearFlight();
     }
-  }, [sessionId, handleResponse, dropStaleSession, hydrate, resolveAndApply]);
+  }, [sessionId, handleResponse, dropStaleSession, hydrate, resolveAndApply, isCurrent, clearFlight]);
 
   const submitInput = useCallback(
     async (variable: string, value: string) => {
       if (!sessionId || inFlightRef.current) return;
+      const epoch = requestEpochRef.current;
       inFlightRef.current = true;
       setBusy(true);
       setCheckPending(true);
@@ -689,17 +749,22 @@ export function useSession(): SessionHandle {
         ]);
         setAwaitingVariable(null);
         setAwaitingStageName(null);
-        const r = await api.submitInput(sessionId, { variable, value });
+        const r = await api.submitInput(sessionId, { variable, value, identityRevision: identityRevisionRef.current });
+        if (epoch !== requestEpochRef.current || activeSessionRef.current !== sessionId) return;
         handleResponse(r);
         phase1Done = true;
         // Two-phase check: the stage streamed its "wait…" narrative; now run
         // the deferred check while the verifying spinner masks the latency.
-        if (r.checkPending) await resolveAndApply(sessionId);
+        if (r.checkPending) await resolveAndApply(sessionId, r.stageName);
       } catch (err) {
+        if (epoch !== requestEpochRef.current || activeSessionRef.current !== sessionId) return;
         const msg = err instanceof Error ? err.message : String(err);
         setError(msg);
         if (msg.startsWith('404')) {
           dropStaleSession(KICK_NOTICE);
+        } else if (msg.startsWith('409')) {
+          hydrated.current = null;
+          await hydrate(sessionId);
         } else if (phase1Done) {
           // Check parked server-side; keep the scrollback and just surface the
           // error — the next advance() 409s and re-hydrates to retry the resolve.
@@ -708,19 +773,19 @@ export function useSession(): SessionHandle {
           awaitingRef.current = variable;
         }
       } finally {
-        inFlightRef.current = false;
-        setBusy(false);
-        setCheckPending(false);
+        if (isCurrent(epoch, sessionId)) clearFlight();
       }
     },
-    [sessionId, handleResponse, dropStaleSession, resolveAndApply],
+    [sessionId, handleResponse, dropStaleSession, resolveAndApply, hydrate, isCurrent, clearFlight],
   );
 
   const askHelp = useCallback(
     async (confirm: boolean, penaltySec?: number): Promise<HelpOutcome> => {
       if (!sessionId) return { status: 'error', message: 'no session' };
+      const epoch = requestEpochRef.current;
       try {
         const r = await api.requestHelp(sessionId, confirm, penaltySec);
+        if (!isCurrent(epoch, sessionId)) return { status: 'error', message: 'session changed' };
         if (r.status === 'confirm-required') {
           return { status: 'confirm-required', penaltySec: r.penaltySec };
         }
@@ -728,6 +793,7 @@ export function useSession(): SessionHandle {
         setItems((prev) => withHelpBlock(prev, `help-${advanceCounterRef.current++}`, r));
         return { status: 'shown' };
       } catch (err) {
+        if (!isCurrent(epoch, sessionId)) return { status: 'error', message: 'session changed' };
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.startsWith('404 Session not found')) dropStaleSession(KICK_NOTICE);
         // The operator may have switched the help off since the last beat.
@@ -735,17 +801,19 @@ export function useSession(): SessionHandle {
         return { status: 'error', message: msg };
       }
     },
-    [sessionId, dropStaleSession],
+    [sessionId, dropStaleSession, isCurrent],
   );
 
   const gotoStage = useCallback(
     async (stageName: string) => {
-      if (!sessionId) return;
+      if (!sessionId || inFlightRef.current) return;
+      const epoch = ++requestEpochRef.current;
       inFlightRef.current = true;
       setBusy(true);
       setError(null);
       try {
         await api.gotoStage(sessionId, stageName);
+        if (!isCurrent(epoch, sessionId)) return;
         // Reset local state + force a fresh hydrate on the new position.
         hydrated.current = null;
         finishedRef.current = false;
@@ -756,22 +824,29 @@ export function useSession(): SessionHandle {
         setFinished(false);
         await hydrate(sessionId);
       } catch (err) {
+        if (!isCurrent(epoch, sessionId)) return;
         setError(err instanceof Error ? err.message : String(err));
       } finally {
-        inFlightRef.current = false;
-        setBusy(false);
+        if (isCurrent(epoch, sessionId)) clearFlight();
       }
     },
-    [sessionId, hydrate],
+    [sessionId, hydrate, isCurrent, clearFlight],
   );
 
   const switchIdentity = useCallback(async () => {
     if (!sessionId || inFlightRef.current) return;
+    const epoch = ++requestEpochRef.current;
     inFlightRef.current = true;
     setBusy(true);
     setError(null);
     try {
-      await api.switchIdentity(sessionId);
+      const result = await api.switchIdentity(sessionId);
+      if (!isCurrent(epoch, sessionId)) return;
+      identityRevisionRef.current = undefined;
+      if (result.switchSessionId) {
+        handleResponse({ kind: 'switch-session', switchSessionId: result.switchSessionId, units: [], actions: [], disabledStages: [] });
+        return;
+      }
       // Inline transition: don't wipe the scrollback. Drop a dim separator
       // so the shift is visible, then let the usual advance() flow type
       // the fresh Trigram prompt below it. Prior lore + failure chips stay
@@ -795,12 +870,12 @@ export function useSession(): SessionHandle {
       setCurrentStage(null);
       await hydrate(sessionId);
     } catch (err) {
+      if (!isCurrent(epoch, sessionId)) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      inFlightRef.current = false;
-      setBusy(false);
+      if (isCurrent(epoch, sessionId)) clearFlight();
     }
-  }, [sessionId, hydrate]);
+  }, [sessionId, hydrate, handleResponse, isCurrent, clearFlight]);
 
   const reset = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY);
@@ -808,6 +883,10 @@ export function useSession(): SessionHandle {
     finishedRef.current = false;
     awaitingRef.current = null;
     gatedRef.current = null;
+    requestEpochRef.current++;
+    clearFlight();
+    activeSessionRef.current = null;
+    identityRevisionRef.current = undefined;
     setSessionId(null);
     setItems([]);
     setAwaitingVariable(null);
@@ -817,7 +896,7 @@ export function useSession(): SessionHandle {
     setHelpEnabled(false);
     setHelpUsedStages([]);
     setError(null);
-  }, []);
+  }, [clearFlight]);
 
   return {
     sessionId,

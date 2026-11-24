@@ -36,6 +36,7 @@ import {
 import { applyOverlay } from './pack-overlay';
 import { readHelpEnabledGlobally, resolveHelpEnabled, writeHelpEnabledGlobally } from './help';
 import type { Telemetry } from './telemetry';
+import { IdentityStore, IdentityError } from './identity-store';
 import {
   clusterCacheForSession,
   mockOverlayForSession,
@@ -93,6 +94,7 @@ export interface AdvanceResult {
   stageName?: string;
   units: MessageUnit[];
   awaitingVariable?: string;
+  identityRevision?: number;
   /**
    * Discriminator on `kind === 'gated'`: 'stage' = a per-stage adminGate
    * blocked the next stage; 'global' = pack-wide pause (lunch lock, etc.)
@@ -148,6 +150,8 @@ export interface CreateSessionInput {
 
 export class SessionService {
   readonly sessions: SessionQueries;
+  readonly identities: IdentityStore;
+  private readonly db: Database;
   readonly variables: VariableQueries;
   readonly history: HistoryQueries;
   readonly attempts: AttemptQueries;
@@ -199,6 +203,8 @@ export class SessionService {
   private globallyPausedAt: number | null;
 
   constructor(deps: SessionServiceDeps) {
+    this.db = deps.db;
+    this.identities = new IdentityStore(deps.db, deps.packId, { allowFinishedReuse: deps.nutanix.mode === 'mock' });
     this.sessions = new SessionQueries(deps.db);
     this.variables = new VariableQueries(deps.db);
     this.history = new HistoryQueries(deps.db);
@@ -233,6 +239,15 @@ export class SessionService {
     // Apply any persisted overlay at boot so a server restart preserves
     // operator tweaks. Cheap: one DB read + an in-memory map+rebuild.
     this.applyEffectiveStages();
+    const identityStage = this.baseStages.find((stage) => stage.check?.fn === 'CheckTrigram');
+    if (identityStage) {
+      const rows = deps.db.query(`SELECT s.id, t.value AS code, p.value AS pin FROM sessions s
+        JOIN stage_history h ON h.session_id = s.id AND h.stage_name = ? AND h.first_passed_at IS NOT NULL
+        JOIN session_variables t ON t.session_id = s.id AND t.name = 'Trigram'
+        JOIN session_variables p ON p.session_id = s.id AND p.name = 'PIN'
+        WHERE s.pack_id = ? ORDER BY s.started_at, s.id`).all(identityStage.name, deps.packId) as Array<{id:string;code:string;pin:string}>;
+      for (const row of rows) this.identities.importConfirmed(row.id, JSON.parse(row.code), JSON.parse(row.pin));
+    }
   }
 
   // ---------------- name ↔ index helpers ----------------
@@ -910,6 +925,8 @@ export class SessionService {
   }
 
   async advance(sessionId: string): Promise<AdvanceResult> {
+    const handoff = this.identityHandoff(sessionId);
+    if (handoff) return handoff;
     const session = this.getSession(sessionId);
     if (session.finishedAt) {
       return {
@@ -1066,9 +1083,19 @@ export class SessionService {
     return await this.finalizeStage(session, next.next, ctx, rendered.units, rendered.actions, disabled, rendered.typingSpeedMs);
   }
 
-  async submitInput(sessionId: string, variable: string, value: string): Promise<AdvanceResult> {
+  async submitInput(sessionId: string, variable: string, value: string, identityRevision?: number): Promise<AdvanceResult> {
+    return this.db.transaction(() => this.submitInputNow(sessionId, variable, value, identityRevision)).immediate();
+  }
+
+  private submitInputNow(sessionId: string, variable: string, value: string, identityRevision?: number): AdvanceResult {
+    const receipt = this.identities.receipt<AdvanceResult>(sessionId, identityRevision);
+    if (variable === 'PIN' && receipt && identityRevision !== undefined) return receipt.response;
     const session = this.getSession(sessionId);
     if (!session.awaiting) {
+      if (variable === 'PIN' && session.pendingCheck && this.runner.stageByName(session.pendingCheck.stageName)?.check?.fn === 'CheckTrigram' &&
+          identityRevision === this.identities.revision(sessionId) && this.variables.all(sessionId).PIN === value) {
+        return { kind: 'units', stageName: session.pendingCheck.stageName, units: [], actions: [], disabledStages: [], checkPending: true };
+      }
       throw new HttpError(409, 'Session not awaiting input');
     }
     if (session.awaiting.variable !== variable) {
@@ -1077,6 +1104,20 @@ export class SessionService {
     const stage = this.runner.stageByName(session.awaiting.stageName);
     if (!stage) throw new HttpError(500, 'Awaited stage disappeared from pack');
 
+    const identity = stage.check?.fn === 'CheckTrigram';
+    if (identity) {
+      if (identityRevision !== undefined && identityRevision !== this.identities.revision(sessionId)) {
+        throw new HttpError(409, 'Identity prompt changed; reload the current prompt');
+      }
+      if (this.identities.isConfirmed(sessionId)) throw new HttpError(409, 'This identity is already confirmed');
+      if (variable === 'Trigram') {
+        if (!/^[a-z0-9]{3}$/i.test(value.trim())) {
+          return { kind: 'awaiting-input', stageName: stage.name, awaitingVariable: 'Trigram',
+            units: [], actions: [], disabledStages: [], check: { pass: false, detail: this.identityMessage(session, 'invalid-code'), hint: this.identityMessage(session, 'invalid-code') } };
+        }
+        value = this.identities.select(sessionId, value, identityRevision).code;
+      }
+    }
     const ctx = this.buildCheckContext(session);
     ctx.vars.set(variable, value, stage.name);
 
@@ -1086,8 +1127,9 @@ export class SessionService {
     // the same `inputVar` value, finished included: a finished trigram is
     // still claimed, so the greeting must agree with the coming verdict.
     if (stage.computeGreeting && variable === stage.computeGreeting.inputVar) {
-      const others = this.sessionDirectory
-        .findOtherSessionsWithVariable(session.id, variable, value);
+      const others = identity
+        ? (this.identities.attempt(sessionId)?.intent === 'resume' ? [true] : [])
+        : this.sessionDirectory.findOtherSessionsWithVariable(session.id, variable, value);
       const key = others.length > 0
         ? stage.computeGreeting.returningKey
         : stage.computeGreeting.newKey;
@@ -1161,7 +1203,7 @@ export class SessionService {
     // finalizeStage defers a check (streams the "wait…" narrative, parks
     // pendingCheck) or finalizes a no-check stage inline. The retry context
     // lets a deferred check rewind to this input on failure.
-    return await this.finalizeStage(
+    return this.finalizeStage(
       session,
       stage,
       ctx,
@@ -1178,13 +1220,22 @@ export class SessionService {
    * already streamed in phase 1, so this returns only the verdict (empty
    * `units` + `check`) — advancing on pass, rewinding awaiting on fail.
    */
-  async resolvePendingCheck(sessionId: string): Promise<AdvanceResult> {
+  async resolvePendingCheck(sessionId: string, identityRevision?: number, expectedStage?: string): Promise<AdvanceResult> {
+    const receipt = this.identities.receipt<AdvanceResult>(sessionId, identityRevision);
+    const current = this.sessions.byId(sessionId);
+    if (expectedStage && expectedStage !== current?.pendingCheck?.stageName) {
+      if (receipt && this.runner.stageByName(expectedStage)?.check?.fn === 'CheckTrigram') return receipt.response;
+      throw new HttpError(409, 'Pending check changed; reload the current stage');
+    }
+    if (receipt && (!current || !current.pendingCheck ||
+        this.runner.stageByName(current.pendingCheck.stageName)?.check?.fn === 'CheckTrigram')) return receipt.response;
     const session = this.getSession(sessionId);
     if (session.finishedAt) throw new HttpError(409, 'Session already finished');
     const pending = session.pendingCheck;
     if (!pending) throw new HttpError(409, 'Session has no pending check');
     const stage = this.runner.stageByName(pending.stageName);
     if (!stage) throw new HttpError(500, 'Pending-check stage disappeared from pack');
+    if (stage.check?.fn === 'CheckTrigram') return this.resolveIdentity(session, stage, identityRevision);
 
     const ctx = this.buildCheckContext(session);
     // No narrative units — those streamed in phase 1. Run the check BEFORE
@@ -1240,6 +1291,78 @@ export class SessionService {
     return result;
   }
 
+  identityRevision(sessionId: string): number {
+    return this.identities.revision(sessionId);
+  }
+
+  requireIdentityRevision(sessionId: string, revision: unknown): void {
+    const session = this.sessions.byId(sessionId);
+    const name = session?.awaiting?.stageName ?? session?.pendingCheck?.stageName;
+    if (name && this.runner.stageByName(name)?.check?.fn === 'CheckTrigram' &&
+        (!Number.isSafeInteger(revision) || (revision as number) < 0)) {
+      throw new HttpError(409, 'Identity prompt revision required; reload the current prompt');
+    }
+  }
+
+  identityHandoff(sessionId: string): AdvanceResult | null {
+    if (this.sessions.byId(sessionId)) return null;
+    const receipt = this.identities.receipt<AdvanceResult>(sessionId);
+    return receipt?.outcome.kind === 'resumed' ? receipt.response : null;
+  }
+
+  private identityMessage(session: SessionRecord, reason: string): string {
+    return resolveKey(`identity.${reason}`, session.locale, this.bundle);
+  }
+
+  private resolveIdentity(session: SessionRecord, stage: StageDefinition, revision?: number): AdvanceResult {
+    const attempt = this.identities.attempt(session.id);
+    if (!attempt) throw new HttpError(409, 'Choose an agent code first');
+    try {
+      return this.identities.finish(session.id, revision ?? attempt.revision,
+        String(this.variables.all(session.id).PIN ?? ''), (outcome): AdvanceResult => {
+          if (outcome.kind === 'resumed') {
+            if (this.sessions.deleteById(session.id) > 0) {
+              this.telemetry?.record({ type: 'session_deleted', sessionId: session.id });
+            }
+            return { kind: 'switch-session', switchSessionId: outcome.targetId, units: [], actions: [], disabledStages: [] };
+          }
+          this.sessions.setPendingCheck(session.id, null);
+          if (outcome.kind === 'registered') {
+            this.variables.upsert(session.id, 'Trigram', attempt.code, stage.name);
+            for (const name of stage.invalidates ?? []) this.variables.delete(session.id, name);
+            this.history.record(session.id, stage.name, 'passed', 0, null);
+            this.attempts.record(session.id, stage.name, 'passed', 0, null);
+            this.telemetry?.record({ type: 'stage_passed', sessionId: session.id,
+              stageId: stage.id, stageName: stage.name, stageIndex: stage.index,
+              checkMs: 0, ...this.passFields(session, stage.name) });
+            this.sessions.updateCurrentStage(session.id, stage.name);
+            return { kind: 'units', stageName: stage.name, units: [], actions: [], disabledStages: [] };
+          }
+          const detail = this.identityMessage(session, outcome.kind);
+          this.history.record(session.id, stage.name, 'failed', 0, detail);
+          this.attempts.record(session.id, stage.name, 'failed', 0, detail);
+          this.telemetry?.record({ type: 'stage_failed', sessionId: session.id,
+            stageId: stage.id, stageName: stage.name, stageIndex: stage.index, checkMs: 0 });
+          const variable = outcome.kind === 'code-taken' || outcome.kind === 'target-gone' ? 'Trigram' : 'PIN';
+          const ctx = this.buildCheckContext(session);
+          const rendered = this.runner.render(stage, ctx.vars, session.locale, this.bundle, this.globalTypingSpeedMs);
+          const index = this.runner.firstAwaitInputFor(rendered.units, variable);
+          if (variable === 'Trigram') {
+            this.variables.delete(session.id, 'Trigram');
+            this.variables.delete(session.id, 'PIN');
+            this.variables.delete(session.id, 'Greeting');
+          }
+          this.sessions.setAwaiting(session.id, { variable, stageName: stage.name, renderOffset: index + 1 });
+          return { kind: 'awaiting-input', stageName: stage.name, awaitingVariable: variable,
+            units: [], actions: [], disabledStages: [],
+            check: { pass: false, detail, hint: detail, retryFromVariable: variable } };
+        }).response;
+    } catch (error) {
+      if (error instanceof IdentityError) throw new HttpError(409, 'Identity prompt changed; reload the current prompt');
+      throw error;
+    }
+  }
+
   /**
    * Reset the session's identity capture without starting from scratch:
    * rewind to just before the stage that asks who the player is, so its
@@ -1255,8 +1378,14 @@ export class SessionService {
    * stage then gated off on the variable it needs, and the runner — finding
    * nothing left to play — declared the run complete.
    */
-  switchIdentity(sessionId: string): { currentStage: string | null } {
+  async switchIdentity(sessionId: string): Promise<{ currentStage: string | null; switchSessionId?: string }> {
     const session = this.getSession(sessionId);
+    if (this.identities.isConfirmed(sessionId)) {
+      const draft = await this.create({ locale: session.locale, clusterEndpoint: session.clusterEndpoint,
+        clusterProfile: session.clusterProfile, capabilities: session.capabilities });
+      return { currentStage: null, switchSessionId: draft.id };
+    }
+    this.identities.reset(sessionId);
     const stages = this.runner.listStages();
     // The first stage that captures anything is the one that asks who the
     // player is: `login` in the infiltration game, `welcome` in the bootcamp.
@@ -1293,6 +1422,10 @@ export class SessionService {
    */
   gotoStage(sessionId: string, stageName: string): { currentStage: string | null } {
     const session = this.getSession(sessionId);
+    const identityIndex = this.runner.listStages().findIndex((stage) => stage.check?.fn === 'CheckTrigram');
+    if (this.identities.isConfirmed(sessionId) && this.stageIndex(stageName) >= 0 && this.stageIndex(stageName) <= identityIndex) {
+      throw new HttpError(409, 'Switch agent to enter a different identity');
+    }
     const targetIdx = this.stageIndex(stageName);
     if (targetIdx < 0) throw new HttpError(404, `Stage '${stageName}' not in pack`);
     const names = this.stageNames();
@@ -1359,7 +1492,7 @@ export class SessionService {
    * uniform. `pendingRetry` is the input to rewind to on a fail (submit path);
    * absent for advance-reached checks. No-check stages finalize inline.
    */
-  private async finalizeStage(
+  private finalizeStage(
     session: SessionRecord,
     stage: StageDefinition,
     ctx: CheckContext,
@@ -1368,7 +1501,7 @@ export class SessionService {
     disabledStages: DisabledStage[],
     typingSpeedMs: number | undefined,
     pendingRetry?: { variable: string; offset: number },
-  ): Promise<AdvanceResult> {
+  ): AdvanceResult {
     if (stage.check) {
       if (stage.checkMessagePrefix) {
         const prefix = stage.checkMessagePrefix;
@@ -1439,7 +1572,9 @@ export class SessionService {
     const start = Date.now();
     const r = await this.runner.runCheck(stage, ctx);
     if (r.switchTo) {
-      this.sessions.deleteById(session.id);
+      if (this.sessions.deleteById(session.id) > 0) {
+        this.telemetry?.record({ type: 'session_deleted', sessionId: session.id });
+      }
       return {
         kind: 'switch-session',
         switchSessionId: r.switchTo,

@@ -217,11 +217,8 @@ describe('GET /api/scoreboard', () => {
     expect(entries[0].username).toBe('Rowie');
   });
 
-  test('two sessions capturing the same trigram both appear (identity-flow audit signal)', async () => {
-    // UNIQUE(trigram, pack_id) is on the UUID placeholder column, not the
-    // captured Trigram variable. Nothing DB-side prevents two players from
-    // typing the same in-game trigram; the scoreboard should surface that so
-    // it acts as a validation tool for the in-game identity flow.
+  test('packs without trigram registration do not deduplicate captured labels', async () => {
+    // This fixture has no CheckTrigram stage; its labels are not registered identities.
     const db = freshDb();
     seed(db, {
       id: 'sess-one', startedAt: 1000, currentStage: 'recovery-gate',

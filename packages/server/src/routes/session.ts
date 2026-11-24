@@ -34,6 +34,7 @@ export function buildSessionRoutes(deps: SessionRoutesDeps): Hono {
     });
     return c.json({
       sessionId: session.id,
+      identityRevision: deps.service.identityRevision(session.id),
       currentStage: session.currentStage,
       clusterProfile: session.clusterProfile,
       capabilities: session.capabilities,
@@ -44,10 +45,13 @@ export function buildSessionRoutes(deps: SessionRoutesDeps): Hono {
   });
 
   router.get('/:id', (c) => {
+    const handoff = deps.service.identityHandoff(c.req.param('id'));
+    if (handoff) return c.json(handoff);
     const session = deps.service.getSession(c.req.param('id'));
     const replay = deps.service.replayAwaiting(session);
     return c.json({
       sessionId: session.id,
+      identityRevision: deps.service.identityRevision(session.id),
       // The column is a placeholder (= session id); the real trigram is the
       // captured session variable. null until the player types it.
       trigram: deps.service.capturedTrigram(session.id),

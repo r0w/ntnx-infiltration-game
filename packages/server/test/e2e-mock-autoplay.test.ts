@@ -214,9 +214,10 @@ describe('e2e — mock auto-play (full pack)', () => {
       expect(created.status).toBe(200);
       const { sessionId } = await created.json();
       const post = async (path: string, body?: unknown) => {
+        const identityRevision = (await (await app.request(`/api/session/${sessionId}`)).json()).identityRevision;
         const response = await app.request(`/api/session/${sessionId}/${path}`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: body === undefined ? undefined : JSON.stringify(body),
+          body: JSON.stringify({ ...(body as object ?? {}), identityRevision }),
         });
         expect(response.status).toBe(200);
         return response.json();
