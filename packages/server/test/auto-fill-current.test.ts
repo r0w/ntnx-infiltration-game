@@ -129,6 +129,23 @@ describe('POST /auto-fill-current (mock)', () => {
   });
 });
 
+describe('POST /auto-fill-current (test with live transport)', () => {
+  test('Runway supplies an example without querying a cluster', async () => {
+    let requests = 0;
+    const client: NutanixClient = {
+      mode: 'live',
+      async request() { requests++; throw new Error('Unexpected cluster request'); },
+    };
+    const app = await bootApp('test', client);
+    const sid = await newSession(app);
+    await reachPrompt(app, sid, 'capacity-runway', 'Runway');
+    const { status, body } = await autoFill(app, sid);
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ ok: true, variable: 'Runway', value: '120' });
+    expect(requests).toBe(0);
+  });
+});
+
 describe('POST /auto-fill-current (live gate)', () => {
   test('is disabled in live mode', async () => {
     const app = await bootApp('live');

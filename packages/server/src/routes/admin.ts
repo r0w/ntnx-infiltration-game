@@ -1137,8 +1137,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
   // Persisted in cluster_config; consumed by session-service.create() to
   // (1) compute the PlannerCluster capability flag (gates stages 31 +
   // 32 in the pack) and (2) project the 3 vars (OldPC / OldPCUsername /
-  // OldPCPassword) into per-session variables so CheckRunway has a
-  // current creds set. Editing here re-enables those stages on fresh
+  // OldPCPassword) into per-session variables for the displayed credentials. Editing here re-enables those stages on fresh
   // sessions without a server restart.
   router.get('/planner-config', (c) => {
     const cfg = deps.service.clusterConfig;
