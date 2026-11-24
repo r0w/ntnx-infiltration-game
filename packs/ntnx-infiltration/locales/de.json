@@ -169,7 +169,7 @@
   "stage-031.line-04": "Kein großer Fang, es scheint das Konto der Person zu sein, die die Cluster-Kapazität und die Knotenbeschaffung überwacht.<pause sec='2'/>\n\n",
   "stage-031.line-05": "Können Sie sich jetzt mit diesem Cluster verbinden, die Runway-Werte prüfen und mir die Anzahl der verbleibenden Tage für diesen Cluster nennen?<pause sec='3'/>\n",
   "stage-031.line-06": "Die für die Verbindung erforderlichen Informationen finden Sie unten:\n",
-  "stage-031.line-07": " - Prism Central: <a href='https://{OldPC}:9440'>{OldPC}</a>\n",
+  "stage-031.line-07": " - Nutanix Central AIOps: <a href='https://nc.ntnxlab.org/services/aiops/'>nc.ntnxlab.org/services/aiops/</a>\n",
   "stage-031.line-08": " - Benutzer: <white><copy>{OldPCUsername}</copy></white> <red>(es ist ein lokaler Benutzer)</red>\n",
   "stage-031.line-09": " - Passwort: <white><copy>{OldPCPassword}</copy></white>\n\n",
   "stage-031.line-10": "Sie sollten Informationen auf der Seite <white>Intelligent Operations</white> finden. Schicken Sie mir einfach <white>die Anzahl der Tage</white> hierher, wenn Sie sie haben <red>(nur Zahlen, sonst nichts)</red>: <input var='Runway'/>",

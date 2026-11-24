@@ -201,7 +201,7 @@
   "stage-031.line-04": "Not a big catch, it seems to be the account of the person who monitors clusters capacity and node procurement.<pause sec='2'/>\n\n",
   "stage-031.line-05": "Can you connect on this cluster now, check runway values and give me the number of days remaining on this cluster?<pause sec='3'/>\n",
   "stage-031.line-06": "Required informations to connect are below:\n",
-  "stage-031.line-07": " - Prism Central: <a href='https://{OldPC}:9440'>{OldPC}</a>\n",
+  "stage-031.line-07": " - Nutanix Central AIOps: <a href='https://nc.ntnxlab.org/services/aiops/'>nc.ntnxlab.org/services/aiops/</a>\n",
   "stage-031.line-08": " - User: <white><copy>{OldPCUsername}</copy></white> <red>(it's a local user)</red>\n",
   "stage-031.line-09": " - Password: <white><copy>{OldPCPassword}</copy></white>\n\n",
   "stage-031.line-10": "You should find info in the <white>Intelligent Operations</white> page. Just send the <white>number of days</white> here when you have it <red>(only numbers, nothing else)</red>: <input var='Runway'/>",
