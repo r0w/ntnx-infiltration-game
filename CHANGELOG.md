@@ -15,6 +15,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- Include Prism Central and AOS versions in Central deployment telemetry when available.
+
 - Right-click outside the input in the game terminal to paste into the current prompt without submitting it.
 
 - Open fresh deployments over HTTPS with an automatic sslip.io address and a local certificate accepted through the browser warning.
@@ -24,6 +26,9 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 - Make the browser-tab icon easier to recognize with a high-contrast terminal prompt.
 
 ### Fixed
+
+- Handle simultaneous agent-code registrations safely while preserving existing games and reliable resume.
+- Keep unconfirmed players out of the scoreboard and notify Central when a session is deleted.
 
 - Rank tied players by time to their latest validated stage, excluding organizer waits and including help penalties, consistently across local and combined scoreboards.
 

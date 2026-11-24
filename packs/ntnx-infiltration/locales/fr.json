@@ -253,5 +253,10 @@
   "sentences.check-02": "Donne-moi une seconde…<pause sec='2'/>\n",
   "sentences.check-03": "Je regarde ça…<pause sec='2'/>\n",
   "sentences.check-04": "Parfait. Attends deux nanosecondes…<pause sec='2'/>\n",
-  "sentences.check-05": "Voyons ça…<pause sec='2'/>\n"
+  "sentences.check-05": "Voyons ça…<pause sec='2'/>\n",
+  "identity.invalid-code": "Le code agent doit contenir exactement 3 lettres ou chiffres.",
+  "identity.code-taken": "Un autre joueur vient de prendre ce code. Choisis-en un autre.",
+  "identity.target-gone": "Cette partie n’est plus disponible. Choisis à nouveau un code agent.",
+  "identity.wrong-pin": "PIN incorrect. Réessaie ou appuie sur ↓ pour choisir un autre code agent.",
+  "identity.invalid-pin": "Le PIN doit contenir exactement 4 chiffres."
 }

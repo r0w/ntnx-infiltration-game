@@ -55,6 +55,7 @@ export type HelpResponse =
   | { status: 'ok'; stageName: string; units: MessageUnit[]; penaltySec: number; charged: boolean };
 
 export interface SubmitInputRequest {
+  identityRevision?: number;
   variable: string;
   value: string;
 }

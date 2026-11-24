@@ -12,6 +12,7 @@ import type {
 export type { DisabledStage, HelpResponse, HelpSnapshot };
 
 export interface AdvanceResponse {
+  identityRevision?: number;
   kind: 'units' | 'awaiting-input' | 'finished' | 'switch-session' | 'gated';
   /** Canonical stage name — present on units/awaiting-input/gated(stage). */
   stageName?: string;
@@ -31,6 +32,8 @@ export interface AdvanceResponse {
 }
 
 export interface SessionSnapshot {
+  identityRevision?: number;
+  switchSessionId?: string;
   sessionId: string;
   trigram: string;
   /** Canonical stage name of the last passed stage; `null` = pre-game. */
@@ -477,8 +480,8 @@ export const api = {
   submitInput: (id: string, req: SubmitInputRequest) =>
     post<AdvanceResponse>(`/session/${id}/input`, req),
   /** Phase 2 of the two-phase check: run the check deferred by submitInput. */
-  resolveCheck: (id: string) =>
-    post<AdvanceResponse>(`/session/${id}/resolve-check`),
+  resolveCheck: (id: string, identityRevision?: number, stageName?: string) =>
+    post<AdvanceResponse>(`/session/${id}/resolve-check`, { identityRevision, stageName }),
   /**
    * Show the step-by-step help of the stage being played. A first display
    * that costs time answers `confirm-required` until re-posted with
@@ -495,7 +498,7 @@ export const api = {
       `/session/${id}/goto/${encodeURIComponent(stageName)}`,
     ),
   switchIdentity: (id: string) =>
-    post<{ currentStage: string | null }>(`/session/${id}/switch-identity`),
+    post<{ currentStage: string | null; switchSessionId?: string }>(`/session/${id}/switch-identity`),
   /**
    * Auto-play helper: fires the registered **act** handler for whatever stage
    * the session is currently awaiting on. Server-side gated to `test` mode

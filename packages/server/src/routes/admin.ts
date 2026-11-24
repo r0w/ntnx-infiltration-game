@@ -35,9 +35,11 @@ import {
 import { EmailRosterQueries, type ClusterConfigQueries, type EmailRosterRow } from '../db/queries';
 import { EMAIL_RE, HELP_PENALTY_MAX_SEC, substituteSeat, substituteVars, isScoreboardDisplaySettings } from '@ntnx-game/shared';
 import { SCOREBOARD_DISPLAY_KEY } from '../scoreboard-display';
+import type { Telemetry } from '../telemetry';
 
 export interface AdminRoutesDeps {
   db: Database;
+  telemetry?: Telemetry;
   pack: LoadedPack;
   /** Handed to the pack's cluster-fact refresh, for a pack that reads k8s. */
   kube?: KubeClient;
@@ -475,6 +477,7 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
     const id = c.req.param('id');
     const changed = sessions.deleteById(id);
     if (changed === 0) throw new HttpError(404, 'session not found');
+    deps.telemetry?.record({ type: 'session_deleted', sessionId: id });
     return c.json({ ok: true, sessionId: id });
   });
 

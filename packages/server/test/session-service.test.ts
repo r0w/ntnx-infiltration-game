@@ -829,7 +829,7 @@ describe('SessionService', () => {
     service.variables.upsert(session.id, 'SomethingElse', 'keep-me', 's5');
     service.sessions.updateCurrentStage(session.id, 's5');
 
-    const r = service.switchIdentity(session.id);
+    const r = await service.switchIdentity(session.id);
     // Rewinds to just before the stage that captures the identity ('s2'), so
     // currentStage lands on the prelude 's1' — it stays "passed" and the
     // runner picks the identity prompt up next.
@@ -1165,7 +1165,7 @@ describe('switchIdentity — pack that asks first', () => {
     service.variables.upsert(session.id, 'UserNum', '09', 'welcome');
     service.sessions.updateCurrentStage(session.id, 'welcome');
 
-    const r = service.switchIdentity(session.id);
+    const r = await service.switchIdentity(session.id);
     // Nothing precedes the identity stage here, so the run resumes at the top.
     expect(r.currentStage).toBeNull();
     expect(service.variables.all(session.id).UserNum).toBeUndefined();
@@ -1176,7 +1176,7 @@ describe('switchIdentity — pack that asks first', () => {
     service.variables.upsert(session.id, 'UserNum', '09', 'welcome');
     service.sessions.updateCurrentStage(session.id, 'welcome');
 
-    service.switchIdentity(session.id);
+    await service.switchIdentity(session.id);
     const next = await service.advance(session.id);
     expect(next.kind).not.toBe('finished');
     expect(service.getSession(session.id).finishedAt).toBeNull();

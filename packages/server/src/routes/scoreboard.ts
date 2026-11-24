@@ -107,6 +107,7 @@ export function buildScoreboardRoutes(deps: ScoreboardRoutesDeps): Hono {
   const order = deps.pack.stages.map((s) => s.name);
   const indexOf = (name: string | null): number => (name ? order.indexOf(name) : -1);
   const totalStages = deps.pack.stages.length;
+  const confirmedIdentityRequired = deps.pack.stages.some((stage) => stage.check?.fn === 'CheckTrigram');
 
   function buildLocalEntries(): ScoreboardEntry[] {
     const rows = sessions.listScoreboard(
@@ -118,12 +119,13 @@ export function buildScoreboardRoutes(deps: ScoreboardRoutesDeps): Hono {
       deps.capabilities,
       deps.clusterProfile,
     );
-    // Public scoreboard hides anonymous (= pre-trigram-capture) sessions.
+    // Public scoreboard hides anonymous sessions and unconfirmed trigram drafts.
     // The query keeps surfacing them for /admin's debug view; the filter
     // lives at the route layer so the projector display only shows
     // identified agents. Re-rank after filter so the visible rank is
     // gap-free.
-    const identified = rows.filter((row) => row.trigram !== null);
+    const identified = rows.filter((row) => row.trigram !== null &&
+      (!confirmedIdentityRequired || deps.service.identities.isConfirmed(row.sessionId)));
     return identified.map((row, idx) => {
       const finished = row.finishedAt !== null;
       let stageName: string | null = null;

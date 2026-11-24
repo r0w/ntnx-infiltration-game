@@ -206,6 +206,7 @@ export function buildApp(deps: AppDeps): { app: Hono; service: SessionService } 
     '/api/admin',
     buildAdminRoutes({
       db: deps.db,
+      telemetry: deps.telemetry,
       pack: deps.pack,
       kube: deps.kube,
       adminPassword: deps.adminPassword,
