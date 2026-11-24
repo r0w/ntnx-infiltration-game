@@ -19,6 +19,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Rank tied players by time to their latest validated stage, excluding organizer waits and including help penalties, consistently across local and combined scoreboards.
+
 ## [1.2.2] - 2026-11-24
 
 ### Fixed

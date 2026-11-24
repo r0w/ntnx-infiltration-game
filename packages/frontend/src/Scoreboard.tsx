@@ -212,7 +212,8 @@ function AgentCard({
       className={`agent-card agent-${entry.status} agent-rank-${rankTier(entry.rank)}${simple ? ' agent-simple' : ''}${blocked ? ` is-blocked-${blocked}` : ''}`}
     >
       <div className="agent-topline">
-        <span className="agent-rank">#{entry.rank}</span>
+        <span className="agent-rank" title={entry.progressTimeMs === undefined ? undefined :
+          `Ranking time at latest validated stage: ${fmtDuration(entry.progressTimeMs + penaltyMs)} (including help)`}>#{entry.rank}</span>
         <span className="agent-heading" title={`${agentName} · ${trigramLabel}`}>
           <span className="agent-username">{agentName}</span>
           <span className="agent-trigram">{trigramLabel}</span>

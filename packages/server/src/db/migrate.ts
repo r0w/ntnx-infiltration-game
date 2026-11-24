@@ -89,6 +89,10 @@ export function migrate(db: Database): void {
   // Additive columns, applied before schema.sql's CREATE IF NOT EXISTS pass so
   // they land on both old- and new-schema DBs.
   addOverlayPenaltyColumn(db);
+  if (columnType(db, 'stage_history', 'checked_at') !== null) {
+    addColumnIfMissing(db, 'stage_history', 'first_passed_at', 'INTEGER');
+    db.exec("UPDATE stage_history SET first_passed_at = checked_at WHERE status = 'passed' AND first_passed_at IS NULL");
+  }
   const hasSessionsTable = columnType(db, 'sessions', 'id') !== null;
   if (hasSessionsTable) {
     // Phase 10: auto-play session mode.
@@ -175,6 +179,7 @@ export function migrate(db: Database): void {
         stage_name TEXT NOT NULL,
         status TEXT NOT NULL,
         checked_at INTEGER NOT NULL,
+        first_passed_at INTEGER,
         duration_ms INTEGER,
         detail TEXT,
         PRIMARY KEY (session_id, stage_name),
@@ -194,8 +199,8 @@ export function migrate(db: Database): void {
         detail: string | null;
       }>;
     const insHist = db.prepare(
-      `INSERT OR IGNORE INTO stage_history (session_id, stage_name, status, checked_at, duration_ms, detail)
-       VALUES ($sid, $sn, $st, $ca, $dm, $dt)`,
+      `INSERT OR IGNORE INTO stage_history (session_id, stage_name, status, checked_at, first_passed_at, duration_ms, detail)
+       VALUES ($sid, $sn, $st, $ca, CASE WHEN $st = 'passed' THEN $ca END, $dm, $dt)`,
     );
     for (const r of histRows) {
       const name = mapId(r.stage_id);

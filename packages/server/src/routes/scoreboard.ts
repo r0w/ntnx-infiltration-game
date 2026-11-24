@@ -1,3 +1,5 @@
+import { compareRanking } from '../scoreboard-ranking';
+export { effectiveDuration } from '../scoreboard-ranking';
 import { Hono } from 'hono';
 import type { Database } from 'bun:sqlite';
 import type { CapabilityFlag, ClusterProfile, NutanixClient } from '@ntnx-game/engine';
@@ -69,6 +71,8 @@ export interface ScoreboardEntry {
   startedAt: number;
   finishedAt: number | null;
   lastActivityAt: number | null;
+  progressReachedAt?: number;
+  progressTimeMs?: number;
   /** Stages whose step-by-step help the player displayed. Optional: peers
    *  on an older version don't send it (read as 0). */
   helpUses?: number;
@@ -147,6 +151,8 @@ export function buildScoreboardRoutes(deps: ScoreboardRoutesDeps): Hono {
         startedAt: row.startedAt,
         finishedAt: row.finishedAt,
         lastActivityAt: row.lastActivityAt,
+        progressReachedAt: row.progressReachedAt,
+        progressTimeMs: row.progressTimeMs,
         helpUses: row.helpUses,
         helpPenaltySec: row.helpPenaltySec,
         blockedMs: row.blockedMs,
@@ -199,51 +205,16 @@ export function buildScoreboardRoutes(deps: ScoreboardRoutesDeps): Hono {
   return router;
 }
 
-/**
- * Re-rank a list of mixed (local + peer) entries into a single board.
- *
- * Ordering matches the AgentCard render (progress-first): more
- * stagesPassed wins, then the shortest playing time (finish - start, minus the
- * time the operator held the player, plus the step-by-step help penalties, see
- * {@link effectiveDuration}), then earliest finish, then earliest start
- * (= "got there first"). `rank` is rewritten gap-free; `sessionId` is
- * namespaced with `peerLabel:` when the entry came from a peer so the
- * frontend `key` doesn't collide between instances that happen to have
- * matching session UUIDs (unlikely but cheap to defend against).
- */
+/** Apply the local ranking to all peers, then namespace their session identities. */
 export function mergeScoreboards(
   rows: Array<ScoreboardEntry & { peerLabel: string | null }>,
 ): Array<ScoreboardEntry & { peerLabel: string | null }> {
-  const sorted = [...rows].sort((a, b) => {
-    if (b.stagesPassed !== a.stagesPassed) return b.stagesPassed - a.stagesPassed;
-    const aDur = effectiveDuration(a);
-    const bDur = effectiveDuration(b);
-    if (aDur !== bDur) return aDur - bDur;
-    if (a.finishedAt !== null && b.finishedAt !== null && a.finishedAt !== b.finishedAt) {
-      return a.finishedAt - b.finishedAt;
-    }
-    return a.startedAt - b.startedAt;
-  });
+  const sorted = [...rows].sort(compareRanking);
   return sorted.map((e, idx) => ({
     ...e,
     rank: idx + 1,
     sessionId: e.peerLabel ? `${e.peerLabel}:${e.sessionId}` : e.sessionId,
   }));
-}
-
-/**
- * Playing time as the ranking sees it, in ms: finish minus start, minus the
- * time the operator held the player in a gate or the pause (waits are not the
- * player's time), plus the step-by-step help penalties. `Infinity` while
- * unfinished, so those entries tie on this key exactly as before. A peer on an
- * older version sends no waits and no penalty (both 0).
- */
-export function effectiveDuration(
-  e: Pick<ScoreboardEntry, 'startedAt' | 'finishedAt' | 'blockedMs' | 'helpPenaltySec'>,
-): number {
-  if (e.finishedAt === null) return Number.POSITIVE_INFINITY;
-  const playing = Math.max(0, e.finishedAt - e.startedAt - (e.blockedMs ?? 0));
-  return playing + (e.helpPenaltySec ?? 0) * 1000;
 }
 
 interface PeerFetchResult {

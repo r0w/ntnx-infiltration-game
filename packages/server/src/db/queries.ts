@@ -1,3 +1,4 @@
+import { compareRanking } from '../scoreboard-ranking';
 import type { Database } from 'bun:sqlite';
 import type {
   CapabilityFlag,
@@ -304,7 +305,7 @@ export class SessionQueries {
     }));
   }
 
-  listScoreboard(packId: string, identityVar = 'Trigram'): Array<ScoreboardRow & WaitSummary> {
+  listScoreboard(packId: string, identityVar = 'Trigram'): Array<ScoreboardRow & WaitSummary & { progressReachedAt: number; progressTimeMs: number }> {
     // We read the real trigram/username from `session_variables` — the
     // `sessions.trigram` column is a UUID placeholder (identification happens
     // in-game via <input/>), so joining on it would surface UUIDs, not the
@@ -313,7 +314,12 @@ export class SessionQueries {
     // stuck pre-stage-1 (a useful debug signal for the trigram+PIN flow).
     const rows = this.db
       .prepare(
-        `SELECT
+        `WITH progress AS (
+           SELECT sessions.*, COALESCE(finished_at,
+             (SELECT MAX(COALESCE(first_passed_at, checked_at)) FROM stage_history
+              WHERE session_id = sessions.id AND status = 'passed'), started_at) AS progress_at
+           FROM sessions WHERE pack_id = $packId
+         ) SELECT
            s.id AS session_id,
            s.current_stage AS current_stage,
            s.started_at AS started_at,
@@ -342,22 +348,14 @@ export class SessionQueries {
               WHERE session_id = s.id AND released_at IS NULL) AS blocked_reason,
            (SELECT MAX(released_at) FROM session_waits
               WHERE session_id = s.id) AS last_released_at,
-           -- Playing time (finish - start - held time) plus the help penalties:
-           -- what finished players are ranked on. NULL while unfinished (those
-           -- tie here, as before).
-           (MAX(0, s.finished_at - s.started_at - (SELECT COALESCE(SUM(released_at - blocked_at), 0)
-              FROM session_waits WHERE session_id = s.id AND released_at IS NOT NULL))
-            + 1000 * (SELECT COALESCE(SUM(penalty_sec), 0) FROM help_usage
-              WHERE session_id = s.id)) AS net_effective_ms
-         FROM sessions s
-         WHERE s.pack_id = $packId
-         ORDER BY
-           CASE WHEN s.finished_at IS NOT NULL THEN 0 ELSE 1 END ASC,
-           stages_passed DESC,
-           net_effective_ms ASC,
-           s.finished_at ASC,
-           last_activity_at DESC,
-           s.started_at ASC`,
+           s.progress_at AS progress_reached_at,
+           MAX(0, s.progress_at - s.started_at - (
+             SELECT COALESCE(SUM(MAX(0,
+               MIN(COALESCE(released_at, s.progress_at), s.progress_at)
+               - MAX(blocked_at, s.started_at))), 0)
+             FROM session_waits WHERE session_id = s.id
+           )) AS progress_time_ms
+         FROM progress s`,
       )
       .all({ $packId: packId, $identityVar: identityVar }) as Array<{
         session_id: string;
@@ -375,6 +373,8 @@ export class SessionQueries {
         blocked_since: number | null;
         blocked_reason: SessionWaitReason | null;
         last_released_at: number | null;
+        progress_reached_at: number;
+        progress_time_ms: number;
       }>;
     return rows.map((r) => ({
       sessionId: r.session_id,
@@ -392,7 +392,9 @@ export class SessionQueries {
       blockedSince: r.blocked_since,
       blockedReason: r.blocked_reason,
       lastReleasedAt: r.last_released_at,
-    }));
+      progressReachedAt: r.progress_reached_at,
+      progressTimeMs: r.progress_time_ms,
+    })).sort(compareRanking);
   }
 }
 
@@ -762,9 +764,12 @@ export class HistoryQueries {
   ): void {
     this.db
       .prepare(
-        `INSERT INTO stage_history (session_id, stage_name, status, checked_at, duration_ms, detail)
-         VALUES ($sid, $stage, $status, $ts, $dur, $detail)
+        `INSERT INTO stage_history (session_id, stage_name, status, checked_at, first_passed_at, duration_ms, detail)
+         VALUES ($sid, $stage, $status, $ts, CASE WHEN $status = 'passed' THEN $ts END, $dur, $detail)
          ON CONFLICT(session_id, stage_name) DO UPDATE SET
+           first_passed_at = COALESCE(stage_history.first_passed_at,
+             CASE WHEN stage_history.status = 'passed' THEN stage_history.checked_at END,
+             excluded.first_passed_at),
            status = excluded.status,
            checked_at = excluded.checked_at,
            duration_ms = excluded.duration_ms,

@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS stage_history (
   stage_name TEXT NOT NULL,
   status TEXT NOT NULL,
   checked_at INTEGER NOT NULL,
+  first_passed_at INTEGER,
   duration_ms INTEGER,
   detail TEXT,
   PRIMARY KEY (session_id, stage_name),

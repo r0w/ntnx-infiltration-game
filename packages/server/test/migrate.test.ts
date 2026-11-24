@@ -214,3 +214,17 @@ describe('session_waits table', () => {
     expect(columns(db, 'session_waits')).toContain('blocked_at');
   });
 });
+
+test('first-pass timestamps migrate once and survive later history updates', () => {
+  const db = new Database(':memory:');
+  db.exec('CREATE TABLE stage_history (session_id TEXT, stage_name TEXT, status TEXT, checked_at INTEGER)');
+  db.exec("INSERT INTO stage_history VALUES ('s', 'done', 'passed', 123), ('s', 'retry', 'failed', 456)");
+  migrate(db);
+  expect(db.query('SELECT first_passed_at FROM stage_history ORDER BY stage_name').all())
+    .toEqual([{ first_passed_at: 123 }, { first_passed_at: null }]);
+  db.exec("UPDATE stage_history SET checked_at = 789 WHERE stage_name = 'done'");
+  migrate(db);
+  expect(db.query("SELECT first_passed_at FROM stage_history WHERE stage_name = 'done'").get())
+    .toEqual({ first_passed_at: 123 });
+  db.close();
+});
