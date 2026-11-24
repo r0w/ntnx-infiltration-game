@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { normalizeTerminalInput, terminalPasteLabels } from './terminalPaste';
+import { useTerminalPaste } from './useTerminalPaste';
 import { fmtPenaltyShort } from './duration';
 import { helpLabels } from './helpLabels';
 import { BrailleSpinner, TerminalItem, VERIFYING_LABELS } from './renderer';
@@ -334,11 +337,28 @@ export function FauxTerminal({
     onSubmit(v);
   };
 
+  const changeInput = (value: string) => {
+    if (helpConfirm !== null) setHelpConfirm(null);
+    if (helpNote) setHelpNote(null);
+    setInputValue(normalizeTerminalInput(value, awaitingVariable));
+  };
+  const pasteLabels = terminalPasteLabels(locale);
+  const paste = useTerminalPaste(inputRef, inputVisible && !finished && !gatedAt,
+    `${awaitingVariable}:${lastItem?.id ?? ''}`, awaitingVariable, changeInput);
+
   const isEmpty = items.length === 0 && !awaitingVariable && !finished;
   const visibleItems = items.slice(0, Math.min(activeIdx + 1, items.length));
 
   return (
-    <div className="terminal" onClick={focusInput}>
+    <div className="terminal" onClick={focusInput} onContextMenu={paste.onContextMenu}>
+      {paste.menu && createPortal(
+        <div className="terminal-paste-menu" ref={paste.menuRef} role="menu" aria-label={pasteLabels.paste}
+          style={{ left: paste.menu.x, top: paste.menu.y }} onClick={(e) => e.stopPropagation()}>
+          <button type="button" role="menuitem" autoFocus onClick={() => void paste.paste()}>
+            {pasteLabels.paste}
+          </button>
+        </div>, document.body,
+      )}
       <div className="terminal-scroll" ref={scrollerRef}>
         {isEmpty && (
           <div className="terminal-line c-dim">
@@ -397,6 +417,7 @@ export function FauxTerminal({
               </div>
             )}
             {helpNote && <div className="terminal-help-note c-dim">{helpNote}</div>}
+            {paste.denied && <div className="terminal-help-note c-dim" role="status">{pasteLabels.denied}</div>}
             <form
               onSubmit={handleSubmit}
               className="terminal-input-line"
@@ -415,21 +436,8 @@ export function FauxTerminal({
                 data-primary-input="true"
                 value={inputValue}
                 onChange={(e) => {
-                  let v = e.target.value;
-                  // Per-variable saisie constraints — keep the field
-                  // physically incapable of accepting an invalid value
-                  // so the player gets immediate feedback (no "type 8
-                  // chars then learn it had to be 3"). Server-side
-                  // CheckTrigram enforces the same rules defensively.
-                  if (awaitingVariable === 'Trigram') {
-                    v = v.replace(/[^A-Za-z0-9]/g, '').slice(0, 3);
-                  } else if (awaitingVariable === 'PIN') {
-                    v = v.replace(/\D/g, '').slice(0, 4);
-                  }
-                  // Typing anything cancels a pending help confirmation.
-                  if (helpConfirm !== null) setHelpConfirm(null);
-                  if (helpNote) setHelpNote(null);
-                  setInputValue(v);
+                  paste.clearNote();
+                  changeInput(e.target.value);
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Escape' && helpConfirm !== null) {

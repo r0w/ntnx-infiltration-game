@@ -1,11 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <title>ntnx infiltration game</title>
-  <g stroke="#7cdcfe" stroke-width="3" stroke-linecap="round" fill="none">
-    <line x1="7"  y1="7"  x2="25" y2="25" />
-    <line x1="12" y1="7"  x2="25" y2="20" />
-    <line x1="7"  y1="12" x2="20" y2="25" />
-    <line x1="25" y1="7"  x2="7"  y2="25" />
-    <line x1="20" y1="7"  x2="7"  y2="20" />
-    <line x1="25" y1="12" x2="12" y2="25" />
-  </g>
+  <title>NIG terminal</title>
+  <rect width="32" height="32" rx="7" fill="#0d1317" />
+  <path d="m8 9 7 7-7 7" fill="none" stroke="#7cdcfe" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M19 23h6" fill="none" stroke="#ffb454" stroke-width="3" stroke-linecap="round" />
 </svg>

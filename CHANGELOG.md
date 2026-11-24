@@ -15,9 +15,13 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- Right-click outside the input in the game terminal to paste into the current prompt without submitting it.
+
 - Open fresh deployments over HTTPS with an automatic sslip.io address and a local certificate accepted through the browser warning.
 
 ### Changed
+
+- Make the browser-tab icon easier to recognize with a high-contrast terminal prompt.
 
 ### Fixed
 

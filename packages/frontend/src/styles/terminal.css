@@ -3847,3 +3847,28 @@ a.terminal-link:visited {
   .help-step h3 { font-size: 16px; }
   .help-reader .help-foot { padding: 10px 16px; }
 }
+
+/* Right-click paste stays inside the viewport, above terminal overlays. */
+.terminal-paste-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 150px;
+  padding: 4px;
+  background: #151b23;
+  border: 1px solid var(--dim, #627080);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px #0008;
+}
+.terminal-paste-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  background: transparent;
+  border: 0;
+  color: var(--fg, #d9e1e8);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.terminal-paste-menu button:hover,
+.terminal-paste-menu button:focus-visible { background: #263445; outline: 1px solid #7cdcfe; }
