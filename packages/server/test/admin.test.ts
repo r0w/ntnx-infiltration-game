@@ -1871,3 +1871,65 @@ describe('PUT /api/admin/email-templates/:id/:locale (explicit save)', () => {
     })).status).toBe(400);
   });
 });
+
+describe('saving email variables without sending', () => {
+  const headers = { 'X-Admin-Password': ADMIN_PW, 'Content-Type': 'application/json' };
+  const summary = EMAIL_TEMPLATES.find((t) => t.id === 'summary' && t.locale === 'en')!;
+  function router(db: Database) {
+    const pack = fakePack();
+    return buildAdminRoutes({ db, pack, service: makeService(db, pack), adminPassword: ADMIN_PW,
+      nutanix: noopNutanix, clusterProfile: 'other', pcEndpoint: '',
+      sendEmail: async () => { throw new Error('Saving must never send an email'); } });
+  }
+
+  test('survey-only save survives SQLite reopen and preserves invitation variables', async () => {
+    const dir = mkdtempSync(resolve(tmpdir(), 'email-vars-'));
+    const path = resolve(dir, 'game.db');
+    let db = new Database(path);
+    db.exec(SCHEMA);
+    try {
+      let r = router(db);
+      await r.request('/email-config', { method: 'PUT', headers,
+        body: JSON.stringify({ vars: { CLUSTER: 'existing-cluster', GAME_URL: 'https://game.example' } }) });
+      const vars = { SURVEY_URL: 'https://survey.example/new' };
+      const saved = await r.request('/email-templates/summary/en', { method: 'PUT', headers,
+        body: JSON.stringify({ subject: summary.subject, html: summary.html, vars }) });
+      expect(saved.status).toBe(200);
+      expect(await saved.json()).toEqual({ ok: true, overridden: false,
+        vars: { CLUSTER: 'existing-cluster', GAME_URL: 'https://game.example', ...vars } });
+      db.close();
+      db = new Database(path);
+      db.exec(SCHEMA);
+      r = router(db);
+      const config = await (await r.request('/email-config', { headers })).json();
+      expect(config.vars).toEqual({ CLUSTER: 'existing-cluster', GAME_URL: 'https://game.example', ...vars });
+      // Saving another locale and an older caller without vars must keep the URL.
+      for (const locale of ['fr', 'de']) {
+        const template = EMAIL_TEMPLATES.find((t) => t.id === 'summary' && t.locale === locale)!;
+        expect((await r.request(`/email-templates/summary/${locale}`, { method: 'PUT', headers,
+          body: JSON.stringify({ subject: template.subject, html: template.html }) })).status).toBe(200);
+      }
+      expect((await (await r.request('/email-config', { headers })).json()).vars).toEqual(config.vars);
+    } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  test('invalid variables and unauthenticated saves do not change the template or saved values', async () => {
+    const db = freshDb();
+    try {
+      const r = router(db);
+      for (const vars of [null, [], 'url', { SURVEY_URL: 42 }]) {
+        const res = await r.request('/email-templates/summary/en', { method: 'PUT', headers,
+          body: JSON.stringify({ subject: 'changed', html: '<p>changed</p>', vars }) });
+        expect(res.status).toBe(400);
+      }
+      const denied = await r.request('/email-templates/summary/en', { method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject: 'changed', html: '<p>changed</p>', vars: { SURVEY_URL: 'https://survey.example' } }) });
+      expect(denied.status).toBe(401);
+      const templates = (await (await r.request('/email-templates', { headers })).json()).templates;
+      expect(templates.find((t: { id: string; locale: string }) => t.id === 'summary' && t.locale === 'en'))
+        .toMatchObject({ subject: summary.subject, html: summary.html, overridden: false });
+      expect((await (await r.request('/email-config', { headers })).json()).vars).toEqual({});
+    } finally { db.close(); }
+  });
+});

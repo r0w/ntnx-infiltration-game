@@ -27,6 +27,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Save email variables, including the survey URL, with the template without sending an email.
+
 - Handle simultaneous agent-code registrations safely while preserving existing games and reliable resume.
 - Keep unconfirmed players out of the scoreboard and notify Central when a session is deleted.
 
