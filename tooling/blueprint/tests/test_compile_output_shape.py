@@ -278,3 +278,31 @@ def test_escripts_have_calm_exit_helper(compiled_bp: dict):
         assert "def _calm_exit" in script, (
             f"task {task.get('name')!r} missing _calm_exit helper — patcher pass 1 regressed"
         )
+
+
+def test_https_install_is_bundled_for_every_profile(compiled_bp: dict):
+    """CI/release must ship the proxy config, not an unexpanded asset marker."""
+    def walk(value):
+        if isinstance(value, dict):
+            yield value
+            for child in value.values():
+                yield from walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from walk(child)
+
+    scripts = [node["script"] for node in walk(compiled_bp)
+               if isinstance(node.get("script"), str)
+               and "COMPOSEEOF" in node["script"]]
+    assert len(scripts) >= 2, "NCP and NKP installs must both include HTTPS"
+    for script in scripts:
+        assert "__COMPOSE_YML__" not in script
+        assert "__CADDYFILE__" not in script
+        assert "tls internal" in script
+        assert '"443:443"' in script
+        assert '"80:80"' in script
+        assert "caddy_data:/data" in script
+        assert re.search(r"GAME_HTTPS_HOST=game\.@@\{(?:VM|NkpVM)\.address\}@@\.sslip\.io", script)
+        assert '--resolve "${HTTPS_HOST}:443:127.0.0.1"' in script
+        assert "HTTPS health check failed" in script
+    assert "https://game.@@{Game.GAME_VM_ADDRESS}@@.sslip.io/scoreboard" in json.dumps(compiled_bp)

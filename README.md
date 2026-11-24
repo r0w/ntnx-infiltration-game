@@ -47,6 +47,14 @@ bun run dev:frontend
 
 Open <http://localhost:5173>. Default mode is `mock` - fixtures back the entire scenario, all 39 stages playable end-to-end without a Prism Central.
 
+To try the deployment's HTTPS setup locally with Docker:
+
+```bash
+MODE=mock docker compose up -d --build
+```
+
+Open <https://game.127.0.0.1.sslip.io> and accept the local certificate warning. Ports 80 and 443 must be free; HTTP redirects to HTTPS. No certificate is installed in your browser or operating system. To stop the local stack, use `docker compose down` (omit `-v` to retain the proxy certificates). `GAME_HTTPS_HOST` can select another sslip.io hostname when testing from a different machine.
+
 ## Stack
 
 | Layer | Choice |
