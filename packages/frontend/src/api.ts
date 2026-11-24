@@ -213,6 +213,8 @@ export interface ScoreboardEntry {
   startedAt: number;
   finishedAt: number | null;
   lastActivityAt: number | null;
+  progressReachedAt?: number;
+  progressTimeMs?: number;
   /** Stages whose step-by-step help the player displayed (absent from
    *  peers running an older version). */
   helpUses?: number;

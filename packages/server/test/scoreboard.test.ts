@@ -473,3 +473,93 @@ describe('mergeScoreboards on playing time', () => {
     expect(merged.map((e) => e.trigram)).toEqual(['early-finish', 'early-start']);
   });
 });
+
+describe('ranking at the latest validated progression', () => {
+  const MIN = 60_000;
+  function player(db: Database, id: string, start: number, reached: number) {
+    seed(db, { id, startedAt: start * MIN, capturedTrigram: id, passedStages: ['login'] });
+    db.query('UPDATE stage_history SET checked_at = ?, first_passed_at = ? WHERE session_id = ?')
+      .run(reached * MIN, reached * MIN, id);
+  }
+
+  test('catching up later does not take the lead, but a genuinely faster late starter does', async () => {
+    const db = freshDb();
+    player(db, 'first', 0, 10);
+    player(db, 'catchup', 0, 15);
+    expect((await fetchEntries(db)).map(e => e.trigram)).toEqual(['first', 'catchup']);
+    player(db, 'fast-late', 20, 25);
+    expect((await fetchEntries(db)).map(e => e.trigram)).toEqual(['fast-late', 'first', 'catchup']);
+  });
+
+  test('only waits overlapping the completed progression reduce its time', async () => {
+    const db = freshDb();
+    player(db, 'held', 0, 20);
+    const waits = new SessionWaitQueries(db);
+    waits.open('held', 'gate', 'login', 5 * MIN);
+    expect((await fetchEntries(db))[0].progressTimeMs).toBe(5 * MIN);
+    waits.close('held', 25 * MIN); // only 5..20 counts
+    expect((await fetchEntries(db))[0].progressTimeMs).toBe(5 * MIN);
+    waits.open('held', 'pause', null, 30 * MIN);
+    expect((await fetchEntries(db))[0].progressTimeMs).toBe(5 * MIN);
+    waits.close('held', 45 * MIN);
+    expect((await fetchEntries(db))[0].progressTimeMs).toBe(5 * MIN);
+  });
+
+  test('new help counts immediately, while failures and repeat passes do not move the checkpoint', async () => {
+    const db = freshDb();
+    player(db, 'first', 0, 10);
+    player(db, 'second', 0, 12);
+    const history = new HistoryQueries(db);
+    history.record('first', 'recovery-gate', 'failed', 100, 'retry');
+    history.record('first', 'login', 'passed', 100, 'rechecked');
+    let entries = await fetchEntries(db);
+    expect(entries.map(e => e.trigram)).toEqual(['first', 'second']);
+    expect(entries[0].progressReachedAt).toBe(10 * MIN);
+    expect(entries[0].progressTimeMs).toBe(10 * MIN);
+    new HelpUsageQueries(db).record('first', 'recovery-gate', 3 * 60);
+    entries = await fetchEntries(db);
+    expect(entries.map(e => e.trigram)).toEqual(['second', 'first']);
+    expect(entries[1].progressTimeMs).toBe(10 * MIN);
+  });
+
+  test('equal scores use arrival then stable identity, independent of row order', async () => {
+    const db = freshDb();
+    player(db, 'late', 10, 20);
+    player(db, 'z-first', 0, 10);
+    player(db, 'a-first', 0, 10);
+    const local = await fetchEntries(db);
+    expect(local.map(e => e.trigram)).toEqual(['a-first', 'z-first', 'late']);
+    const combined = mergeScoreboards([...local].reverse().map(e => ({ ...e, peerLabel: null })));
+    expect(combined.map(e => e.trigram)).toEqual(local.map(e => e.trigram));
+  });
+
+  test('finished players precede unfinished players even with fewer playable stages', async () => {
+    const db = freshDb();
+    player(db, 'done', 0, 10);
+    db.query('UPDATE sessions SET finished_at = ? WHERE id = ?').run(12 * MIN, 'done');
+    player(db, 'playing', 0, 5);
+    new HistoryQueries(db).record('playing', 'recovery-gate', 'passed', 0, null);
+    const local = await fetchEntries(db);
+    expect(local.map(e => e.trigram)).toEqual(['done', 'playing']);
+    expect(mergeScoreboards(local.reverse().map(e => ({ ...e, peerLabel: 'peer' }))).map(e => e.trigram))
+      .toEqual(['done', 'playing']);
+  });
+
+  test('reset removes old progression checkpoints and zero-progress time is zero', async () => {
+    const db = freshDb();
+    player(db, 'reset', 0, 10);
+    const history = new HistoryQueries(db);
+    history.deleteFrom('reset', 'login', stages.map(s => s.name));
+    expect((await fetchEntries(db))[0]).toMatchObject({ stagesPassed: 0, progressReachedAt: 0, progressTimeMs: 0 });
+    history.record('reset', 'login', 'passed', 0, null);
+    expect((await fetchEntries(db))[0].progressReachedAt).toBeGreaterThan(10 * MIN);
+  });
+
+  test('unknown timing from old peers stays deterministic without using recent activity', async () => {
+    const db = freshDb();
+    player(db, 'legacy-a', 0, 10);
+    player(db, 'legacy-b', 1, 15);
+    const oldRows = (await fetchEntries(db)).map(({ progressTimeMs, progressReachedAt, ...e }) => ({ ...e, peerLabel: 'old' }));
+    expect(mergeScoreboards(oldRows.reverse()).map(e => e.trigram)).toEqual(['legacy-a', 'legacy-b']);
+  });
+});
