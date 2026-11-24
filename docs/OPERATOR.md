@@ -41,9 +41,14 @@ Supply the PC IP and local admin credentials, select the **primary** subnet for 
 
 Share these links once installation is complete:
 
-- Players: `http://<vm>:3000/`
-- Projector: `http://<vm>:3000/scoreboard`
-- Operator: `http://<vm>:3000/admin`
+- Players: `https://game.<vm-ip>.sslip.io/`
+- Projector: `https://game.<vm-ip>.sslip.io/scoreboard`
+- Operator: `https://game.<vm-ip>.sslip.io/admin`
+
+Fresh deployments generate this address from the VM IP automatically: no DNS record or VDI configuration is needed. Accept the local certificate warning in the browser (Advanced → Proceed). Test this once from a player VDI: its DNS must resolve sslip.io to private IPs and its browser policy must allow the certificate exception. The VM must accept TCP 80/443; HTTP on the generated hostname redirects to HTTPS. Caddy keeps its CA and certificates in Docker volumes across restarts and game updates. No public certificate authority is contacted.
+
+Port 3000 remains available for existing operational tools and combined-scoreboard peers (`http://<vm-ip>:3000`); use these HTTP peer URLs because servers cannot click through a certificate warning. HTTPS does not by itself guarantee browser clipboard permissions.
+
 
 Players also need the Prism Central URL, lab credentials and internet access.
 

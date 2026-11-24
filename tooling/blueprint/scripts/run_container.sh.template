@@ -34,6 +34,11 @@ sudo tee "$APPDIR/docker-compose.yml" >/dev/null <<'COMPOSEEOF'
 __COMPOSE_YML__
 COMPOSEEOF
 
+# Local CA and site certificates persist in the proxy's Docker volume.
+sudo tee "$APPDIR/Caddyfile" >/dev/null <<'CADDYEOF'
+__CADDYFILE__
+CADDYEOF
+
 # .env — Calm substitutes the runtime-variable macros to their literal values
 # before this runs; the quoted heredoc then keeps any $ / backtick in a secret intact.
 # (Do NOT write a literal at-at-brace macro token in a comment: Calm scans the
@@ -41,6 +46,7 @@ COMPOSEEOF
 sudo tee "$APPDIR/.env" >/dev/null <<'ENVEOF'
 IMAGE_REPO=@@{IMAGE_REPO}@@
 IMAGE_TAG=@@{IMAGE_TAG}@@
+GAME_HTTPS_HOST=game.@@{VM.address}@@.sslip.io
 PUBLIC_DIR=/app/public
 GAME_PACK=@@{GAME_PACK}@@
 MODE=@@{MODE}@@
@@ -84,6 +90,21 @@ sleep 5
 sudo docker compose ps
 echo "--- boot log ---"
 sudo docker compose logs --tail 30
+
+# Verify HTTPS without relying on the VM's DNS resolver; players resolve sslip.io.
+HTTPS_HOST="game.@@{VM.address}@@.sslip.io"
+for attempt in {1..30}; do
+    if curl --fail --silent --insecure --noproxy '*' --connect-timeout 2 --max-time 5 \
+        --resolve "${HTTPS_HOST}:443:127.0.0.1" "https://${HTTPS_HOST}/api/health" >/dev/null; then
+        break
+    fi
+    if [[ "$attempt" == 30 ]]; then
+        echo "HTTPS health check failed" >&2
+        exit 1
+    fi
+    sleep 2
+done
+echo "Game URL: https://${HTTPS_HOST}/"
 
 # Captured by Calm for the application links after the selected VM is ready.
 echo "GAME_VM_ADDRESS=@@{VM.address}@@"

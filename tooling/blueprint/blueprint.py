@@ -2,7 +2,7 @@
 Active blueprint — calm-dsl source, post-compile patcher.
 
 Validated end-to-end on a live PC: 15 install tasks SUCCESS + 2 day-2
-actions + game container UP at port 3000 with /api/health returning
+actions + game HTTPS proxy UP at port 443 with /api/health returning
 status:ok + 39 stages.
 
 Differences vs v2's manual JSON assembler (build_blueprint.py):
@@ -281,7 +281,7 @@ class GameContent(Package):
             # URL before the shrink finished, players could reach stage
             # 28 prematurely and the in-game lookup would 404. Putting
             # the container at the end of Branch 1 guarantees that by
-            # the time anyone can hit `http://<vm>:3000/`, the cluster
+            # the time anyone can hit `https://game.<vm-ip>.sslip.io/`, the cluster
             # is in its final 3-node shape with a free chassis slot.
             #
             # Container chain (Install Docker → Push prereq BPs → Clone
@@ -425,7 +425,7 @@ class GameContent(Package):
                 # run -d with PC + GAME_* env injected. The "deploy
                 # done" signal: once this returns SUCCESS, the BP app
                 # state flips to `running` and the operator hands out
-                # http://<vm>:3000/ to players.
+                # https://game.<vm-ip>.sslip.io/ to players.
                 CalmTask.SetVariable.ssh(
                     name="Run game container",
                     variables=["GAME_VM_ADDRESS"],
@@ -890,9 +890,9 @@ class NKPFundamentals(Profile):
 class NtnxInfiltrationGame(Blueprint):
     """Nutanix Infiltration Game :
 
- - Game:       http://@@{Game.GAME_VM_ADDRESS}@@:3000/
- - Scoreboard: http://@@{Game.GAME_VM_ADDRESS}@@:3000/scoreboard
- - Admin:      http://@@{Game.GAME_VM_ADDRESS}@@:3000/admin
+ - Game:       https://game.@@{Game.GAME_VM_ADDRESS}@@.sslip.io/
+ - Scoreboard: https://game.@@{Game.GAME_VM_ADDRESS}@@.sslip.io/scoreboard
+ - Admin:      https://game.@@{Game.GAME_VM_ADDRESS}@@.sslip.io/admin
 """
     services = [Game]
     packages = [Ubuntu2204, GameContent, NkpContent]

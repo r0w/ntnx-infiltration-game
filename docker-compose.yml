@@ -13,6 +13,26 @@ services:
       PC_PASSWORD: ${PC_PASSWORD}
       CLUSTER_PROFILE: ${CLUSTER_PROFILE:-other}
       TYPING_SPEED_MS: ${TYPING_SPEED_MS:-15}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     volumes:
       - ./data:/data
     restart: unless-stopped
+  https:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      GAME_HTTPS_HOST: ${GAME_HTTPS_HOST:-game.127.0.0.1.sslip.io}
+      GAME_UPSTREAM: infiltration:3000
+    volumes:
+      - ./tooling/blueprint/specs/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - infiltration
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

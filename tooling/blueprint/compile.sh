@@ -47,6 +47,7 @@ print(f'  generated push_prereq_bps.sh ({len(out)} chars)')
 compose = (HERE / 'specs' / 'docker-compose.yml').read_text()
 rc = (HERE / 'scripts' / 'run_container.sh.template').read_text()
 rc = rc.replace('__COMPOSE_YML__', compose.rstrip(chr(10)))
+rc = rc.replace('__CADDYFILE__', (HERE / 'specs' / 'Caddyfile').read_text().rstrip())
 (HERE / 'scripts' / 'run_container.sh').write_text(rc)
 print(f'  generated run_container.sh ({len(rc)} chars)')
 "

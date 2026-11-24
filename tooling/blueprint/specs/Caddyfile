@@ -1,0 +1,9 @@
+{
+	# The players accept the browser warning; do not install a CA on their machines.
+	skip_install_trust
+}
+
+{$GAME_HTTPS_HOST} {
+	tls internal
+	reverse_proxy {$GAME_UPSTREAM:game:3000}
+}

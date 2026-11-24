@@ -15,6 +15,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- Open fresh deployments over HTTPS with an automatic sslip.io address and a local certificate accepted through the browser warning.
+
 ### Changed
 
 ### Fixed
