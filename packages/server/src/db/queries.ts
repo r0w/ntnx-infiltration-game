@@ -858,6 +858,15 @@ export class AttemptQueries {
       });
   }
 
+  consecutiveFailures(sessionId: string, stageName: string, since: number): number {
+    const row = this.db.query(`SELECT COUNT(*) AS count FROM check_attempts
+      WHERE session_id = ? AND stage_name = ? AND status = 'failed' AND checked_at >= ?
+        AND id > COALESCE((SELECT MAX(id) FROM check_attempts
+          WHERE session_id = ? AND stage_name = ? AND status = 'passed'), 0)`)
+      .get(sessionId, stageName, since, sessionId, stageName) as { count: number };
+    return row.count;
+  }
+
   /** Newest-first attempts for the pack, with the session's trigram/username
    *  joined in so the admin Logs tab renders without a second lookup. */
   listRecent(packId: string, limit: number, identityVar = 'Trigram'): AttemptRow[] {

@@ -154,6 +154,8 @@ export interface AdminUserEntry
   extends Omit<AdminSessionRow, 'lastFailStage' | 'lastFailDetail' | 'lastFailAt'> {
   /** Name of the stage the player is ABOUT to play (i.e. after currentStage). */
   nextStageName: string | null;
+  stageElapsedMs: number | null;
+  stageFailures: number;
   /**
    * Last failed check on a stage still ahead of the player, so the operator
    * can see what's missing without walking over. null once the stage passes
@@ -421,10 +423,12 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
       deps.capabilities ?? [],
       deps.clusterProfile,
     );
+    const now = Date.now();
     const helpGlobal = deps.service.isHelpEnabledGlobally();
     const helpByPlayer = deps.service.helpUsage.listByPack(deps.pack.manifest.id);
     const entries: AdminUserEntry[] = rows.map((row) => {
       const { lastFailStage, lastFailDetail, lastFailAt, ...rest } = row;
+      const session = sessions.byId(row.sessionId)!;
       let nextStageName: string | null = null;
       if (row.finishedAt === null) {
         const curIdx = positionOf(row.currentStage);
@@ -439,12 +443,25 @@ export function buildAdminRoutes(deps: AdminRoutesDeps): Hono {
         row.finishedAt === null &&
         lastFailStage !== null &&
         lastFailAt !== null &&
+        lastFailAt >= (session.stageEnteredAt ?? row.startedAt) &&
         positionOf(lastFailStage) > positionOf(row.currentStage)
           ? { stage: lastFailStage, detail: lastFailDetail, at: lastFailAt }
           : null;
+      if (row.finishedAt === null) {
+        nextStageName = session.pendingCheck?.stageName ?? session.awaiting?.stageName ?? lastFail?.stage ?? nextStageName;
+      }
+      const enteredAt = session.stageEnteredAt;
+      const stageElapsedMs = row.finishedAt === null && nextStageName && enteredAt !== null
+        ? Math.max(0, now - enteredAt - deps.service.waits.overlapMs(row.sessionId, enteredAt, now))
+        : null;
+      const stageFailures = row.finishedAt === null && nextStageName
+        ? attempts.consecutiveFailures(row.sessionId, nextStageName, enteredAt ?? row.startedAt)
+        : 0;
       return {
         ...rest,
         nextStageName,
+        stageElapsedMs,
+        stageFailures,
         lastFail,
         totalStages,
         effectiveTotalStages,

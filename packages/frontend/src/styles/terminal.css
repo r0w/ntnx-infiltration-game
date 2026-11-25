@@ -2275,9 +2275,9 @@ a.terminal-link:visited {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: rgba(255, 213, 128, 0.06);
-  color: var(--yellow);
-  border: 1px solid rgba(255, 213, 128, 0.25);
+  background: transparent;
+  color: var(--dim);
+  border: 1px solid currentColor;
   border-radius: 3px;
   cursor: pointer;
   font: inherit;
@@ -2286,9 +2286,17 @@ a.terminal-link:visited {
 }
 .admin-fail-chip:hover,
 .admin-fail-chip:focus-visible {
-  border-color: var(--yellow);
+  border-color: var(--dim);
   background: rgba(255, 213, 128, 0.12);
   outline: none;
+}
+.admin-fail-chip.admin-fail-warning {
+  color: #f5a742;
+  background: rgba(245, 167, 66, 0.08);
+}
+.admin-fail-chip.admin-fail-critical {
+  color: var(--red);
+  background: rgba(255, 85, 85, 0.08);
 }
 .admin-fail-age {
   font-weight: 600;

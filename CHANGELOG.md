@@ -23,6 +23,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Changed
 
+- Show time on the current stage and highlight repeated check failures in the admin Users table.
+
 - Make the browser-tab icon easier to recognize with a high-contrast terminal prompt.
 
 ### Fixed
