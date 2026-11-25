@@ -23,7 +23,7 @@ import { EMAIL_RE } from '@ntnx-game/shared';
 import { HelpCostCell } from './HelpCostCell';
 import { HelpMenu } from './HelpMenu';
 import { ScoreboardDisplayOptions } from './ScoreboardDisplayOptions';
-import { fmtPenaltyShort } from './duration';
+import { fmtDuration, fmtPenaltyShort } from './duration';
 import { ConfirmModal, Modal } from './Modal';
 import { stageState, stateNote, STATE_ORDER, type StageState } from './pack-state';
 
@@ -894,7 +894,7 @@ function AdminDashboard({
                 <th>Progress</th>
                 <th>Help</th>
                 <th>Penalties</th>
-                <th>Started</th>
+                <th>Time on stage</th>
                 <th>Session</th>
                 <th aria-label="actions" />
               </tr>
@@ -926,17 +926,14 @@ function AdminDashboard({
                     ) : (
                       <>
                         {e.nextStageName ?? <span className="c-dim">pre-game</span>}
-                        {e.lastFail && (
+                        {e.lastFail && e.stageFailures > 0 && (
                           <button
                             type="button"
-                            className="admin-fail-chip"
+                            className={`admin-fail-chip${e.stageFailures >= 4 ? ' admin-fail-critical' : e.stageFailures >= 2 ? ' admin-fail-warning' : ''}`}
                             onClick={() => setFailTarget(e)}
-                            title="last failed check — click for full detail"
+                            title="Failed checks on this stage — click for details"
                           >
-                            {/* age leads so the ellipsis can't truncate it —
-                                it's the triage signal (stuck 15m ≠ just failed) */}
-                            <span aria-hidden>⚠</span>{' '}
-                            <span className="admin-fail-age">{fmtAgeShort(e.lastFail.at)}</span> ·{' '}
+                            <span className="admin-fail-age">×{e.stageFailures}</span> ·{' '}
                             {/* name the stage when it isn't the one shown above
                                 (disabled stages can sit in between) */}
                             {e.lastFail.stage !== e.nextStageName && `${e.lastFail.stage}: `}
@@ -981,7 +978,7 @@ function AdminDashboard({
                       <span className="c-dim">—</span>
                     )}
                   </td>
-                  <td className="c-dim">{fmtAge(e.startedAt)}</td>
+                  <td className="c-dim" title="Time on the current stage, excluding organizer waits">{e.stageElapsedMs === null ? '—' : fmtDuration(e.stageElapsedMs)}</td>
                   <td className="admin-td-sid c-dim" title={e.sessionId}>
                     {e.sessionId.slice(0, 8)}
                   </td>
@@ -2020,11 +2017,6 @@ function splitCheckDetail(detail: string | null): { prose: string; json: string 
     }
   }
   return { prose: detail, json: null };
-}
-
-/** Terse variant for the fail chip: "42s" / "12m" / "2h05". */
-function fmtAgeShort(ts: number): string {
-  return fmtAge(ts).replace(' ago', '');
 }
 
 function fmtAge(ts: number): string {

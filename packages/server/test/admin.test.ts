@@ -1933,3 +1933,63 @@ describe('saving email variables without sending', () => {
     } finally { db.close(); }
   });
 });
+
+describe('Users current-stage progress', () => {
+  const headers = { 'X-Admin-Password': ADMIN_PW };
+  async function entry(db: Database) {
+    return (await (await router(db).request('/users', { headers })).json()).entries[0] as AdminUserEntry;
+  }
+  function attempt(db: Database, stage: string, status: 'passed' | 'failed', at: number) {
+    db.query('INSERT INTO check_attempts(session_id,stage_name,status,checked_at) VALUES (?,?,?,?)')
+      .run('player', stage, status, at);
+  }
+
+  test('counts consecutive failures only for the actual pending stage and current visit', async () => {
+    const db = freshDb();
+    try {
+      const now = Date.now();
+      seedSession(db, { id: 'player', currentStage: 'login', startedAt: now - 10000 });
+      db.query("UPDATE sessions SET stage_entered_at=?, awaiting_stage='outro', awaiting_variable='answer', awaiting_render_offset=1 WHERE id='player'").run(now - 1000);
+      attempt(db, 'outro', 'failed', now - 2000); // previous visit
+      attempt(db, 'intro', 'failed', now); // other stage
+      for (let n = 1; n <= 4; n++) {
+        attempt(db, 'outro', 'failed', now);
+        expect(await entry(db)).toMatchObject({ nextStageName: 'outro', stageFailures: n });
+      }
+      attempt(db, 'outro', 'passed', now);
+      expect((await entry(db)).stageFailures).toBe(0);
+      attempt(db, 'outro', 'failed', now);
+      expect((await entry(db)).stageFailures).toBe(1);
+      db.query("UPDATE sessions SET current_stage='outro', awaiting_stage=NULL, awaiting_variable=NULL, awaiting_render_offset=NULL, stage_entered_at=? WHERE id='player'").run(now);
+      expect((await entry(db)).stageFailures).toBe(0);
+    } finally { db.close(); }
+  });
+
+  test('time on stage excludes closed and ongoing organizer waits without counting pre-stage waits', async () => {
+    const db = freshDb();
+    try {
+      const now = Date.now();
+      seedSession(db, { id: 'player', currentStage: 'login', startedAt: now - 3600000 });
+      db.query("UPDATE sessions SET stage_entered_at=? WHERE id='player'").run(now - 600000);
+      const wait = db.query("INSERT INTO session_waits(session_id,reason,blocked_at,released_at) VALUES ('player','pause',?,?)");
+      wait.run(now - 900000, now - 700000); // before this stage
+      wait.run(now - 500000, now - 440000); // 1 minute
+      wait.run(now - 120000, null); // ongoing, 2 minutes
+      db.query('INSERT INTO pack_pauses(pack_id, paused_at, reason) VALUES (?, ?, ?)').run(PACK_ID, now - 120000, 'lunch');
+      const first = await entry(db);
+      expect(first.stageElapsedMs).toBeGreaterThanOrEqual(420000);
+      expect(first.stageElapsedMs).toBeLessThan(421000);
+      expect((await entry(db)).stageElapsedMs).toBe(first.stageElapsedMs);
+      db.query("UPDATE sessions SET finished_at=? WHERE id='player'").run(now);
+      expect(await entry(db)).toMatchObject({ nextStageName: null, stageElapsedMs: null, stageFailures: 0 });
+    } finally { db.close(); }
+  });
+
+  test('older sessions without a stage timestamp show no invented duration', async () => {
+    const db = freshDb();
+    try {
+      seedSession(db, { id: 'player', currentStage: 'login' });
+      expect((await entry(db)).stageElapsedMs).toBeNull();
+    } finally { db.close(); }
+  });
+});

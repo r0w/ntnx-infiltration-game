@@ -295,6 +295,8 @@ export interface AdminUserEntry {
   currentStage: string | null;
   /** Name of the stage the player is ABOUT to play. null when finished. */
   nextStageName: string | null;
+  stageElapsedMs: number | null;
+  stageFailures: number;
   stagesPassed: number;
   /** Stages the engine gated for this session (capability missing,
    *  destructive-on-other, missing-upstream). Kept for telemetry —
