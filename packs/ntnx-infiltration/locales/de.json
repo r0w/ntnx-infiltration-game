@@ -258,5 +258,11 @@
   "identity.code-taken": "Ein anderer Spieler hat diesen Code gerade belegt. Wähle einen anderen.",
   "identity.target-gone": "Dieses Spiel ist nicht mehr verfügbar. Wähle erneut einen Agentencode.",
   "identity.wrong-pin": "Falsche PIN. Versuche es erneut oder drücke ↓, um einen anderen Agentencode zu wählen.",
-  "identity.invalid-pin": "Die PIN muss genau 4 Ziffern enthalten."
+  "identity.invalid-pin": "Die PIN muss genau 4 Ziffern enthalten.",
+  "resume.intro": "<clear/>Signal wiederhergestellt… <pause sec='1'/>Willkommen zurück, <white>{Username}</white>.\n\nIhre VDI ist vielleicht verschwunden, während Sie außerhalb der Matrix waren. Aber ich habe Ihre Position gespeichert. Die Agenten haben unseren Fortschritt nicht gelöscht.\n\nBevor Sie sich wieder einklinken, prüfen wir Ihren Zugang.\n\n",
+  "resume.personal": "Prism Central: <a href='{PC}'>{PC}</a>\nIhr Administratorkonto: <white><copy>{Trigram}-adm</copy></white>\n\nVerwenden Sie das Passwort, das Sie beim Erstellen dieses Kontos gewählt haben. Ich kenne es nicht. Wenn Sie es vergessen haben, wenden Sie sich an die Kursleitung.\n\nDenken Sie daran: Dies ist ein <white>lokales Konto</white>. Wählen Sie auf der Anmeldeseite <white>Local Account</white>.\n<image src='stage-006-local-account.png' alt='Anmeldung bei Prism Central: Local Account für das lokale Konto auswählen.'/>\n",
+  "resume.initial": "Prism Central: <a href='{PC}'>{PC}</a>\nKonto für den ersten Zugang: <white><copy>{PCUser}</copy></white>\nAbgefangenes Passwort: <white><copy>{PCPassword}</copy></white>\n\nIhr persönlicher Zugang ist noch in Vorbereitung. Fahren Sie nach diesem Briefing mit den Anweisungen zum Erstellen von <white><copy>{Trigram}-adm</copy></white> fort.\n\nDas erste Konto ist ein <white>lokales Konto</white>: Wählen Sie <white>Local Account</white>.\n<image src='stage-006-local-account.png' alt='Anmeldung bei Prism Central: Local Account auswählen.'/>\n",
+  "resume.continue": "\nNehmen Sie sich Zeit, um sich wieder anzumelden. Wenn Sie bereit sind, drücken Sie die <white>Eingabetaste</white>. Dann setzen wir genau dort fort, wo wir aufgehört haben.<input/>",
+  "recall.intro": "<clear/>Hier ist Tank. <pause sec='1'/>Brauchen Sie Ihren Zugang noch einmal, <white>{Username}</white>?\n\nIch übermittle Ihnen die Zugangsdaten erneut. Ihre Mission wartet genau dort, wo Sie sie verlassen haben.\n\n",
+  "recall.continue": "\nHaben Sie alles? Drücken Sie die <white>Eingabetaste</white>, um zu den aktuellen Anweisungen zurückzukehren.<input/>"
 }

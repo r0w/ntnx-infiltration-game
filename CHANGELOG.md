@@ -15,6 +15,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- Resume NCP and NKP sessions with a narrated access briefing, available again through Call Tank or Call the instructor.
+
 - Include Prism Central and AOS versions in Central deployment telemetry when available.
 
 - Right-click outside the input in the game terminal to paste into the current prompt without submitting it.

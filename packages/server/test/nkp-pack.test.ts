@@ -47,6 +47,8 @@ function navStages(items: NavItem[]): string[] {
   ]);
 }
 const messageKeys = [
+  // SessionService renders these outside the numbered mission stages.
+  'resume.intro', 'resume.access', 'resume.continue', 'recall.intro', 'recall.continue',
   ...stages.flatMap((s) => s.messages),
   ...(manifest.nav ?? []).flatMap((c) => [c.title, ...navKeys(c.items)]),
 ];
@@ -121,7 +123,7 @@ describe('nkp pack structure', () => {
     }
   });
 
-  test('locales carry no keys no stage or menu asks for', () => {
+  test('locales carry no keys no stage, briefing or menu asks for', () => {
     const keys = new Set(messageKeys);
     const en = JSON.parse(readFileSync(join(PACK, 'locales/en.json'), 'utf8')) as Record<string, string>;
     expect(Object.keys(en).filter((k) => !keys.has(k))).toEqual([]);

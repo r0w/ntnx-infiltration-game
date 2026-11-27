@@ -247,5 +247,11 @@
   "identity.code-taken": "Otro jugador acaba de elegir este código. Elige otro.",
   "identity.target-gone": "Esta partida ya no está disponible. Elige de nuevo un código de agente.",
   "identity.wrong-pin": "PIN incorrecto. Inténtalo de nuevo o pulsa ↓ para elegir otro código de agente.",
-  "identity.invalid-pin": "El PIN debe contener exactamente 4 dígitos."
+  "identity.invalid-pin": "El PIN debe contener exactamente 4 dígitos.",
+  "resume.intro": "<clear/>Señal restablecida… <pause sec='1'/>Bienvenido de nuevo, <white>{Username}</white>.\n\nPuede que su VDI haya desaparecido mientras estaba fuera de Matrix. Pero he guardado su posición. Los agentes no han borrado nuestro progreso.\n\nAntes de volver a conectarse, comprobemos su punto de entrada.\n\n",
+  "resume.personal": "Prism Central: <a href='{PC}'>{PC}</a>\nSu cuenta de administrador: <white><copy>{Trigram}-adm</copy></white>\n\nUse la contraseña que eligió al crear esta cuenta. Yo no la conozco. Si la ha olvidado, consulte al instructor.\n\nRecuerde: es una <white>cuenta local</white>. Seleccione <white>Local Account</white> en la pantalla de inicio de sesión.\n<image src='stage-006-local-account.png' alt='Inicio de sesión en Prism Central: seleccione Local Account para usar la cuenta local.'/>\n",
+  "resume.initial": "Prism Central: <a href='{PC}'>{PC}</a>\nCuenta de acceso inicial: <white><copy>{PCUser}</copy></white>\nContraseña interceptada: <white><copy>{PCPassword}</copy></white>\n\nSu acceso personal aún está en preparación. Después de este informe, continúe con las instrucciones para crear <white><copy>{Trigram}-adm</copy></white>.\n\nLa cuenta inicial es una <white>cuenta local</white>: seleccione <white>Local Account</white>.\n<image src='stage-006-local-account.png' alt='Inicio de sesión en Prism Central: seleccione Local Account.'/>\n",
+  "resume.continue": "\nTómese un momento para volver a conectarse. Cuando esté listo, pulse <white>Intro</white> y retomaremos la misión justo donde la dejamos.<input/>",
+  "recall.intro": "<clear/>Aquí Tank. <pause sec='1'/>¿Necesita de nuevo su punto de entrada, <white>{Username}</white>?\n\nLe retransmito los datos de acceso. Su misión sigue justo donde la dejó.\n\n",
+  "recall.continue": "\n¿Tiene lo que necesita? Pulse <white>Intro</white> para volver a las instrucciones actuales.<input/>"
 }

@@ -137,6 +137,7 @@ export interface SessionHandle {
   askHelp: (confirm: boolean, penaltySec?: number) => Promise<HelpOutcome>;
   createSession: (opts: { locale: string }) => Promise<void>;
   resume: (sessionId: string) => void;
+  recallBriefing: () => Promise<void>;
   advance: () => Promise<void>;
   submitInput: (variable: string, value: string) => Promise<void>;
   gotoStage: (stageName: string) => Promise<void>;
@@ -283,6 +284,8 @@ export function useSession(): SessionHandle {
       // and let the sessionId-change effect re-hydrate at the other
       // session's currentStage.
       const newId = r.switchSessionId;
+      resumeBriefed.current = null;
+      resumeBriefingActive.current = false;
       activeSessionRef.current = newId;
       identityRevisionRef.current = undefined;
       requestEpochRef.current++;
@@ -498,6 +501,8 @@ export function useSession(): SessionHandle {
     if (notice !== undefined) setError(notice);
   }, [clearFlight]);
 
+  const resumeBriefed = useRef<string | null>(null);
+  const resumeBriefingActive = useRef(false);
   const hydrated = useRef<string | null>(null);
   const hydratingRef = useRef<{ id: string; epoch: number } | null>(null);
 
@@ -507,7 +512,7 @@ export function useSession(): SessionHandle {
     const request = { id, epoch };
     hydratingRef.current = request;
     try {
-      const snap = await api.getSession(id);
+      const snap = await api.getSession(id, resumeBriefed.current !== id);
       if (epoch !== requestEpochRef.current || activeSessionRef.current !== id) return;
       if (snap.switchSessionId) {
         handleResponse({ kind: 'switch-session', switchSessionId: snap.switchSessionId, units: [], actions: [], disabledStages: [] });
@@ -517,6 +522,17 @@ export function useSession(): SessionHandle {
       setCurrentStage(snap.currentStage);
       setLocale(snap.locale);
       if (snap.help) applyHelp(snap.help);
+      if (snap.resumeBriefing?.length && resumeBriefed.current !== id) {
+        resumeBriefed.current = id;
+        resumeBriefingActive.current = true;
+        awaitingRef.current = CONTINUE_VAR;
+        setAwaitingVariable(CONTINUE_VAR);
+        setAwaitingStageName('resume-briefing');
+        setItems(appendUnits([], snap.resumeBriefing, `resume-briefing-${id}`, true).next);
+        hydrated.current = id;
+        return;
+      }
+      resumeBriefingActive.current = false;
       if (snap.finishedAt) {
         finishedRef.current = true;
         setFinished(true);
@@ -642,6 +658,37 @@ export function useSession(): SessionHandle {
     };
   }, [sessionId, gatedAt, handleResponse, dropStaleSession, isCurrent]);
 
+  const recallBriefing = useCallback(async () => {
+    if (!sessionId || inFlightRef.current || finishedRef.current || gatedRef.current || resumeBriefingActive.current) return;
+    if (hydrated.current !== sessionId) return;
+    const epoch = requestEpochRef.current;
+    inFlightRef.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      const snap = await api.getSession(sessionId, 'recall');
+      if (!isCurrent(epoch, sessionId)) return;
+      if (snap.switchSessionId) {
+        handleResponse({ kind: 'switch-session', switchSessionId: snap.switchSessionId, units: [], actions: [], disabledStages: [] });
+        return;
+      }
+      if (!snap.resumeBriefing?.length) return;
+      resumeBriefed.current = sessionId;
+      resumeBriefingActive.current = true;
+      awaitingRef.current = CONTINUE_VAR;
+      setAwaitingVariable(CONTINUE_VAR);
+      setAwaitingStageName('resume-briefing');
+      setItems(appendUnits([], snap.resumeBriefing, `recall-${advanceCounterRef.current++}`, true).next);
+    } catch (err) {
+      if (!isCurrent(epoch, sessionId)) return;
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.startsWith('404')) dropStaleSession(KICK_NOTICE);
+      else setError(message);
+    } finally {
+      if (isCurrent(epoch, sessionId)) clearFlight();
+    }
+  }, [sessionId, isCurrent, handleResponse, dropStaleSession, clearFlight]);
+
   // Heartbeat: detect an operator-side session delete even while the player is
   // idle. advance()/submitInput()/hydrate() already drop a 404'd session, but a
   // player parked at an input (or just reading) issues no requests and would
@@ -726,6 +773,16 @@ export function useSession(): SessionHandle {
   const submitInput = useCallback(
     async (variable: string, value: string) => {
       if (!sessionId || inFlightRef.current) return;
+      if (resumeBriefingActive.current) {
+        resumeBriefingActive.current = false;
+        awaitingRef.current = null;
+        setAwaitingVariable(null);
+        setAwaitingStageName(null);
+        setItems([]);
+        hydrated.current = null;
+        await hydrate(sessionId);
+        return;
+      }
       const epoch = requestEpochRef.current;
       inFlightRef.current = true;
       setBusy(true);
@@ -878,6 +935,8 @@ export function useSession(): SessionHandle {
   }, [sessionId, hydrate, handleResponse, isCurrent, clearFlight]);
 
   const reset = useCallback(() => {
+    resumeBriefed.current = null;
+    resumeBriefingActive.current = false;
     localStorage.removeItem(STORAGE_KEY);
     hydrated.current = null;
     finishedRef.current = false;
@@ -916,6 +975,7 @@ export function useSession(): SessionHandle {
     askHelp,
     createSession,
     resume,
+    recallBriefing,
     advance,
     submitInput,
     gotoStage,

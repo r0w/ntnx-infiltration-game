@@ -45,6 +45,7 @@ export function buildSessionRoutes(deps: SessionRoutesDeps): Hono {
   });
 
   router.get('/:id', (c) => {
+    c.header('Cache-Control', 'no-store');
     const handoff = deps.service.identityHandoff(c.req.param('id'));
     if (handoff) return c.json(handoff);
     const session = deps.service.getSession(c.req.param('id'));
@@ -68,6 +69,9 @@ export function buildSessionRoutes(deps: SessionRoutesDeps): Hono {
       // within a few seconds without a reload.
       help: deps.service.helpSnapshot(session),
       replay,
+      ...(['1', 'recall'].includes(c.req.query('resume') ?? '')
+        ? { resumeBriefing: deps.service.resumeBriefing(session.id, c.req.query('resume') === 'recall' ? 'recall' : 'resume') }
+        : {}),
     });
   });
 

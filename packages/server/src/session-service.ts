@@ -736,6 +736,34 @@ export class SessionService {
     return rendered.units.slice(0, this.awaitingOffset(rendered.units, session.awaiting));
   }
 
+  /** A read-only reconnection beat: it never advances the saved mission. */
+  resumeBriefing(sessionId: string, context: 'resume' | 'recall' = 'resume'): MessageUnit[] | null {
+    const session = this.getSession(sessionId);
+    if (session.finishedAt) return null;
+    const vars = variablesForSession(session.id, this.variables, this.initialVariables);
+    const reached = session.awaiting
+      ? this.stageIndex(session.awaiting.stageName)
+      : this.stageIndex(session.currentStage);
+    const hasReached = (name: string) => {
+      const stage = this.runner.stageByName(name);
+      return !!stage && stage.active && this.stageIndex(name) <= reached;
+    };
+    let access: string;
+    if (this.packId === 'ntnx-infiltration' && hasReached('create-admin-user') && vars.get('Trigram')) {
+      access = hasReached('switch-to-admin-user') ? 'resume.personal' : 'resume.initial';
+    } else if (this.packId === 'nkp-bootcamp' && hasReached('access') && vars.get('UserNum')) {
+      access = 'resume.access';
+    } else return null;
+    const rendered = this.runner.render({
+      id: 'resume-briefing', name: 'resume-briefing', index: -1, active: true,
+      prompt: 'tank', defaultColor: 'magenta',
+      messages: [`${context}.intro`, access, `${context}.continue`],
+    }, vars, session.locale, this.bundle, this.globalTypingSpeedMs);
+    // NKP normally pauses after images; this reconnection beat has one exit.
+    return [...rendered.units.filter(unit => unit.kind !== 'await-input'),
+      { kind: 'await-input', variable: '$continue' }];
+  }
+
   /**
    * Re-render a stage the player has already reached, for re-reading.
    *

@@ -1,3 +1,4 @@
+import { briefingLabels } from './briefingLabels';
 import { helpLabels } from './helpLabels';
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import type { MessageUnit } from '@ntnx-game/shared';
@@ -310,7 +311,7 @@ export function GameApp() {
   const identityCaptured =
     session.currentStage !== null &&
     !['lore', 'login', 'recovery-gate'].includes(session.currentStage);
-  const autoPlayVisible = devToolsAllowed && identityCaptured;
+  const autoPlayVisible = devToolsAllowed && identityCaptured && session.awaitingStageName !== 'resume-briefing';
 
   // Step-by-step help for the stage being played: usable when it is switched
   // on for this player (global switch, or the operator's per-player override)
@@ -351,6 +352,14 @@ export function GameApp() {
     );
   }
 
+  const briefingEntry = pack?.id === 'ntnx-infiltration' ? 'create-admin-user' : 'access';
+  const briefingEntryIndex = pack?.stages.findIndex(stage => stage.name === briefingEntry) ?? -1;
+  const briefingPosition = pack?.stages.findIndex(stage => stage.name === (session.awaitingStageName === 'resume-briefing'
+    ? session.currentStage : session.awaitingStageName ?? session.currentStage)) ?? -1;
+  const briefingAvailable = briefingEntryIndex >= 0 && briefingPosition >= briefingEntryIndex;
+  const briefingOpen = session.awaitingStageName === 'resume-briefing';
+  const recall = briefingLabels(session.locale, pack?.id === 'nkp-bootcamp');
+
   const appStyle = { '--terminal-max-width': maxWidth } as CSSProperties;
   const stageOrder = pack?.stages.map((s) => s.name) ?? [];
   const position = readerPosition(
@@ -368,6 +377,17 @@ export function GameApp() {
           <span className="app-title">{gameTitle}</span>
         </div>
         <div className="app-header-side app-header-right">
+          {(pack?.id === 'ntnx-infiltration' || pack?.id === 'nkp-bootcamp') && (
+            <button
+              type="button"
+              className="app-reset"
+              disabled={!briefingAvailable || briefingOpen || session.busy || session.checkPending || session.finished || !!session.gatedAt || autoPlayActing}
+              title={recall.title}
+              onClick={() => { setAutoPlay(false); void session.recallBriefing(); }}
+            >
+              {recall.button}
+            </button>
+          )}
           <WidthToggle value={maxWidth} onChange={setMaxWidth} />
           <button
             className="app-reset"

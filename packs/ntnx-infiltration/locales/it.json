@@ -247,5 +247,11 @@
   "identity.code-taken": "Un altro giocatore ha appena scelto questo codice. Scegline un altro.",
   "identity.target-gone": "Questa partita non è più disponibile. Scegli di nuovo un codice agente.",
   "identity.wrong-pin": "PIN errato. Riprova oppure premi ↓ per scegliere un altro codice agente.",
-  "identity.invalid-pin": "Il PIN deve contenere esattamente 4 cifre."
+  "identity.invalid-pin": "Il PIN deve contenere esattamente 4 cifre.",
+  "resume.intro": "<clear/>Segnale ripristinato… <pause sec='1'/>Bentornato, <white>{Username}</white>.\n\nLa sua VDI potrebbe essere scomparsa mentre era fuori da Matrix. Ma ho salvato la sua posizione. Gli agenti non hanno cancellato i nostri progressi.\n\nPrima di ricollegarsi, controlliamo il suo punto di accesso.\n\n",
+  "resume.personal": "Prism Central: <a href='{PC}'>{PC}</a>\nIl suo account amministratore: <white><copy>{Trigram}-adm</copy></white>\n\nUsi la password scelta quando ha creato questo account. Io non la conosco. Se l’ha dimenticata, si rivolga all’istruttore.\n\nRicordi: è un <white>account locale</white>. Selezioni <white>Local Account</white> nella schermata di accesso.\n<image src='stage-006-local-account.png' alt='Accesso a Prism Central: selezioni Local Account per usare il suo account locale.'/>\n",
+  "resume.initial": "Prism Central: <a href='{PC}'>{PC}</a>\nAccount di accesso iniziale: <white><copy>{PCUser}</copy></white>\nPassword intercettata: <white><copy>{PCPassword}</copy></white>\n\nIl suo accesso personale è ancora in preparazione. Dopo questo briefing, riprenda le istruzioni per creare <white><copy>{Trigram}-adm</copy></white>.\n\nL’account iniziale è un <white>account locale</white>: selezioni <white>Local Account</white>.\n<image src='stage-006-local-account.png' alt='Accesso a Prism Central: selezioni Local Account.'/>\n",
+  "resume.continue": "\nSi prenda un momento per ricollegarsi. Quando è pronto, prema <white>Invio</white> e riprenderemo esattamente da dove ci eravamo fermati.<input/>",
+  "recall.intro": "<clear/>Qui Tank. <pause sec='1'/>Le serve di nuovo il punto di accesso, <white>{Username}</white>?\n\nLe ritrasmetto i dati di accesso. La missione l’aspetta esattamente dove l’ha lasciata.\n\n",
+  "recall.continue": "\nHa tutto ciò che le serve? Prema <white>Invio</white> per tornare alle istruzioni attuali.<input/>"
 }

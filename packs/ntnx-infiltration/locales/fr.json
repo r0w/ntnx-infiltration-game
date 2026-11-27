@@ -258,5 +258,11 @@
   "identity.code-taken": "Un autre joueur vient de prendre ce code. Choisis-en un autre.",
   "identity.target-gone": "Cette partie n’est plus disponible. Choisis à nouveau un code agent.",
   "identity.wrong-pin": "PIN incorrect. Réessaie ou appuie sur ↓ pour choisir un autre code agent.",
-  "identity.invalid-pin": "Le PIN doit contenir exactement 4 chiffres."
+  "identity.invalid-pin": "Le PIN doit contenir exactement 4 chiffres.",
+  "resume.intro": "<clear/>Signal retrouvé… <pause sec='1'/>Te revoilà, <white>{Username}</white>.\n\nTa VDI a peut-être disparu pendant que tu étais hors de la Matrice. Mais j’ai gardé ta position. Les agents n’ont pas effacé notre progression.\n\nAvant de te rebrancher, vérifions ton point d’entrée.\n\n",
+  "resume.personal": "Prism Central : <a href='{PC}'>{PC}</a>\nTon compte administrateur : <white><copy>{Trigram}-adm</copy></white>\n\nUtilise le mot de passe que tu as choisi lors de la création de ce compte. Je ne le connais pas. Si tu l’as oublié, appelle l’animateur.\n\nSouviens-toi : c’est un <white>compte local</white>. Sur l’écran de connexion, clique sur <white>Local Account</white>.\n<image src='stage-006-local-account.png' alt='Connexion à Prism Central : sélectionner Local Account pour utiliser le compte local.'/>\n",
+  "resume.initial": "Prism Central : <a href='{PC}'>{PC}</a>\nCompte d’accès initial : <white><copy>{PCUser}</copy></white>\nMot de passe intercepté : <white><copy>{PCPassword}</copy></white>\n\nNous en étions encore à préparer ton accès personnel. Reprends les consignes de création du compte <white><copy>{Trigram}-adm</copy></white> après ce briefing.\n\nLe compte d’accès initial est un <white>compte local</white> : clique sur <white>Local Account</white>.\n<image src='stage-006-local-account.png' alt='Connexion à Prism Central : sélectionner Local Account.'/>\n",
+  "resume.continue": "\nPrends le temps de te reconnecter. Quand tu es prêt, appuie sur <white>Entrée</white> : je te remets exactement là où nous en étions.<input/>",
+  "recall.intro": "<clear/>Tank à l’écoute. <pause sec='1'/>Besoin de retrouver ton point d’entrée, <white>{Username}</white> ?\n\nJe te retransmets les accès. Ta mission t’attend exactement là où tu l’as laissée.\n\n",
+  "recall.continue": "\nTu as ce qu’il te faut ? Appuie sur <white>Entrée</white> pour retrouver les consignes en cours.<input/>"
 }

@@ -49,6 +49,7 @@ export interface SessionSnapshot {
    *  reaches the player without a reload. */
   help?: HelpSnapshot;
   replay?: MessageUnit[] | null;
+  resumeBriefing?: MessageUnit[] | null;
 }
 
 const BASE = '/api';
@@ -477,7 +478,8 @@ export const api = {
   version: () => get<VersionInfo>('/version'),
   createSession: (req: CreateSessionRequest) =>
     post<CreateSessionResponse>('/session', req),
-  getSession: (id: string) => get<SessionSnapshot>(`/session/${id}`),
+  getSession: (id: string, briefing: boolean | 'recall' = false) =>
+    get<SessionSnapshot>(`/session/${id}${briefing ? `?resume=${briefing === 'recall' ? 'recall' : '1'}` : ''}`),
   advance: (id: string) => post<AdvanceResponse>(`/session/${id}/advance`),
   submitInput: (id: string, req: SubmitInputRequest) =>
     post<AdvanceResponse>(`/session/${id}/input`, req),

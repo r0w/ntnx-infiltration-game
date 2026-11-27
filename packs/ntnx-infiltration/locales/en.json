@@ -300,5 +300,11 @@
   "identity.code-taken": "This code was just taken by another player. Choose another code.",
   "identity.target-gone": "That game is no longer available. Choose an agent code again.",
   "identity.wrong-pin": "Wrong PIN. Try again, or press ↓ to choose another agent code.",
-  "identity.invalid-pin": "The PIN must contain exactly 4 digits."
+  "identity.invalid-pin": "The PIN must contain exactly 4 digits.",
+  "resume.intro": "<clear/>Signal restored… <pause sec='1'/>Welcome back, <white>{Username}</white>.\n\nYour VDI may have vanished while you were outside the Matrix. But I kept your position. The agents haven’t erased our progress.\n\nBefore you jack back in, let’s check your entry point.\n\n",
+  "resume.personal": "Prism Central: <a href='{PC}'>{PC}</a>\nYour administrator account: <white><copy>{Trigram}-adm</copy></white>\n\nUse the password you chose when creating this account. I don’t know it. If you’ve forgotten it, ask your facilitator.\n\nRemember: this is a <white>local account</white>. Select <white>Local Account</white> on the sign-in screen.\n<image src='stage-006-local-account.png' alt='Prism Central sign-in: select Local Account to use your local account.'/>\n",
+  "resume.initial": "Prism Central: <a href='{PC}'>{PC}</a>\nInitial access account: <white><copy>{PCUser}</copy></white>\nIntercepted password: <white><copy>{PCPassword}</copy></white>\n\nWe were still preparing your personal access. Resume the instructions for creating <white><copy>{Trigram}-adm</copy></white> after this briefing.\n\nThe initial account is a <white>local account</white>: select <white>Local Account</white>.\n<image src='stage-006-local-account.png' alt='Prism Central sign-in: select Local Account.'/>\n",
+  "resume.continue": "\nTake a moment to reconnect. When you’re ready, press <white>Enter</white> and I’ll put you right back where we left off.<input/>",
+  "recall.intro": "<clear/>Tank here. <pause sec='1'/>Need your entry point again, <white>{Username}</white>?\n\nI’m sending the access details again. Your mission stays right where you left it.\n\n",
+  "recall.continue": "\nGot what you need? Press <white>Enter</white> to return to your current instructions.<input/>"
 }

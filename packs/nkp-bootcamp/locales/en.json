@@ -91,5 +91,10 @@
   "nkp.nav.ingress": "Ingress",
   "nkp.nav.chapter.optional-labs": "Optional Labs",
   "nkp.nav.group.deploy-app": "Deploy and expose an app",
-  "nkp.nav.group.expose-prod": "Expose app on production"
+  "nkp.nav.group.expose-prod": "Expose app on production",
+  "resume.intro": "<clear/>Connection restored… <pause sec='1'/>Welcome back, <white>user{UserNum}</white>.\n\nLosing a terminal doesn’t erase our mission. I saved your position in the Matrix. Let’s reconnect to the console before we continue.\n\n",
+  "resume.access": "NKP console: <a href='{DashboardUrl}'>{DashboardUrl}</a>\nYour user: <white><copy>user{UserNum}</copy></white>\n\nChoose <white>Log in with ntnxlab.local</white> and use your lab credentials. Don’t add the domain to your username. If you’ve forgotten your password, ask your facilitator.\n<image src='dashboard-ldap-auth.e90e9704.gif' alt='Signing in to the NKP console with the ntnxlab.local (Active Directory) provider.'/>\n",
+  "resume.continue": "\nConsole ready? Press <white>Enter</white> to resume the lab at your saved position.<input/>",
+  "recall.intro": "<clear/>I’m here, <white>user{UserNum}</white>. <pause sec='1'/>Need the console access details again?\n\nHere’s your entry point. Your lab progress is safe while we review it.\n\n",
+  "recall.continue": "\nReady to continue? Press <white>Enter</white> to return to your current lab instructions.<input/>"
 }
