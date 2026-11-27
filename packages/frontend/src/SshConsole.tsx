@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from './api';
+import { api, type SshProbeResult } from './api';
 
 // Standalone sandbox terminal at /ssh. Fully agnostic of the game
 // session — no auth, no stage/session/pack coupling, just a whitelisted
@@ -62,6 +62,24 @@ export function SshConsole() {
     });
   }, []);
 
+  const cancelCommand = useCallback(() => {
+    if (!abortRef.current || abortRef.current.signal.aborted) return;
+    appendLine('^C', 'dim');
+    abortRef.current.abort();
+  }, [appendLine]);
+
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (!abortRef.current || !event.ctrlKey || event.key.toLowerCase() !== 'c') return;
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) return;
+      event.preventDefault();
+      cancelCommand();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('keydown', onKey); abortRef.current?.abort(); };
+  }, [cancelCommand]);
+
   const clearScreen = useCallback(() => {
     setLines([]);
     lineIdRef.current = 0;
@@ -93,6 +111,7 @@ export function SshConsole() {
 
   const runCommand = useCallback(
     async (raw: string) => {
+      if (abortRef.current) return;
       const trimmed = raw.trim();
       appendLine(`${PROMPT} ${trimmed}`, 'dim');
       if (!trimmed) return;
@@ -116,11 +135,12 @@ export function SshConsole() {
         for (const line of stream) {
           if (controller.signal.aborted) break;
           if (line.delayMs > 0) await sleep(line.delayMs, controller.signal);
+          if (controller.signal.aborted) break;
           appendLine(line.text, line.color ?? 'default');
         }
       } catch (err) {
         // Ctrl+C printed the `^C` line already — swallow the AbortError.
-        if (!isAbortError(err)) {
+        if (!controller.signal.aborted && !isAbortError(err)) {
           appendLine(
             `${name}: ${err instanceof Error ? err.message : String(err)}`,
             'fail',
@@ -192,8 +212,7 @@ export function SshConsole() {
         if (sel && !sel.isCollapsed) return;
         e.preventDefault();
         if (abortRef.current) {
-          appendLine('^C', 'dim');
-          abortRef.current.abort();
+          cancelCommand();
         } else {
           appendLine(`${PROMPT} ${input}^C`, 'dim');
           setInput('');
@@ -201,7 +220,7 @@ export function SshConsole() {
         }
       }
     },
-    [appendLine, clearScreen, history, historyIdx, input],
+    [appendLine, clearScreen, history, historyIdx, input, cancelCommand],
   );
 
   return (
@@ -218,10 +237,10 @@ export function SshConsole() {
           </div>
         ))}
         {busy ? (
-          <div className="ssh-running" onKeyDown={handleKey} tabIndex={0}>
+          <div className="ssh-running" role="status">
             <span className="ssh-spinner">…</span>
             <span className="ssh-running-label">running</span>
-            <span className="ssh-running-hint">(ctrl+c to cancel)</span>
+            <button type="button" className="app-reset" onClick={cancelCommand}>Stop · Ctrl+C</button>
           </div>
         ) : (
           <form className="ssh-input-line" onSubmit={handleSubmit}>
@@ -310,6 +329,9 @@ const COMMANDS: Record<string, CommandHandler> = {
   help: cmdHelp,
   ping: cmdPing,
   ssh: cmdSsh,
+  nslookup: cmdNslookup,
+  traceroute: cmdTraceroute,
+  curl: cmdCurl,
   whoami: cmdWhoami,
   exit: cmdExit,
   // `clear` is handled inline in runCommand (needs access to state setters).
@@ -339,11 +361,15 @@ function cmdHelp(): StreamedLine[] {
     { delayMs: 0, text: 'available commands:', color: 'accent' },
     { delayMs: 0, text: '  ping <target>         real ICMP ping (4 packets)' },
     { delayMs: 0, text: '  ssh [user@]<target>   real TCP probe of port 22' },
+    { delayMs: 0, text: '  nslookup <target>     DNS lookup (forward or reverse)' },
+    { delayMs: 0, text: '  traceroute <target>   route probe (up to 12 hops, 15 seconds)' },
+    { delayMs: 0, text: '  curl -I <http(s) URL> HTTP response headers; no redirects' },
     { delayMs: 0, text: '  whoami                who you are (spoiler: classified)' },
     { delayMs: 0, text: '  clear                 wipe the screen' },
     { delayMs: 0, text: '  help                  this message' },
     { delayMs: 0, text: '  exit                  print a goodbye' },
     { delayMs: 0, text: '' },
+    { delayMs: 0, text: 'targets: hostname, IPv4 or IPv6; use [IPv6] in URLs', color: 'dim' },
     { delayMs: 0, text: 'keyboard: tab completes · ↑/↓ history · ctrl+l clear · ctrl+c cancel', color: 'dim' },
     {
       delayMs: 0,
@@ -359,7 +385,7 @@ function cmdHelp(): StreamedLine[] {
 }
 
 async function cmdPing(args: string[], signal?: AbortSignal): Promise<StreamedLine[]> {
-  if (args.length === 0) {
+  if (args.length !== 1) {
     return [{ delayMs: 0, text: 'usage: ping <target>', color: 'fail' }];
   }
   const target = args[0];
@@ -385,7 +411,7 @@ async function cmdPing(args: string[], signal?: AbortSignal): Promise<StreamedLi
   // show — otherwise the real ping stderr already explains the failure
   // (e.g. "Name or service not known") and a trailing "ping: exit 2"
   // would just be noise.
-  if (!result.ok && result.output.length === 0) {
+  if (result.error || (!result.ok && result.output.length === 0)) {
     out.push({
       delayMs: 0,
       text: `ping: ${result.error ?? 'target unreachable'}`,
@@ -399,7 +425,7 @@ function classifyPingLine(line: string): LineColor | undefined {
   if (/Destination (Host|Net) Unreachable|Request timed? out|Name or service not known|unreachable/i.test(line)) return 'fail';
   // "4 packets transmitted, 4 received, 0% packet loss" — green when all
   // four got through, red when any are missing.
-  const lossMatch = /(\d+)% packet loss/i.exec(line);
+  const lossMatch = /(\d+(?:\.\d+)?)% packet loss/i.exec(line);
   if (lossMatch) return Number(lossMatch[1]) === 0 ? 'pass' : 'fail';
   if (/ping statistics|^---/i.test(line)) return 'accent';
   if (/rtt |min\/avg\/max/i.test(line)) return 'dim';
@@ -407,12 +433,12 @@ function classifyPingLine(line: string): LineColor | undefined {
 }
 
 async function cmdSsh(args: string[], signal?: AbortSignal): Promise<StreamedLine[]> {
-  if (args.length === 0) {
+  if (args.length !== 1) {
     return [{ delayMs: 0, text: 'usage: ssh [user@]<target>', color: 'fail' }];
   }
   const spec = args[0];
   const [, hostPart] = spec.includes('@') ? spec.split('@') : [null, spec];
-  const target = hostPart || spec;
+  const target = (hostPart || spec).replace(/^\[|\]$/g, '');
   let result;
   try {
     result = await api.sshTcp(target, 22, signal);
@@ -437,7 +463,7 @@ async function cmdSsh(args: string[], signal?: AbortSignal): Promise<StreamedLin
     { delayMs: 0, text: `connecting to ${display} port 22…`, color: 'dim' },
     {
       delayMs: 200,
-      text: `port 22 open — handshake would succeed (${result.durationMs} ms)`,
+      text: `port 22 open — TCP connection established (${result.durationMs} ms)`,
       color: 'pass',
     },
     {
@@ -451,6 +477,28 @@ async function cmdSsh(args: string[], signal?: AbortSignal): Promise<StreamedLin
       color: 'dim',
     },
   ];
+}
+
+async function diagnostic(
+  args: string[], usage: string, run: (target: string, signal?: AbortSignal) => Promise<SshProbeResult>, signal?: AbortSignal,
+): Promise<StreamedLine[]> {
+  if (args.length !== 1) return [{ delayMs: 0, text: `usage: ${usage}`, color: 'fail' }];
+  const result = await run(args[0], signal);
+  const lines: StreamedLine[] = result.output.map(text => ({ delayMs: 0, text }));
+  if (result.error || (!result.ok && !lines.length)) lines.push({ delayMs: 0, text: result.error ?? 'probe failed', color: 'fail' });
+  return lines;
+}
+
+function cmdNslookup(args: string[], signal?: AbortSignal) {
+  return diagnostic(args, 'nslookup <target>', api.sshNslookup, signal);
+}
+function cmdTraceroute(args: string[], signal?: AbortSignal) {
+  return diagnostic(args, 'traceroute <target>', api.sshTraceroute, signal);
+}
+function cmdCurl(args: string[], signal?: AbortSignal): StreamedLine[] | Promise<StreamedLine[]> {
+  return args.length === 2 && args[0] === '-I'
+    ? diagnostic(args.slice(1), 'curl -I <http(s) URL>', api.sshHead, signal)
+    : [{ delayMs: 0, text: 'usage: curl -I <http(s) URL>', color: 'fail' }];
 }
 
 function cmdWhoami(): StreamedLine[] {
@@ -475,4 +523,4 @@ function cmdExit(): StreamedLine[] {
 
 // Exports for unit tests / future help rendering.
 export const SSH_COMMAND_NAMES = [...Object.keys(COMMANDS), 'clear'] as const;
-export { classifyPingLine };
+export { classifyPingLine, cmdCurl, cmdNslookup, cmdTraceroute, cmdPing, cmdSsh };

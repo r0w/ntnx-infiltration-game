@@ -55,6 +55,20 @@ MODE=mock docker compose up -d --build
 
 Open <https://game.127.0.0.1.sslip.io> and accept the local certificate warning. Ports 80 and 443 must be free; HTTP redirects to HTTPS. No certificate is installed in your browser or operating system. To stop the local stack, use `docker compose down` (omit `-v` to retain the proxy certificates). `GAME_HTTPS_HOST` can select another sslip.io hostname when testing from a different machine.
 
+### Network console
+
+Open `/ssh` for real probes from the game server (also in mock mode). This is a restricted diagnostic console, not an interactive SSH shell.
+
+- `ping <host-or-IP>` sends four ICMP packets; IPv4 and IPv6 literals are supported.
+- `ssh [user@]<host-or-IP>` tests TCP port 22 without authenticating or negotiating SSH.
+- `nslookup <host-or-IP>` asks the server's DNS resolver for forward or reverse records.
+- `traceroute <host-or-IP>` probes up to 12 hops, with a 15-second overall limit.
+- `curl -I <http(s)-URL>` retrieves response headers only. It verifies TLS certificates and does not follow redirects. Use brackets for IPv6 URLs, for example `http://[::1]:3000/`.
+
+Use **Stop** or **Ctrl+C** to cancel a running probe on the server. Output is limited to 64 KiB; other probes have a 10-second maximum (TCP: 4 seconds). Network policy and ICMP permissions still determine which probes succeed.
+
+The Docker image includes the required tools. For a native Linux development server, install `iputils-ping`, `dnsutils`, `traceroute`, `curl` and `ca-certificates`; macOS uses its built-in tools, including `ping6` and `traceroute6`.
+
 ## Stack
 
 | Layer | Choice |

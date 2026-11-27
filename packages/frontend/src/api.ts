@@ -64,6 +64,30 @@ async function post<T>(path: string, body?: unknown, signal?: AbortSignal): Prom
   return handle<T>(res);
 }
 
+export interface SshProbeResult {
+  ok: boolean;
+  target: string;
+  exitCode: number | null;
+  output: string[];
+  durationMs: number;
+  error?: string;
+}
+
+async function sshProbe<T>(command: string, body: { target: string; port?: number }, signal?: AbortSignal): Promise<T> {
+  if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
+  const requestId = crypto.randomUUID();
+  // A separate request stops the server process even if disconnect is not propagated.
+  const cancel = () => {
+    void fetch(`${BASE}/ssh/cancel`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId }), keepalive: true,
+    }).catch(() => { /* disconnect and server timeout remain fallbacks */ });
+  };
+  signal?.addEventListener('abort', cancel, { once: true });
+  try { return await post<T>(`/ssh/${command}`, { ...body, requestId }, signal); }
+  finally { signal?.removeEventListener('abort', cancel); }
+}
+
 async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { signal });
   return handle<T>(res);
@@ -541,24 +565,12 @@ export const api = {
   adminScoreboardDisplaySave: (password: string, settings: ScoreboardDisplaySettings) =>
     adminPut<ScoreboardDisplaySettings>('/admin/scoreboard-display', password, settings),
   combinedScoreboard: () => get<CombinedScoreboardPayload>('/scoreboard/combined'),
-  sshPing: (target: string, signal?: AbortSignal) =>
-    post<{
-      ok: boolean;
-      target: string;
-      exitCode: number | null;
-      output: string[];
-      durationMs: number;
-      error?: string;
-    }>('/ssh/ping', { target }, signal),
+  sshPing: (target: string, signal?: AbortSignal) => sshProbe<SshProbeResult>('ping', { target }, signal),
+  sshNslookup: (target: string, signal?: AbortSignal) => sshProbe<SshProbeResult>('nslookup', { target }, signal),
+  sshTraceroute: (target: string, signal?: AbortSignal) => sshProbe<SshProbeResult>('traceroute', { target }, signal),
+  sshHead: (target: string, signal?: AbortSignal) => sshProbe<SshProbeResult>('head', { target }, signal),
   sshTcp: (target: string, port = 22, signal?: AbortSignal) =>
-    post<{
-      ok: boolean;
-      target: string;
-      port: number;
-      ip?: string;
-      durationMs: number;
-      error?: string;
-    }>('/ssh/tcp', { target, port }, signal),
+    sshProbe<{ ok: boolean; target: string; port: number; ip?: string; durationMs: number; error?: string }>('tcp', { target, port }, signal),
   adminLogin: (password: string) =>
     post<{ ok: true }>('/admin/login', { password }),
   adminUsers: (password: string) =>

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { completeCommand, classifyPingLine, SSH_COMMAND_NAMES } from '../src/SshConsole';
+import { completeCommand, classifyPingLine, SSH_COMMAND_NAMES, cmdCurl, cmdNslookup, cmdTraceroute, cmdPing, cmdSsh } from '../src/SshConsole';
 
 describe('completeCommand', () => {
   test('empty prefix → options lists every command', () => {
@@ -18,14 +18,9 @@ describe('completeCommand', () => {
   });
 
   test('ambiguous prefix → options (no completion)', () => {
-    // `c` matches both `clear` (plus `e` matches `exit` only) — with the
-    // current set only `c` and nothing else is ambiguous at single-char
-    // level, so build an artificial collision by checking `e` which is
-    // unique → completes.
-    const resE = completeCommand('e');
-    expect(resE.completion).toBe('exit ');
-    // Empty partial is the canonical ambiguous case — already covered
-    // above — and `c` is unique to clear.
+    expect(completeCommand('c')).toEqual({ options: ['clear', 'curl'] });
+    expect(completeCommand('ns').completion).toBe('nslookup ');
+    expect(completeCommand('tr').completion).toBe('traceroute ');
   });
 
   test('no match → empty result', () => {
@@ -50,6 +45,7 @@ describe('classifyPingLine', () => {
   test('non-zero packet loss → fail', () => {
     expect(classifyPingLine('4 packets transmitted, 0 received, 100% packet loss'))
       .toBe('fail');
+    expect(classifyPingLine('4 packets transmitted, 0 received, 100.0% packet loss')).toBe('fail');
     expect(classifyPingLine('4 packets transmitted, 2 received, 50% packet loss'))
       .toBe('fail');
   });
@@ -66,4 +62,14 @@ describe('classifyPingLine', () => {
     expect(classifyPingLine('64 bytes from google.com (1.2.3.4): icmp_seq=1 ttl=64 time=0.321 ms'))
       .toBeUndefined();
   });
+});
+
+
+test('restricted commands reject extra arguments before calling the server', async () => {
+  for (const run of [cmdPing, cmdSsh, cmdNslookup, cmdTraceroute]) {
+    expect((await run(['localhost', '-f']))[0]?.text).toContain('usage:');
+  }
+  for (const args of [[], ['http://localhost'], ['-I', 'http://localhost', '--output', '/tmp/file'], ['-X', 'POST']]) {
+    expect((await cmdCurl(args))[0]?.text).toBe('usage: curl -I <http(s) URL>');
+  }
 });

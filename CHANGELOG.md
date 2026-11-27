@@ -15,6 +15,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Added
 
+- Run IPv6, DNS, traceroute and HTTP header probes in the SSH console, with server-side cancellation through Stop or Ctrl+C.
+
 - Resume NCP and NKP sessions with a narrated access briefing, available again through Call Tank or Call the instructor.
 
 - Include Prism Central and AOS versions in Central deployment telemetry when available.
