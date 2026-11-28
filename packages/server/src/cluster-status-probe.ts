@@ -1,22 +1,10 @@
 import type { Logger, NutanixClient } from '@ntnx-game/engine';
 
 /**
- * Live (non-cached) probe of Prism Central product enablement, exposed
- * to the operator via `/admin` Cluster tab. Currently surfaces just the
- * Intelligent Operations state — there is no public Nutanix API to
- * *enable* IOps (the v4 Domain Manager Products PUT hard-rejects with
- * PRI-55201, no v3 equivalent works either), so the operator has to
- * click in Prism UI Settings → Intelligent Operations. The point of
- * this probe is to spare them from having to remember which screen
- * shows the current state.
- *
- * Read-only: every call hits the live PC, no DB caching. The endpoint
- * is admin-gated and called only when the operator opens the Cluster
- * tab — frequency is low enough that caching adds no value and would
- * confuse "did my click in Prism UI take effect yet?".
- *
- * In `mock` mode this is a no-op (`state: null`): mock fixtures don't
- * model IOps, and the test suite shouldn't hit a real PC.
+ * Read-only IOps status for the admin Cluster tab, using the same product
+ * endpoint as Prism's IOps screen. The generic product portfolio can report
+ * a stale enablement state. Activation remains an operator action in Prism.
+ * Mock mode never queries the cluster; live status is not cached.
  */
 export type IntelligentOpsState = 'ENABLED' | 'DISABLED' | 'UNKNOWN';
 
@@ -189,28 +177,15 @@ export async function probeIntelligentOps(
   const enableUrl = buildEnableUrl(pcEndpoint);
 
   try {
-    const dmRes = await nutanix.request<{ data?: Array<{ extId?: string }> }>(
+    const response = await nutanix.request<{ data?: { isEnabled?: unknown } }>(
       'GET',
-      '/api/prism/v4.2/config/domain-managers',
+      '/api/prism/v4.2/resource-manager/products/prismops',
     );
-    const pcExtId = dmRes?.data?.[0]?.extId;
-    if (!pcExtId) {
-      return { state: null, enableUrl, error: 'no domain-manager listed' };
+    const enabled = response?.data?.isEnabled;
+    if (typeof enabled !== 'boolean') {
+      return { state: null, enableUrl, error: 'IOps status response has no boolean data.isEnabled' };
     }
-    const prodRes = await nutanix.request<{
-      data?: Array<{ name?: string; enablementState?: string }>;
-    }>(
-      'GET',
-      `/api/prism/v4.2/management/domain-managers/${pcExtId}/products?$limit=100`,
-    );
-    const product = (prodRes?.data ?? []).find((p) => p.name === 'INTELLIGENT_OPERATIONS');
-    if (!product) {
-      return { state: null, enableUrl, error: 'product not in PC portfolio' };
-    }
-    const raw = product.enablementState;
-    const state: IntelligentOpsState | null =
-      raw === 'ENABLED' || raw === 'DISABLED' ? raw : raw ? 'UNKNOWN' : null;
-    return { state, enableUrl };
+    return { state: enabled ? 'ENABLED' : 'DISABLED', enableUrl };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn('intelligent-ops probe failed', { err: msg });

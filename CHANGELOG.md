@@ -33,6 +33,8 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Read Intelligent Operations status from its dedicated Prism endpoint to avoid false disabled warnings.
+
 - Save email variables, including the survey URL, with the template without sending an email.
 
 - Handle simultaneous agent-code registrations safely while preserving existing games and reliable resume.

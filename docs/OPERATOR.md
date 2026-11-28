@@ -17,6 +17,14 @@ Use `hpoc` for a dedicated lab, including a single-node HPoC. On a 4-node HPoC, 
 
 Use `other` for shared clusters, where HPoC-only operations are skipped. The full installer still prepares networks, users and VMs. For an existing training world, see the optional [deployment-only variant](DEPLOYMENT_NOTES.md#shared-clusters-and-existing-installations).
 
+### Intelligent Operations status
+
+The admin **Cluster** tab reads `GET /api/prism/v4.2/resource-manager/products/prismops` and uses the boolean `data.isEnabled`, matching the product-specific status in Prism. The generic Domain Manager Products portfolio can disagree and is not used as a fallback. A failed request or an unrecognized response displays an unknown status rather than a disabled warning.
+
+Read access and the disabled response were verified on **PC 7.5.1.8**. Other patch versions and an enabled live cluster have not yet been verified for this fix; automated tests cover both boolean states and conflicting portfolio data. Mock mode makes no request.
+
+To activate IOps, use **Prism Settings → Intelligent Operations** and review the resources requested by Prism before confirming. The investigation in [#136](https://github.com/r0w/ntnx-infiltration-game/issues/136) identified a POST used by the Prism UI for activation; this is distinct from the failing generic Products PUT and does not establish a portable activation contract. The activation payload, additional resource allocation and version compatibility still need separate validation before automation. This status probe only issues GET requests and never activates IOps.
+
 ## Install
 
 Download `nig-00-runbook-prerequisites.json` and `nig-01-blueprint.json` from the [latest release](https://github.com/r0w/ntnx-infiltration-game/releases/latest).
