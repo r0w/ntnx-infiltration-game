@@ -109,10 +109,10 @@ async function deployBlueprint(ctx: ActionContext): Promise<void> {
 }
 
 /**
- * Stage 13 `verify-prod-user-isolation`: silent action fired after `create-vm`.
+ * Required success action of `create-vm`, after CheckVM captures VMUUID.
  * Snapshots the VM (`POST .../config/recovery-points`) so the later delete
  * (stage 23) then restore (stage 26) chain has a recovery point to work from.
- * Mock no-op. Idempotent: skips quietly if VMUUID isn't captured yet.
+ * Mock no-op. A missing VMUUID is a failure, not a completed backup.
  */
 async function createRecoveryPoint(ctx: ActionContext): Promise<void> {
   if (ctx.nutanix.mode === 'mock') {
@@ -121,8 +121,7 @@ async function createRecoveryPoint(ctx: ActionContext): Promise<void> {
   }
   const vmUuid = ctx.vars.get('VMUUID');
   if (typeof vmUuid !== 'string' || vmUuid.length === 0) {
-    ctx.logger.info('createRecoveryPoint: no VMUUID captured yet, skipping');
-    return;
+    throw new Error('createRecoveryPoint: VMUUID missing after VM validation');
   }
   await ensureRecoveryPoint(ctx, vmUuid);
 }

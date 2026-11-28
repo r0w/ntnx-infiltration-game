@@ -33,6 +33,10 @@ section verbatim into the GitHub Release notes, which the admin footer shows.
 
 ### Fixed
 
+- Complete the VM recovery point before validating VM creation, with safe retries after snapshot failures.
+
+- Prevent stage jumps from bypassing a required backup or interrupting its validation.
+
 - Read Intelligent Operations status from its dedicated Prism endpoint to avoid false disabled warnings.
 
 - Save email variables, including the survey URL, with the template without sending an email.

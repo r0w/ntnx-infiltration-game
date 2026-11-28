@@ -116,6 +116,8 @@ export interface StageDefinition {
     args?: Record<string, unknown>;
     rehydrate?: string;
   };
+  /** Required actions after a successful check and its captures, before stage completion. */
+  onSuccessActions?: string[];
   /** Optional localized phrase pool played before a deferred check. */
   checkMessagePrefix?: string;
   captures?: string[];

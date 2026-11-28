@@ -1,6 +1,6 @@
 import type { ActContext } from '@ntnx-game/engine';
 import type { NutanixSdk } from '@ntnx-game/nutanix';
-import { getTrigram, listAllSdk, listAllV4Rest, postV4, postV4Action, waitForTask } from './helpers';
+import { getTrigram, listAllSdk, listAllV4Rest, postV4, postV4Action, waitForTask, TerminalTaskError } from './helpers';
 
 const RECOVERY = '/api/dataprotection/v4.0/config/recovery-points';
 type RecoveryPoint = {
@@ -23,15 +23,23 @@ export async function ensureRecoveryPoint(ctx: ActContext, vmUuid: string): Prom
   const pending = ctx.cache.get('recoveryTask', vmUuid);
   let task = pending?.uuid;
   if (!task) {
+    const requestId = typeof pending?.extra?.requestId === 'string' ? pending.extra.requestId : crypto.randomUUID();
+    ctx.cache.set({ kind: 'recoveryTask', logicalName: vmUuid, uuid: '', extra: { requestId } });
     const result = await postV4<{ data?: { extId?: string } }>(ctx, RECOVERY, {
       name: `${getTrigram(ctx)}-game-recovery`,
       vmRecoveryPoints: [{ vmExtId: vmUuid }],
-    });
+    }, requestId);
     task = result.data?.extId;
     if (!task) throw new Error('Recovery point creation returned no task');
     ctx.cache.set({ kind: 'recoveryTask', logicalName: vmUuid, uuid: task });
   }
-  await waitForTask(ctx, task, 240_000);
+  try {
+    await waitForTask(ctx, task, 240_000);
+  } catch (err) {
+    // A timeout may still finish: retain its task. Only a terminal failure permits a new POST.
+    if (err instanceof TerminalTaskError) ctx.cache.set({ kind: 'recoveryTask', logicalName: vmUuid, uuid: '' });
+    throw err;
+  }
   if (!await findRecovery(ctx, vmUuid)) throw new Error('Recovery task completed but the VM recovery point is not ready');
 }
 

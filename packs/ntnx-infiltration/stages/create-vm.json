@@ -21,6 +21,9 @@
   "check": {
     "fn": "CheckVM"
   },
+  "onSuccessActions": [
+    "createRecoveryPoint"
+  ],
   "captures": [
     "HostUUID",
     "VMUUID"

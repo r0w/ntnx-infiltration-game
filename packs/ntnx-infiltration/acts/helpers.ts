@@ -130,6 +130,12 @@ export async function listAllV4Rest<T = unknown>(ctx: ActContext, path: string):
  * most acts (the SDK methods we call already wait) but kept for the few
  * that don't.
  */
+export class TerminalTaskError extends Error {
+  constructor(public readonly taskId: string, public readonly taskStatus: string, details: unknown) {
+    super(`Task ${taskId} terminal: ${taskStatus}: ${JSON.stringify(details)}`);
+  }
+}
+
 export async function waitForTask(
   ctx: ActContext,
   taskExtId: string,
@@ -146,7 +152,7 @@ export async function waitForTask(
     const status = res?.data?.status;
     if (status && /SUCCEED|SUCCESS|COMPLETE/i.test(status)) return res.data ?? {};
     if (status && /FAIL|ERROR|CANCEL/i.test(status)) {
-      throw new Error(`Task ${taskExtId} terminal: ${status}: ${JSON.stringify(res.data?.errorMessages ?? [])}`);
+      throw new TerminalTaskError(taskExtId, status, res.data?.errorMessages ?? []);
     }
     await new Promise((r) => setTimeout(r, 1500));
   }
@@ -204,6 +210,7 @@ export async function postV4<T = unknown>(
   ctx: ActContext,
   path: string,
   body: unknown,
+  requestId: string = crypto.randomUUID(),
 ): Promise<T> {
   const pcEndpoint = getVarString(ctx, 'PC');
   const user = getVarString(ctx, 'PCUser');
@@ -220,7 +227,7 @@ export async function postV4<T = unknown>(
       Authorization: auth,
       'Content-Type': 'application/json',
       Accept: 'application/json',
-      'Ntnx-Request-Id': crypto.randomUUID(),
+      'Ntnx-Request-Id': requestId,
     },
     body: JSON.stringify(body),
     tls: { rejectUnauthorized: false },

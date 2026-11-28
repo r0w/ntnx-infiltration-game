@@ -186,6 +186,7 @@ export class SessionService {
   readonly seededVariableNames: ReadonlySet<string>;
   private readonly sessionDirectory: SessionDirectory;
   private readonly telemetry?: Telemetry;
+  private readonly successChecks = new Map<string, Promise<AdvanceResult>>();
   /**
    * In-memory mirror of the gate_unlocks table for the current pack. Read at
    * boot, mutated by `setGateUnlock`. Passed to the runner on every advance
@@ -1249,6 +1250,22 @@ export class SessionService {
    * `units` + `check`) — advancing on pass, rewinding awaiting on fail.
    */
   async resolvePendingCheck(sessionId: string, identityRevision?: number, expectedStage?: string): Promise<AdvanceResult> {
+    const pending = this.sessions.byId(sessionId)?.pendingCheck;
+    const stage = pending && this.runner.stageByName(pending.stageName);
+    if (!stage?.onSuccessActions?.length || (expectedStage && expectedStage !== stage.name)) {
+      return this.resolvePendingCheckOnce(sessionId, identityRevision, expectedStage);
+    }
+    // Reloads and two open tabs must not launch the same success action twice.
+    const key = `${sessionId}:${stage.name}`;
+    const running = this.successChecks.get(key);
+    if (running) return running;
+    const result = this.resolvePendingCheckOnce(sessionId, identityRevision, expectedStage);
+    this.successChecks.set(key, result);
+    try { return await result; }
+    finally { this.successChecks.delete(key); }
+  }
+
+  private async resolvePendingCheckOnce(sessionId: string, identityRevision?: number, expectedStage?: string): Promise<AdvanceResult> {
     const receipt = this.identities.receipt<AdvanceResult>(sessionId, identityRevision);
     const current = this.sessions.byId(sessionId);
     if (expectedStage && expectedStage !== current?.pendingCheck?.stageName) {
@@ -1450,6 +1467,7 @@ export class SessionService {
    */
   gotoStage(sessionId: string, stageName: string): { currentStage: string | null } {
     const session = this.getSession(sessionId);
+    this.requireNoSuccessCheck(sessionId);
     const identityIndex = this.runner.listStages().findIndex((stage) => stage.check?.fn === 'CheckTrigram');
     if (this.identities.isConfirmed(sessionId) && this.stageIndex(stageName) >= 0 && this.stageIndex(stageName) <= identityIndex) {
       throw new HttpError(409, 'Switch agent to enter a different identity');
@@ -1473,12 +1491,18 @@ export class SessionService {
     stageName: string,
   ): Promise<{ skipped: string[]; finalStage: string | null }> {
     const session = this.getSession(sessionId);
+    this.requireNoSuccessCheck(sessionId);
     const targetIdx = this.stageIndex(stageName);
     if (targetIdx < 0) throw new HttpError(404, `Stage '${stageName}' not in pack`);
     const currentIdx = this.stageIndex(session.currentStage);
     if (targetIdx <= currentIdx) {
       return { skipped: [], finalStage: session.currentStage };
     }
+    // Rehydration only reads cluster state; it cannot replace a required action.
+    const required = this.runner.listStages().find(stage =>
+      stage.index > currentIdx && stage.index <= targetIdx && stage.onSuccessActions?.length,
+    );
+    if (required) throw new HttpError(409, `Complete '${required.name}' before skipping ahead`);
     const ctx = this.buildCheckContext(session);
     const skipped: string[] = [];
     for (const stage of this.runner.listStages()) {
@@ -1503,6 +1527,14 @@ export class SessionService {
     this.clearFlowState(session.id);
     this.sessions.updateCurrentStage(session.id, stageName);
     return { skipped, finalStage: stageName };
+  }
+
+  private requireNoSuccessCheck(sessionId: string): void {
+    for (const key of this.successChecks.keys()) {
+      if (key.startsWith(`${sessionId}:`)) {
+        throw new HttpError(409, 'Stage validation is still running; wait before changing stages');
+      }
+    }
   }
 
   /** Drop both transient flow flags. Awaiting-input and a deferred check are
@@ -1631,6 +1663,14 @@ export class SessionService {
     }
     if (r.captured) {
       for (const [name, value] of Object.entries(r.captured)) ctx.vars.set(name, value, stage.name);
+    }
+    if (r.pass && !r.neutral && stage.onSuccessActions?.length) {
+      const actionCtx = this.buildActionContext(session, ctx);
+      for (const name of stage.onSuccessActions) {
+        const handler = this.actions.get(name);
+        if (!handler) throw new HttpError(500, `Required action '${name}' not registered`);
+        await handler(actionCtx);
+      }
     }
     // Invalidations run after captures and only on pass — a failing check
     // hasn't destroyed anything.

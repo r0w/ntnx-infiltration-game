@@ -1185,16 +1185,8 @@ describe('GET /api/admin/cluster-status', () => {
       mode: 'live',
       async request<T>(method: string, path: string): Promise<T> {
         calls.push({ method, path });
-        if (path.startsWith('/api/prism/v4.2/config/domain-managers')) {
-          return { data: [{ extId: 'pc-uuid-1' }] } as unknown as T;
-        }
-        if (path.includes('/products')) {
-          return {
-            data: [
-              { name: 'NUTANIX_DISASTER_RECOVERY', enablementState: 'ENABLED' },
-              { name: 'INTELLIGENT_OPERATIONS', enablementState: 'DISABLED' },
-            ],
-          } as unknown as T;
+        if (path === '/api/prism/v4.2/resource-manager/products/prismops') {
+          return { data: { isEnabled: false } } as unknown as T;
         }
         if (path === '/api/nutanix/v3/clusters/list') {
           return {
@@ -1255,8 +1247,8 @@ describe('GET /api/admin/cluster-status', () => {
       'https://10.8.16.7:9440/dm/settings/prism_ops',
     );
     const paths = calls.map((x) => x.path);
-    expect(paths).toContain('/api/prism/v4.2/config/domain-managers');
-    expect(paths.some((p) => p.includes('/domain-managers/pc-uuid-1/products'))).toBe(true);
+    expect(paths).toContain('/api/prism/v4.2/resource-manager/products/prismops');
+    expect(calls.find(c => c.path.endsWith('/products/prismops'))?.method).toBe('GET');
   });
 
   test('GET /cluster-versions (live) → PC/AOS from v3 clusters + LCM inventory, deduped + sorted', async () => {

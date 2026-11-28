@@ -182,6 +182,13 @@ export async function loadPack(packsDir: string, packId: string): Promise<Loaded
   const actions = manifest.actions
     ? await loadActions(resolve(dir, manifest.actions))
     : new ActionRegistry();
+  for (const stage of stages) {
+    if (stage.onSuccessActions === undefined) continue;
+    if (!stage.check || !Array.isArray(stage.onSuccessActions) || stage.onSuccessActions.length === 0 ||
+        stage.onSuccessActions.some(name => typeof name !== 'string' || !actions.get(name))) {
+      throw new Error(`stage "${stage.name}" onSuccessActions requires a check and registered action names`);
+    }
+  }
   const acts = manifest.acts
     ? await loadActs(resolve(dir, manifest.acts))
     : new ActRegistry();
